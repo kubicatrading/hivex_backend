@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
-  Video, Play, Trash2, UploadCloud, Monitor
+  Video, Play, Trash2, UploadCloud, Monitor, Sparkles, AlertCircle
 } from "lucide-react";
 
 interface VideoDocument {
@@ -16,12 +16,83 @@ interface VideoDocument {
     duration: string;
     resolution: string;
     thumbnail: string;
+    is_youtube?: boolean;
+    channel_title?: string;
   };
+}
+
+// Custom Premium Markdown Renderer for Structured Financial Reports
+function MarkdownRenderer({ content }: { content: string }) {
+  if (!content) return null;
+
+  const lines = content.split("\n");
+
+  return (
+    <div className="space-y-4 font-light text-zinc-300 leading-relaxed text-sm">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith("### ")) {
+          return (
+            <h3 key={idx} className="text-base font-black text-white tracking-tight mt-6 mb-2 border-l-2 border-sky-400 pl-3">
+              {trimmed.replace("### ", "")}
+            </h3>
+          );
+        }
+
+        if (trimmed.startsWith("#### ")) {
+          return (
+            <h4 key={idx} className="text-xs font-bold text-sky-400 tracking-wider uppercase mt-4 mb-1">
+              {trimmed.replace("#### ", "")}
+            </h4>
+          );
+        }
+
+        if (trimmed === "---") {
+          return <hr key={idx} className="border-zinc-800/80 my-3" />;
+        }
+
+        if (trimmed.startsWith("* **") || trimmed.startsWith("*")) {
+          // Bullet point check
+          const isBoldItem = trimmed.startsWith("* **");
+          if (isBoldItem) {
+            const match = /^\*\s*\*\*(.*?)\*\*:(.*)$/.exec(trimmed);
+            if (match) {
+              return (
+                <div key={idx} className="pl-4 border-l border-zinc-800 py-1.5 my-2.5 bg-zinc-900/20 rounded-r-lg">
+                  <span className="font-bold text-zinc-100 text-xs">{match[1]}:</span>
+                  <span className="text-zinc-400 text-xs ml-1.5">{match[2]}</span>
+                </div>
+              );
+            }
+          }
+          return (
+            <li key={idx} className="list-disc list-inside pl-2 text-zinc-400 my-1 text-xs">
+              {trimmed.replace(/^\*\s*/, "")}
+            </li>
+          );
+        }
+
+        if (trimmed.length === 0) {
+          return <div key={idx} className="h-1" />;
+        }
+
+        // Standard text block
+        return (
+          <p key={idx} className="text-zinc-400 leading-relaxed text-xs">
+            {trimmed}
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function VideosPage() {
   const [videos, setVideos] = useState<VideoDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Active playing states
   const [selectedVideo, setSelectedVideo] = useState<VideoDocument | null>(null);
@@ -47,7 +118,7 @@ export default function VideosPage() {
       if (error) throw error;
       
       if (data) {
-        // Map generic documents to typed VideoDocuments without any-cast rules
+        // Map generic documents to typed VideoDocuments
         const typedData: VideoDocument[] = (data as {
           id: string;
           title: string;
@@ -64,11 +135,25 @@ export default function VideosPage() {
           metadata: {
             duration: String(doc.metadata?.duration || "1:00"),
             resolution: String(doc.metadata?.resolution || "1080p"),
-            thumbnail: String(doc.metadata?.thumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80")
+            thumbnail: String(doc.metadata?.thumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80"),
+            is_youtube: Boolean(doc.metadata?.is_youtube),
+            channel_title: String(doc.metadata?.channel_title || "")
           }
         }));
-        setVideos(typedData);
-        setSelectedVideo((prev) => prev || typedData[0] || null);
+
+        // Sort videos chronologically (newest first)
+        const sortedData = [...typedData].sort(
+          (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)
+        );
+
+        setVideos(sortedData);
+        setSelectedVideo((prev) => {
+          if (prev) {
+            const found = sortedData.find((v) => v.id === prev.id);
+            if (found) return found;
+          }
+          return sortedData[0] || null;
+        });
       }
     } catch (err) {
       console.error("Failed to load videos:", err);
@@ -77,13 +162,143 @@ export default function VideosPage() {
     }
   }, []);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchVideos();
+  // Sync YouTube Channel and apply 7-day retention/purge logic
+  const handleSyncChannel = useCallback(async (autoTrigger = false) => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      // 1. Call our API Route
+      const res = await fetch("/api/videos/sync", { method: "POST" });
+      if (!res.ok) {
+        throw new Error("No se pudo obtener el feed del canal de inversión.");
+      }
+      
+      const syncResult = await res.json();
+      if (!syncResult.success) {
+        throw new Error(syncResult.error || "Error de sincronización.");
+      }
+
+      const freshVideos: VideoDocument[] = syncResult.videos || [];
+
+      // 2. Fetch current videos in the database
+      const { data: existingDocs } = await supabase
+        .from("documents")
+        .select("*")
+        .eq("type", "video");
+
+      const existingMap = new Map<string, string>();
+      if (existingDocs) {
+        existingDocs.forEach((d) => {
+          existingMap.set(d.id, d.created_at);
+        });
+      }
+
+      // 3. Purge videos older than 7 days from the DB (Retention Policy)
+      const now = Date.now();
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+      if (existingDocs) {
+        for (const doc of existingDocs) {
+          const age = now - Date.parse(doc.created_at);
+          if (age > SEVEN_DAYS_MS) {
+            // Delete expired video
+            await supabase.from("documents").delete().eq("id", doc.id);
+          }
+        }
+      }
+
+      // 4. Insert new videos that don't already exist
+      for (const fv of freshVideos) {
+        if (!existingMap.has(fv.id)) {
+          const newDoc = {
+            title: fv.title,
+            description: fv.description,
+            type: "video",
+            file_url: fv.file_url,
+            created_at: fv.created_at, // Preserve original upload date
+            metadata: {
+              duration: fv.metadata.duration,
+              resolution: fv.metadata.resolution,
+              thumbnail: fv.metadata.thumbnail,
+              is_youtube: true,
+              channel_title: "Andrei Jikh"
+            }
+          };
+          await supabase.from("documents").insert(newDoc);
+        }
+      }
+
+      // 5. Reload Videos Catalogue
+      await fetchVideos();
+    } catch (err) {
+      console.error("YouTube sync failure:", err);
+      if (!autoTrigger) {
+        setSyncError(err instanceof Error ? err.message : "Error de sincronización desconocido.");
+      }
+    } finally {
+      setSyncing(false);
+    }
   }, [fetchVideos]);
 
+  // Initial mount load and automatic sync check
   useEffect(() => {
-    // Stop video if track changes
+    const initLoad = async () => {
+      // First, fetch the current local database state
+      setLoading(true);
+      try {
+        const { data } = await supabase
+          .from("documents")
+          .select("*")
+          .eq("type", "video");
+        
+        if (data) {
+          const typedData: VideoDocument[] = (data as {
+            id: string;
+            title: string;
+            description?: string;
+            file_url?: string;
+            created_at: string;
+            metadata?: Record<string, unknown>;
+          }[]).map((doc) => ({
+            id: doc.id,
+            title: doc.title,
+            description: doc.description,
+            file_url: doc.file_url || "",
+            created_at: doc.created_at,
+            metadata: {
+              duration: String(doc.metadata?.duration || "1:00"),
+              resolution: String(doc.metadata?.resolution || "1080p"),
+              thumbnail: String(doc.metadata?.thumbnail || ""),
+              is_youtube: Boolean(doc.metadata?.is_youtube),
+              channel_title: String(doc.metadata?.channel_title || "")
+            }
+          }));
+
+          // If we have no Andrei Jikh analyses loaded, trigger auto-sync!
+          const hasAnalyses = typedData.some((v) => v.title.startsWith("[Análisis]"));
+          if (!hasAnalyses) {
+            await handleSyncChannel(true);
+          } else {
+            // Just sort and set
+            const sortedData = [...typedData].sort(
+              (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)
+            );
+            setVideos(sortedData);
+            setSelectedVideo(sortedData[0] || null);
+            setLoading(false);
+          }
+        }
+      } catch (err) {
+        console.error("Initial page setup failure:", err);
+        setLoading(false);
+      }
+    };
+
+    initLoad();
+  }, [handleSyncChannel]);
+
+  useEffect(() => {
+    // Stop local video player if track changes
     if (videoRef.current) {
       videoRef.current.pause();
     }
@@ -95,7 +310,6 @@ export default function VideosPage() {
     setFormLoading(true);
 
     try {
-      // If thumbnail is empty, use a nice dark premium abstract image
       const finalThumbnail = thumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80";
 
       const newVideo = {
@@ -104,7 +318,7 @@ export default function VideosPage() {
         type: "video",
         file_url: fileUrl,
         metadata: {
-          duration: "1:00", // Standard placeholder length
+          duration: "3:45",
           resolution,
           thumbnail: finalThumbnail
         }
@@ -145,34 +359,64 @@ export default function VideosPage() {
     }
   };
 
+  const isSelectedYoutube = selectedVideo?.file_url.includes("youtube.com") || selectedVideo?.file_url.includes("youtu.be");
+
   return (
     <div className="space-y-10">
-      {/* Page Title Header */}
+      {/* Page Title Header with Sync Action */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+          <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl flex items-center gap-3">
             Videoteca Premium
           </h1>
           <p className="text-zinc-400 font-light mt-1 text-sm md:text-base">
-            Reproductor de vídeo integrado, metadatos enriquecidos y catalogador de archivos de vídeo.
+            Reproductor de vídeo integrado, análisis de inversión automatizado y catalogador documental.
           </p>
         </div>
+
+        <button
+          onClick={() => handleSyncChannel(false)}
+          disabled={syncing}
+          className="px-5 py-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300 text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-2 self-start md:self-auto disabled:opacity-50"
+        >
+          <Sparkles className={`w-4 h-4 ${syncing ? "animate-spin text-emerald-400" : ""}`} />
+          {syncing ? "Sincronizando Andrei Jikh..." : "Sincronizar Canal de Inversión"}
+        </button>
       </div>
+
+      {/* Sync Error Alert */}
+      {syncError && (
+        <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2.5">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{syncError}</span>
+        </div>
+      )}
 
       {/* Main viewport */}
       <div className="grid lg:grid-cols-12 gap-8 items-start">
         {/* LEFT COLUMN: ACTIVE VIDEO VIEWER & INFOCARD */}
         <div className="lg:col-span-8 space-y-6">
-          {/* Video Player Card */}
+          {/* Hibrid Player Card */}
           <div className="rounded-2xl border border-zinc-900 bg-black overflow-hidden relative group shadow-2xl">
             {selectedVideo ? (
               <div className="relative w-full aspect-video bg-black">
-                <video
-                  ref={videoRef}
-                  src={selectedVideo.file_url}
-                  controls
-                  className="w-full h-full object-contain"
-                />
+                {isSelectedYoutube ? (
+                  <iframe
+                    src={selectedVideo.file_url}
+                    title={selectedVideo.title}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <video
+                    ref={videoRef}
+                    src={selectedVideo.file_url}
+                    controls
+                    className="w-full h-full object-contain"
+                  />
+                )}
               </div>
             ) : (
               <div className="w-full aspect-video flex flex-col items-center justify-center text-center p-8 bg-zinc-950">
@@ -182,15 +426,18 @@ export default function VideosPage() {
             )}
           </div>
 
-          {/* Video Details Card */}
+          {/* Video Details Card & Financial Reports */}
           {selectedVideo && (
-            <div className="p-6 rounded-2xl border border-zinc-900 bg-zinc-900/10 space-y-4 relative overflow-hidden">
+            <div className="p-6 rounded-2xl border border-zinc-900 bg-zinc-900/10 space-y-5 relative overflow-hidden">
               <div className="absolute top-[-20%] left-[-20%] w-[50%] h-[50%] bg-sky-500/5 blur-[50px] pointer-events-none" />
               
               <div className="flex items-center justify-between gap-4 border-b border-zinc-900/50 pb-3">
                 <div>
-                  <h2 className="text-lg font-bold text-white tracking-tight">{selectedVideo.title}</h2>
-                  <p className="text-xs text-zinc-500 mt-0.5">Agregado el {new Date(selectedVideo.created_at).toLocaleDateString("es-ES")}</p>
+                  <h2 className="text-lg font-bold text-white tracking-tight leading-snug">{selectedVideo.title}</h2>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    {selectedVideo.metadata.channel_title ? `Canal: ${selectedVideo.metadata.channel_title} • ` : ""}
+                    Publicado el {new Date(selectedVideo.created_at).toLocaleDateString("es-ES")}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-sky-500/10 border border-sky-500/20 text-[10px] font-bold text-sky-400 uppercase tracking-widest flex-shrink-0">
                   <Monitor className="w-3.5 h-3.5" />
@@ -198,8 +445,14 @@ export default function VideosPage() {
                 </div>
               </div>
 
-              <div className="text-sm text-zinc-400 font-light leading-relaxed">
-                {selectedVideo.description || "Sin descripción proporcionada para este vídeo."}
+              <div className="leading-relaxed">
+                {selectedVideo.title.startsWith("[Análisis]") && selectedVideo.description ? (
+                  <MarkdownRenderer content={selectedVideo.description} />
+                ) : (
+                  <p className="text-zinc-400 font-light text-xs whitespace-pre-line">
+                    {selectedVideo.description || "Sin descripción proporcionada para este vídeo."}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -214,52 +467,57 @@ export default function VideosPage() {
                 ))
               ) : videos.length === 0 ? (
                 <div className="p-6 text-center rounded-2xl bg-zinc-900/20 border border-zinc-900 col-span-2 text-sm text-zinc-500">
-                  Aún no tienes vídeos cargados. Añade uno con el panel lateral.
+                  Aún no tienes vídeos cargados. Pulsa &quot;Sincronizar Canal&quot; o usa el panel lateral.
                 </div>
               ) : (
-                videos.map((v) => (
-                  <div
-                    key={v.id}
-                    onClick={() => setSelectedVideo(v)}
-                    className={`rounded-xl border overflow-hidden cursor-pointer flex gap-3.5 transition-all ${selectedVideo?.id === v.id ? "bg-sky-500/10 border-sky-500/40" : "bg-zinc-900/30 border-zinc-900/80 hover:border-zinc-800"}`}
-                  >
-                    {/* Video Thumbnail */}
-                    <div className="w-24 h-20 bg-zinc-900 flex-shrink-0 relative">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img 
-                        src={v.metadata.thumbnail} 
-                        alt={v.title}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center group-hover:bg-black/50 transition-colors">
-                        <Play className="w-5 h-5 text-white/90 fill-white" />
-                      </div>
-                      <span className="absolute bottom-1 right-1 px-1 rounded bg-black/75 text-[8px] font-bold text-zinc-300 font-mono">
-                        {v.metadata.duration}
-                      </span>
-                    </div>
-
-                    <div className="flex-grow min-w-0 pr-3 py-3 flex flex-col justify-between">
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate">{v.title}</div>
-                        <div className="text-[10px] text-zinc-500 truncate mt-0.5">{v.description}</div>
+                videos.map((v) => {
+                  const isYt = v.metadata.is_youtube;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => setSelectedVideo(v)}
+                      className={`rounded-xl border overflow-hidden cursor-pointer flex gap-3.5 transition-all p-2 ${selectedVideo?.id === v.id ? "bg-sky-500/10 border-sky-500/40" : "bg-zinc-900/30 border-zinc-900/80 hover:border-zinc-800"}`}
+                    >
+                      {/* Video Thumbnail */}
+                      <div className="w-24 h-16 bg-zinc-950 flex-shrink-0 relative rounded-lg overflow-hidden border border-zinc-900">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img 
+                          src={v.metadata.thumbnail} 
+                          alt={v.title}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                          <Play className="w-4 h-4 text-white/90 fill-white" />
+                        </div>
+                        <span className="absolute bottom-1 right-1 px-1 rounded bg-black/75 text-[8px] font-bold text-zinc-300 font-mono">
+                          {v.metadata.duration}
+                        </span>
                       </div>
 
-                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 font-bold">
-                        <span>{v.metadata.resolution}</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteVideo(v.id);
-                          }}
-                          className="p-1 rounded hover:bg-rose-500/15 text-zinc-600 hover:text-rose-400 transition-all"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <div className="flex-grow min-w-0 pr-1 flex flex-col justify-between">
+                        <div className="min-w-0">
+                          <div className={`text-xs font-bold truncate ${isYt ? "text-emerald-400" : "text-white"}`}>{v.title}</div>
+                          <div className="text-[10px] text-zinc-500 truncate mt-0.5">
+                            {isYt ? "Análisis de Inversión • " : ""}{new Date(v.created_at).toLocaleDateString("es-ES")}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 font-bold">
+                          <span className="text-[9px] uppercase">{isYt ? "Andrei Jikh" : v.metadata.resolution}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteVideo(v.id);
+                            }}
+                            className="p-1 rounded hover:bg-rose-500/15 text-zinc-600 hover:text-rose-400 transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
