@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { 
-  BarChart3, Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2 
+  BarChart3, Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2,
+  Radio, ChevronDown, ChevronRight
 } from "lucide-react";
 
 interface UserProfile {
@@ -16,10 +17,46 @@ interface UserProfile {
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  
+  // Canales hierarchy state
+  const [canalesOpen, setCanalesOpen] = useState(true);
+  const [channels, setChannels] = useState<string[]>(["Andrei Jikh"]);
+
+  // Fetch unique channels dynamically from saved videos
+  useEffect(() => {
+    const fetchChannels = async () => {
+      try {
+        const { data } = await supabase
+          .from("documents")
+          .select("metadata")
+          .eq("type", "video");
+        
+        if (data) {
+          const uniqueChannels = new Set<string>();
+          uniqueChannels.add("Andrei Jikh"); // Default channel always listed
+          
+          data.forEach((doc: { metadata?: { channel_title?: string } }) => {
+            if (doc.metadata && doc.metadata.channel_title) {
+              uniqueChannels.add(doc.metadata.channel_title);
+            }
+          });
+          
+          setChannels(Array.from(uniqueChannels));
+        }
+      } catch (err) {
+        console.error("Failed to fetch dynamic channels for sidebar:", err);
+      }
+    };
+    
+    fetchChannels();
+    const interval = setInterval(fetchChannels, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Check auth session on load
   useEffect(() => {
@@ -112,29 +149,79 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Navigation Links */}
-          <nav className="space-y-1.5">
-            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-3">CONSOLA</div>
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  href={item.path}
-                  onClick={() => setSidebarOpen(false)}
-                  className={`
-                    w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 group
-                    ${isActive 
-                      ? "bg-violet-600/10 border border-violet-500/25 text-violet-400 shadow-md shadow-violet-500/5" 
-                      : "text-zinc-400 border border-transparent hover:text-zinc-200 hover:bg-zinc-900/40"
-                    }
-                  `}
+          <nav className="space-y-6">
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-3">CONSOLA</div>
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = pathname === item.path;
+                return (
+                  <Link
+                    key={item.path}
+                    href={item.path}
+                    onClick={() => setSidebarOpen(false)}
+                    className={`
+                      w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 group
+                      ${isActive 
+                        ? "bg-violet-600/10 border border-violet-500/25 text-violet-400 shadow-md shadow-violet-500/5" 
+                        : "text-zinc-400 border border-transparent hover:text-zinc-200 hover:bg-zinc-900/40"
+                      }
+                    `}
+                  >
+                    <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-105 ${isActive ? "text-violet-400" : "text-zinc-500 group-hover:text-zinc-400"}`} />
+                    {item.name}
+                  </Link>
+                );
+              })}
+            </div>
+
+            {/* Hierarchical Tree: Nivel 0 "Canales" -> Nivel 1 "Nombre del canal" */}
+            <div className="space-y-2 border-t border-zinc-900/80 pt-5">
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-2 flex items-center justify-between">
+                <span>SEGUIMIENTO DIRECTO</span>
+                <span className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-sky-400 font-bold font-mono">LIVE</span>
+              </div>
+              
+              <div className="space-y-1">
+                {/* Nivel 0: Canales */}
+                <button
+                  onClick={() => setCanalesOpen(!canalesOpen)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/20 transition-all duration-150"
                 >
-                  <Icon className={`w-5 h-5 transition-transform duration-200 group-hover:scale-105 ${isActive ? "text-violet-400" : "text-zinc-500 group-hover:text-zinc-400"}`} />
-                  {item.name}
-                </Link>
-              );
-            })}
+                  <div className="flex items-center gap-2.5">
+                    <Radio className="w-4 h-4 text-sky-400" />
+                    <span>Canales</span>
+                  </div>
+                  {canalesOpen ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
+                </button>
+
+                {/* Nivel 1: Submenus (Nombres de Canales) */}
+                {canalesOpen && (
+                  <div className="pl-4 ml-6 border-l border-zinc-900/85 space-y-1.5 mt-1 transition-all">
+                    {channels.map((ch) => {
+                      const isActive = pathname === "/dashboard/videos" && (searchParams.get("channel") === ch || (ch === "Andrei Jikh" && !searchParams.get("channel")));
+                      return (
+                        <Link
+                          key={ch}
+                          href={`/dashboard/videos?channel=${encodeURIComponent(ch)}`}
+                          onClick={() => setSidebarOpen(false)}
+                          className={`
+                            w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150
+                            ${isActive
+                              ? "bg-sky-500/10 border border-sky-500/20 text-sky-400 shadow-sm"
+                              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/20"
+                            }
+                          `}
+                        >
+                          <span className="truncate">{ch}</span>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-sky-400 shadow-md shadow-sky-400/50" : "bg-zinc-800"}`} />
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           </nav>
         </div>
 
