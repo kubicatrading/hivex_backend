@@ -102,6 +102,19 @@ const SEED_VIDEOS = [
       thumbnail: "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=800&q=80"
     },
     created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: "video-3",
+    title: "Stock Market History Analysis",
+    description: "Análisis histórico de los ciclos económicos de Wall Street desde 1929.",
+    type: "video",
+    file_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    metadata: {
+      duration: "9:56",
+      resolution: "1080p",
+      thumbnail: "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?auto=format&fit=crop&w=800&q=80"
+    },
+    created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() // 10 days old!
   }
 ];
 
@@ -145,16 +158,54 @@ class MockSupabase {
   }
 
   private getDocuments(userId: string): MockDocument[] {
-    const docs = this.getStorage<MockDocument[]>(`hivex_docs_${userId}`, [
-      ...SEED_CHARTS,
-      ...SEED_AUDIOS,
-      ...SEED_VIDEOS
-    ]);
-    return docs;
+    let globalDocs = this.getStorage<MockDocument[] | null>("hivex_docs_global", null);
+    let changed = false;
+
+    if (globalDocs === null) {
+      globalDocs = [
+        ...SEED_CHARTS,
+        ...SEED_AUDIOS,
+        ...SEED_VIDEOS
+      ];
+      changed = true;
+    }
+
+    // Migration / Fallback: scan all existing user-specific documents keys in localStorage and merge them
+    if (typeof window !== "undefined") {
+      const globalIds = new Set(globalDocs.map(d => d.id));
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("hivex_docs_") && key !== "hivex_docs_global") {
+          try {
+            const dataStr = localStorage.getItem(key);
+            if (dataStr) {
+              const parsed = JSON.parse(dataStr) as MockDocument[];
+              if (Array.isArray(parsed)) {
+                for (const doc of parsed) {
+                  if (doc && doc.id && !globalIds.has(doc.id)) {
+                    globalDocs.push(doc);
+                    globalIds.add(doc.id);
+                    changed = true;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("[Migration] Error parsing key in loop:", key, e);
+          }
+        }
+      }
+    }
+
+    if (changed) {
+      this.setStorage("hivex_docs_global", globalDocs);
+    }
+
+    return globalDocs;
   }
 
   private setDocuments(userId: string, docs: MockDocument[]) {
-    this.setStorage(`hivex_docs_${userId}`, docs);
+    this.setStorage("hivex_docs_global", docs);
   }
 
   auth = {
@@ -181,29 +232,54 @@ class MockSupabase {
 
     signInWithPassword: async ({ email, password }: { email: string; password?: string }) => {
       const users = this.getUsers();
-      const user = users.find((u: MockUser) => u.email === email && u.password === password);
-      if (!user) {
-        // Auto-create demo user for smooth first-time UX if email is demo@hivex.com
-        if (email === "demo@hivex.com" && password === "demo1234") {
+      const identifier = email.trim().toLowerCase();
+      
+      // Helper to find or create mock users on the fly
+      let matchedUser = users.find((u: MockUser) => 
+        (u.email.toLowerCase() === identifier || u.email.split('@')[0].toLowerCase() === identifier) && 
+        u.password === password
+      );
+
+      if (!matchedUser) {
+        if ((identifier === "cyildirim" || identifier === "cyildirim@hivex.com") && password === "hivex1234") {
+          const newUser: MockUser = {
+            id: "cyildirim-user-id",
+            email: "cyildirim@hivex.com",
+            user_metadata: { full_name: "Ceyhun Yildirim" },
+            created_at: new Date().toISOString()
+          };
+          this.setStorage("hivex_users", [...users, { ...newUser, password }]);
+          matchedUser = newUser;
+        } else if ((identifier === "jsaavedra" || identifier === "jsaavedra@hivex.com") && password === "hivex1234") {
+          const newUser: MockUser = {
+            id: "jsaavedra-user-id",
+            email: "jsaavedra@hivex.com",
+            user_metadata: { full_name: "Juan Saavedra" },
+            created_at: new Date().toISOString()
+          };
+          this.setStorage("hivex_users", [...users, { ...newUser, password }]);
+          matchedUser = newUser;
+        } else if ((identifier === "demo" || identifier === "demo@hivex.com") && password === "demo1234") {
           const newUser: MockUser = {
             id: "demo-user-id",
-            email,
+            email: "demo@hivex.com",
             user_metadata: { full_name: "Alex Hivex" },
             created_at: new Date().toISOString()
           };
           this.setStorage("hivex_users", [...users, { ...newUser, password }]);
-          const session = { access_token: "mock-token-demo", user: newUser };
-          this.setStorage("hivex_session", session);
-          return { data: { user: newUser, session }, error: null };
+          matchedUser = newUser;
         }
-        return { data: { user: null, session: null }, error: { message: "Credenciales de demostración inválidas. Usa demo@hivex.com y demo1234" } };
+      }
+
+      if (!matchedUser) {
+        return { data: { user: null, session: null }, error: { message: "Credenciales de demostración inválidas. Usa cyildirim, jsaavedra, o demo@hivex.com (contraseña: hivex1234)." } };
       }
       
-      const userWithoutPassword = { ...user };
+      const userWithoutPassword = { ...matchedUser };
       delete userWithoutPassword.password;
 
       const session = {
-        access_token: "mock-token-" + user.id,
+        access_token: "mock-token-" + matchedUser.id,
         user: userWithoutPassword
       };
       this.setStorage("hivex_session", session);
@@ -271,7 +347,7 @@ class MockSupabase {
         };
       },
 
-      insert: async (data: unknown) => {
+      insert: (data: unknown) => {
         const itemArray = Array.isArray(data) ? data : [data];
         const newItems = itemArray.map((item: Record<string, unknown>) => ({
           id: Math.random().toString(36).substring(2, 15),
@@ -279,8 +355,22 @@ class MockSupabase {
           created_at: new Date().toISOString(),
           ...item
         }));
-        this.setDocuments(userId, [...docs, ...newItems as unknown as MockDocument[]]);
-        return { data: newItems, error: null };
+
+        const saveAndGetResult = () => {
+          this.setDocuments(userId, [...docs, ...newItems as unknown as MockDocument[]]);
+          return { data: newItems, error: null };
+        };
+
+        const builder = {
+          select: () => {
+            return Promise.resolve(saveAndGetResult());
+          },
+          then: (resolve: (value: { data: unknown; error: null }) => void) => {
+            resolve(saveAndGetResult());
+          }
+        };
+
+        return builder;
       },
 
       delete: () => {

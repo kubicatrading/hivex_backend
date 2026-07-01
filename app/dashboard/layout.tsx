@@ -5,9 +5,10 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { 
-  BarChart3, Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2,
-  Radio, ChevronDown, ChevronRight
+  Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2,
+  Radio, ChevronDown, ChevronRight, Heart
 } from "lucide-react";
+import { translations } from "@/lib/translations";
 
 interface UserProfile {
   email?: string;
@@ -22,6 +23,35 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  // Global Language Selection State
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("hivex_selected_language") || "en";
+      setSelectedLanguage(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleLangChangedEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail === "string") {
+        setSelectedLanguage(customEvent.detail);
+      }
+    };
+    window.addEventListener("languageChanged", handleLangChangedEvent);
+    return () => {
+      window.removeEventListener("languageChanged", handleLangChangedEvent);
+    };
+  }, []);
+
+  const handleLanguageChange = (langCode: string) => {
+    setSelectedLanguage(langCode);
+    localStorage.setItem("hivex_selected_language", langCode);
+    window.dispatchEvent(new CustomEvent("languageChanged", { detail: langCode }));
+  };
   
   // Canales hierarchy state
   const [canalesOpen, setCanalesOpen] = useState(true);
@@ -86,18 +116,20 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     router.push("/login");
   };
 
+  const lang = selectedLanguage || "en";
+  const t = translations[lang]?.sidebar || translations["en"].sidebar;
+
   const navItems = [
-    { name: "Resumen General", path: "/dashboard", icon: LayoutDashboard },
-    { name: "Métricas y Gráficos", path: "/dashboard/charts", icon: BarChart3 },
-    { name: "Estación de Audio", path: "/dashboard/audios", icon: Music },
-    { name: "Videoteca Premium", path: "/dashboard/videos", icon: Video }
+    { name: t.overview || "Resumen General", path: "/dashboard", icon: LayoutDashboard },
+    { name: t.audioStation || "Estación de Audio", path: "/dashboard/audios", icon: Music },
+    { name: t.favorites || "Vídeos preferidos", path: "/dashboard/videos?favorite=true", icon: Heart }
   ];
 
   if (authLoading) {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center">
         <Loader2 className="w-10 h-10 text-violet-400 animate-spin mb-4" />
-        <p className="text-zinc-500 text-sm tracking-wide animate-pulse">Verificando sesión segura...</p>
+        <p className="text-zinc-500 text-sm tracking-wide animate-pulse">{t.verifyingSession || "Verificando sesión segura..."}</p>
       </div>
     );
   }
@@ -151,10 +183,22 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {/* Navigation Links */}
           <nav className="space-y-6">
             <div className="space-y-1.5">
-              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-3">CONSOLA</div>
+              <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-3">
+                {selectedLanguage === "es" ? "CONSOLA" : selectedLanguage === "de" ? "KONSOLE" : selectedLanguage === "tr" ? "KONSOL" : "CONSOLE"}
+              </div>
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.path;
+                
+                // Robust active state calculation checking path parameters
+                let isActive = false;
+                if (item.path.includes("?favorite=true")) {
+                  isActive = pathname === "/dashboard/videos" && searchParams.get("favorite") === "true";
+                } else if (item.path === "/dashboard/videos") {
+                  isActive = pathname === "/dashboard/videos" && searchParams.get("favorite") !== "true";
+                } else {
+                  isActive = pathname === item.path;
+                }
+
                 return (
                   <Link
                     key={item.path}
@@ -178,7 +222,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             {/* Hierarchical Tree: Nivel 0 "Canales" -> Nivel 1 "Nombre del canal" */}
             <div className="space-y-2 border-t border-zinc-900/80 pt-5">
               <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-3 mb-2 flex items-center justify-between">
-                <span>SEGUIMIENTO DIRECTO</span>
+                <span>{t.liveTracking || "SEGUIMIENTO DIRECTO"}</span>
                 <span className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-sky-400 font-bold font-mono">LIVE</span>
               </div>
               
@@ -190,7 +234,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 >
                   <div className="flex items-center gap-2.5">
                     <Radio className="w-4 h-4 text-sky-400" />
-                    <span>Canales</span>
+                    <span>{t.channels || "Canales"}</span>
                   </div>
                   {canalesOpen ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
                 </button>
@@ -240,7 +284,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {isUsingMock && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-emerald-400 text-[10px] font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Modo Demostración Local</span>
+              <span>{t.demoMode || "Modo Demostración Local"}</span>
             </div>
           )}
 
@@ -249,13 +293,54 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-zinc-400 hover:text-rose-400 border border-transparent hover:bg-rose-500/5 transition-all duration-200"
           >
             <LogOut className="w-5 h-5" />
-            Cerrar Sesión
+            {t.signOut || "Cerrar Sesión"}
           </button>
         </div>
       </aside>
 
       {/* MAIN VIEWPORT */}
       <main className="flex-grow flex flex-col min-w-0 relative z-10 pt-16 md:pt-0">
+        {/* GLOBAL TOP NAVIGATION & LANGUAGE BAR */}
+        <header className="sticky top-16 md:top-0 z-30 w-full border-b border-zinc-900/60 bg-zinc-950/70 backdrop-blur-md px-6 md:px-10 py-3.5 flex items-center justify-between">
+          <div className="hidden md:flex items-center gap-3">
+            <span className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">{t.controlConsole || "Consola de Control HIVEX"}</span>
+            <span className="text-xs text-zinc-600">|</span>
+            <span className="text-xs text-zinc-500 bg-zinc-900/40 px-2 py-0.5 rounded-md border border-zinc-800 font-mono">v2.1 Premium</span>
+          </div>
+          <div className="md:hidden flex-grow" /> {/* Spacer on mobile */}
+          
+          {/* PREMIUM FLAG SWITCHER */}
+          <div className="flex items-center gap-3 select-none">
+            <div className="flex items-center gap-2 bg-zinc-900/40 border border-zinc-900 px-3 py-1.5 rounded-xl shadow-inner">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest hidden sm:inline">{t.globalLanguage || "Idioma Global:"}</span>
+              <div className="flex items-center gap-1.5">
+                {[
+                  { code: "en", flag: "🇺🇸", label: "English" },
+                  { code: "de", flag: "🇩🇪", label: "Deutsch" },
+                  { code: "tr", flag: "🇹🇷", label: "Türkçe" },
+                  { code: "es", flag: "🇪🇸", label: "Español" }
+                ].map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => handleLanguageChange(lang.code)}
+                    title={lang.label}
+                    className={`text-sm p-1.5 rounded-lg border transition-all duration-200 hover:scale-110 flex items-center justify-center relative group ${
+                      selectedLanguage === lang.code
+                        ? "bg-violet-600/10 border-violet-500/30 text-white scale-105 shadow-md shadow-violet-500/5"
+                        : "bg-transparent border-transparent text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    <span className="text-base leading-none">{lang.flag}</span>
+                    <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-zinc-900 text-[10px] text-zinc-300 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none border border-zinc-800 shadow-xl z-50">
+                      {lang.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </header>
+
         <div className="flex-grow p-6 md:p-10 max-w-7xl w-full mx-auto space-y-8">
           {children}
         </div>

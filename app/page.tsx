@@ -21,9 +21,8 @@ export default function Home() {
           </div>
           
           <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-zinc-400">
-            <a href="#features" className="hover:text-white transition-colors">Características</a>
-            <a href="#technology" className="hover:text-white transition-colors">Tecnología</a>
-            <a href="#pricing" className="hover:text-white transition-colors">Planes</a>
+            <a href="#features" className="hover:text-white transition-colors">Features</a>
+            <a href="#technology" className="hover:text-white transition-colors">Technology</a>
           </nav>
 
           <div className="flex items-center gap-4">
@@ -31,13 +30,13 @@ export default function Home() {
               href="/login" 
               className="px-4 py-2 text-sm font-medium hover:text-white transition-colors text-zinc-300"
             >
-              Iniciar Sesión
+              Sign In
             </Link>
             <Link 
               href="/login?register=true" 
               className="px-4 py-2 text-sm font-semibold rounded-xl bg-gradient-to-r from-violet-600 to-emerald-500 hover:from-violet-500 hover:to-emerald-400 text-white shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 transition-all duration-200"
             >
-              Comenzar Gratis
+              Get Started Free
             </Link>
           </div>
         </div>
@@ -50,18 +49,18 @@ export default function Home() {
           <div className="lg:col-span-7 space-y-8 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass-morphism text-xs font-semibold text-violet-400 border border-violet-500/20">
               <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
-              SaaS Premium v1.0 disponible para Vercel
+              Premium SaaS v1.0 available for Vercel
             </div>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-none">
-              Controla tu gestión <br />
+              Control your <br />
               <span className="bg-clip-text text-transparent bg-gradient-to-r from-violet-400 via-purple-400 to-emerald-400">
-                documental inteligente
+                intelligent document management
               </span>
             </h1>
 
             <p className="text-zinc-400 text-lg md:text-xl max-w-2xl mx-auto lg:mx-0 font-light leading-relaxed">
-              HIVEX unifica tus analíticas de gráficos interactivos, reproductores premium de audio y videotecas de alta velocidad bajo un mismo dashboard ultra rápido. Potenciado por Supabase y optimizado para desarrolladores.
+              HIVEX unifies your interactive charts analytics, premium audio players, and high-speed video libraries under a single ultra-fast dashboard. Powered by Supabase and optimized for developers.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
@@ -69,14 +68,14 @@ export default function Home() {
                 href="/login"
                 className="group px-6 py-3.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 font-bold text-white shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 transition-all duration-200 flex items-center justify-center gap-2"
               >
-                Acceder al Dashboard Demo
+                Sign In
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
               <a
                 href="#features"
                 className="px-6 py-3.5 rounded-xl glass-morphism hover:bg-zinc-900/60 font-semibold text-zinc-300 hover:text-white transition-all duration-200 flex items-center justify-center"
               >
-                Ver características
+                Explore features
               </a>
             </div>
 
@@ -88,11 +87,11 @@ export default function Home() {
               </div>
               <div>
                 <div className="text-2xl font-bold text-white">&lt; 100ms</div>
-                <div className="text-xs text-zinc-500">Latencia API</div>
+                <div className="text-xs text-zinc-500">API Latency</div>
               </div>
               <div>
                 <div className="text-2xl font-bold text-white">AES-256</div>
-                <div className="text-xs text-zinc-500">Encriptación</div>
+                <div className="text-xs text-zinc-500">Encryption</div>
               </div>
             </div>
           </div>
@@ -145,10 +144,10 @@ export default function Home() {
               </div>
 
               <div className="flex items-center justify-between pt-4 border-t border-zinc-800/50 text-xs text-zinc-500 font-medium">
-                <span>Sesión activa: demo@hivex.com</span>
+                <span>Session: Active</span>
                 <span className="text-emerald-400 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  Conectado a Supabase
+                  Connected to Supabase
                 </span>
               </div>
             </div>
@@ -158,10 +157,10 @@ export default function Home() {
         {/* Features Section */}
         <section id="features" className="py-24 border-t border-zinc-900 mt-20">
           <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-violet-400">Características Clave</h2>
-            <p className="text-3xl md:text-4xl font-extrabold text-white">Todo lo que necesitas para tu SaaS multimedia</p>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-violet-400">Key Features</h2>
+            <p className="text-3xl md:text-4xl font-extrabold text-white">Everything you need for your multimedia SaaS</p>
             <p className="text-zinc-400 font-light">
-              Hemos empaquetado los tres pilares de gestión documental más importantes en una interfaz de experiencia insuperable.
+              We have packaged the three most important pillars of document management in an interface with an unsurpassed user experience.
             </p>
           </div>
 
@@ -170,9 +169,9 @@ export default function Home() {
               <div className="w-12 h-12 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400 flex items-center justify-center shadow-lg shadow-violet-500/5">
                 <BarChart3 className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-white">Gráficos Analíticos</h3>
+              <h3 className="text-xl font-bold text-white">Analytical Charts</h3>
               <p className="text-zinc-400 text-sm leading-relaxed font-light">
-                Renderiza gráficos interactivos fluidos de forma local. Introduce valores directamente y visualiza el crecimiento, retención o métricas financieras en tiempo real.
+                Render fluid interactive charts locally. Input values directly and visualize growth, retention, or financial metrics in real-time.
               </p>
             </div>
 
@@ -180,9 +179,9 @@ export default function Home() {
               <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/5">
                 <Music className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-white">Reproductor de Audio</h3>
+              <h3 className="text-xl font-bold text-white">Audio Player</h3>
               <p className="text-zinc-400 text-sm leading-relaxed font-light">
-                Sube o reproduce tus pistas musicales y podcasts. Visualización dinámica del espectro de ondas y controles de reproducción optimizados para la máxima fluidez.
+                Upload or play your music tracks and podcasts. Dynamic wave spectrum visualization and playback controls optimized for maximum fluidity.
               </p>
             </div>
 
@@ -190,9 +189,9 @@ export default function Home() {
               <div className="w-12 h-12 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center shadow-lg shadow-sky-500/5">
                 <Video className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-white">Videoteca Premium</h3>
+              <h3 className="text-xl font-bold text-white">Premium Video Library</h3>
               <p className="text-zinc-400 text-sm leading-relaxed font-light">
-                Visualiza y gestiona tus videos con un reproductor HTML5 avanzado con soporte para diferentes resoluciones y panel lateral de metadatos integrados.
+                View and manage your videos with an advanced HTML5 player featuring support for various resolutions and an integrated metadata side panel.
               </p>
             </div>
           </div>
@@ -202,10 +201,10 @@ export default function Home() {
         <section id="technology" className="py-16 border-t border-zinc-900">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div className="space-y-6">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-400">Arquitectura Moderna</h2>
-              <p className="text-3xl font-bold text-white">Stack de Alto Rendimiento</p>
+              <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-400">Modern Architecture</h2>
+              <p className="text-3xl font-bold text-white">High-Performance Stack</p>
               <p className="text-zinc-400 leading-relaxed font-light">
-                Diseñado para cargar instantáneamente en Vercel, con soporte completo de TypeScript que reduce errores en desarrollo, Tailwind CSS para un estilado modular eficiente y la robustez de Supabase como backend.
+                Designed to load instantly on Vercel, with full TypeScript support to reduce development errors, Tailwind CSS for efficient modular styling, and the robustness of Supabase as a backend.
               </p>
               <div className="space-y-3">
                 <div className="flex items-center gap-3 text-sm text-zinc-300">
@@ -218,7 +217,7 @@ export default function Home() {
                 </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-300">
                   <Check className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-                  <span>TypeScript Estricto para máxima seguridad de código</span>
+                  <span>Strict TypeScript for maximum code safety</span>
                 </div>
               </div>
             </div>
@@ -227,22 +226,22 @@ export default function Home() {
               <div className="p-6 rounded-xl bg-zinc-900/30 border border-zinc-800/50 flex flex-col gap-3">
                 <Database className="w-8 h-8 text-violet-400" />
                 <span className="font-semibold text-white">Supabase PostgREST</span>
-                <span className="text-xs text-zinc-500">API PostgreSQL de alto rendimiento auto-generada</span>
+                <span className="text-xs text-zinc-500">High-performance auto-generated PostgreSQL API</span>
               </div>
               <div className="p-6 rounded-xl bg-zinc-900/30 border border-zinc-800/50 flex flex-col gap-3">
                 <ShieldCheck className="w-8 h-8 text-emerald-400" />
                 <span className="font-semibold text-white">Row Level Security</span>
-                <span className="text-xs text-zinc-500">Tus datos multimedia y perfiles protegidos a nivel base de datos</span>
+                <span className="text-xs text-zinc-500">Your multimedia data and profiles protected at the database level</span>
               </div>
               <div className="p-6 rounded-xl bg-zinc-900/30 border border-zinc-800/50 flex flex-col gap-3">
                 <Zap className="w-8 h-8 text-amber-400" />
                 <span className="font-semibold text-white">Next.js Turbopack</span>
-                <span className="text-xs text-zinc-500">Compilación incremental ultra-rápida en milisegundos</span>
+                <span className="text-xs text-zinc-500">Ultra-fast incremental compilation in milliseconds</span>
               </div>
               <div className="p-6 rounded-xl bg-zinc-900/30 border border-zinc-800/50 flex flex-col gap-3">
                 <Video className="w-8 h-8 text-sky-400" />
                 <span className="font-semibold text-white">Vercel Edge</span>
-                <span className="text-xs text-zinc-500">Entrega de archivos estáticos y API distribuida globalmente</span>
+                <span className="text-xs text-zinc-500">Globally distributed static files and API delivery</span>
               </div>
             </div>
           </div>
@@ -258,11 +257,11 @@ export default function Home() {
             </div>
             <span className="font-semibold text-white">HIVEX SaaS</span>
           </div>
-          <p>© 2026 HIVEX Inc. Todos los derechos reservados.</p>
+          <p>© 2026 HIVEX Inc. All rights reserved.</p>
           <div className="flex gap-6">
-            <a href="#" className="hover:text-zinc-300 transition-colors">Términos</a>
-            <a href="#" className="hover:text-zinc-300 transition-colors">Privacidad</a>
-            <a href="#" className="hover:text-zinc-300 transition-colors">Soporte</a>
+            <a href="#" className="hover:text-zinc-300 transition-colors">Terms</a>
+            <a href="#" className="hover:text-zinc-300 transition-colors">Privacy</a>
+            <a href="#" className="hover:text-zinc-300 transition-colors">Support</a>
           </div>
         </div>
       </footer>

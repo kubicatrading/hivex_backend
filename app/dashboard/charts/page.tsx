@@ -8,6 +8,7 @@ import {
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart as RechartsBarChart, Bar, LineChart as RechartsLineChart, Line
 } from "recharts";
+import { translations } from "@/lib/translations";
 
 interface ChartSeries {
   key: string;
@@ -42,6 +43,32 @@ export default function ChartsPage() {
   // Active chart rendering
   const [selectedChart, setSelectedChart] = useState<ChartDocument | null>(null);
   const [chartType, setChartType] = useState<"area" | "bar" | "line">("area");
+
+  // Global Language Selection State
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("hivex_selected_language") || "en";
+      setSelectedLanguage(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleLangChangedEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail === "string") {
+        setSelectedLanguage(customEvent.detail);
+      }
+    };
+    window.addEventListener("languageChanged", handleLangChangedEvent);
+    return () => {
+      window.removeEventListener("languageChanged", handleLangChangedEvent);
+    };
+  }, []);
+
+  const lang = selectedLanguage || "en";
+  const t = translations[lang]?.charts || translations["en"].charts;
 
   // Form states for creating a new chart
   const [title, setTitle] = useState("");
@@ -163,7 +190,7 @@ export default function ChartsPage() {
   };
 
   const handleDeleteChart = async (id: string) => {
-    if (confirm("¿Estás seguro de que deseas eliminar este gráfico?")) {
+    if (confirm(t.confirmDelete || "¿Estás seguro de que deseas eliminar este gráfico?")) {
       try {
         const { error } = await supabase.from("documents").delete().eq("id", id);
         if (error) throw error;
@@ -186,10 +213,10 @@ export default function ChartsPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
-            Métricas y Gráficos
+            {t.title || "Gráficos Analíticos"}
           </h1>
           <p className="text-zinc-400 font-light mt-1 text-sm md:text-base">
-            Renderiza visualizaciones dinámicas locales o introduce tus propios datasets analíticos.
+            {t.subtitle || "Generador de métricas interactivas con renderizado adaptable."}
           </p>
         </div>
       </div>
@@ -205,10 +232,10 @@ export default function ChartsPage() {
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-900/80 pb-4">
               <div>
                 <h2 className="text-lg font-bold text-white truncate">
-                  {selectedChart ? selectedChart.title : "Cargando visualización..."}
+                  {selectedChart ? selectedChart.title : (lang === "es" ? "Cargando visualización..." : lang === "de" ? "Visualisierung wird geladen..." : lang === "tr" ? "Görselleştirme yükleniyor..." : "Loading visualization...")}
                 </h2>
                 <p className="text-xs text-zinc-500 truncate max-w-md mt-0.5">
-                  {selectedChart ? selectedChart.description : "Por favor selecciona o añade un gráfico..."}
+                  {selectedChart ? (selectedChart.description || t.noDescription) : (lang === "es" ? "Por favor selecciona o añade un gráfico..." : lang === "de" ? "Bitte wählen Sie ein Diagramm aus oder fügen Sie eines hinzu..." : lang === "tr" ? "Lütfen bir grafik seçin veya ekleyin..." : "Please select or add a chart...")}
                 </p>
               </div>
 
@@ -219,21 +246,21 @@ export default function ChartsPage() {
                     className={`p-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${chartType === "area" ? "bg-violet-600/15 text-violet-400 border border-violet-500/20" : "hover:text-white border border-transparent"}`}
                   >
                     <AreaIcon className="w-3.5 h-3.5" />
-                    Área
+                    {t.areaType || "Área"}
                   </button>
                   <button
                     onClick={() => setChartType("bar")}
                     className={`p-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${chartType === "bar" ? "bg-violet-600/15 text-violet-400 border border-violet-500/20" : "hover:text-white border border-transparent"}`}
                   >
                     <BarChart className="w-3.5 h-3.5" />
-                    Barras
+                    {t.barType || "Barras"}
                   </button>
                   <button
                     onClick={() => setChartType("line")}
                     className={`p-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${chartType === "line" ? "bg-violet-600/15 text-violet-400 border border-violet-500/20" : "hover:text-white border border-transparent"}`}
                   >
                     <LineIcon className="w-3.5 h-3.5" />
-                    Líneas
+                    {t.lineType || "Líneas"}
                   </button>
                 </div>
               )}
@@ -244,12 +271,12 @@ export default function ChartsPage() {
               {loading ? (
                 <div className="flex flex-col items-center gap-2">
                   <RefreshCw className="w-8 h-8 text-violet-400 animate-spin" />
-                  <span className="text-sm text-zinc-500 font-light">Cargando gráficos...</span>
+                  <span className="text-sm text-zinc-500 font-light">{lang === "es" ? "Cargando gráficos..." : lang === "de" ? "Diagramme werden geladen..." : lang === "tr" ? "Grafikler yükleniyor..." : "Loading charts..."}</span>
                 </div>
               ) : !selectedChart ? (
                 <div className="text-center space-y-2">
                   <BarChart3 className="w-10 h-10 text-zinc-600 mx-auto" />
-                  <p className="text-sm text-zinc-500">No hay gráficos disponibles. Utiliza el creador de la derecha.</p>
+                  <p className="text-sm text-zinc-500">{t.noCharts || "No hay gráficos disponibles. Utiliza el creador de la derecha."}</p>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -302,7 +329,7 @@ export default function ChartsPage() {
 
           {/* LIST OF STORED CHARTS */}
           <div className="space-y-4">
-            <h3 className="text-base font-bold text-white">Visualizaciones de Datos Almacenadas</h3>
+            <h3 className="text-base font-bold text-white">{t.chartListTitle || "Visualizaciones de Datos Almacenadas"}</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               {charts.map((c) => (
                 <div
@@ -316,7 +343,7 @@ export default function ChartsPage() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white truncate">{c.title}</div>
-                      <div className="text-[10px] text-zinc-500 truncate mt-0.5">{c.metadata.data.length} puntos de datos</div>
+                      <div className="text-[10px] text-zinc-500 truncate mt-0.5">{c.metadata.data.length} {lang === "es" ? "puntos de datos" : lang === "de" ? "Datenpunkte" : lang === "tr" ? "veri noktası" : "data points"}</div>
                     </div>
                   </div>
 
@@ -339,12 +366,12 @@ export default function ChartsPage() {
         <div className="lg:col-span-4 rounded-2xl border border-zinc-900 bg-zinc-900/20 p-6 space-y-6">
           <div className="flex items-center gap-2">
             <Plus className="w-5 h-5 text-violet-400" />
-            <h3 className="text-base font-bold text-white">Generar Gráfico</h3>
+            <h3 className="text-base font-bold text-white">{t.createTitle || "Generar Gráfico"}</h3>
           </div>
 
           <form onSubmit={handleCreateChart} className="space-y-5">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Título del Gráfico</label>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.chartTitleLabel || "Título del Gráfico"}</label>
               <input
                 type="text"
                 required
@@ -356,7 +383,7 @@ export default function ChartsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Descripción</label>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.descriptionLabel || "Descripción"}</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -368,7 +395,7 @@ export default function ChartsPage() {
             {/* Config labels */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Serie 1 (Eje Y1)</label>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.seriesLabel || "Serie"} 1</label>
                 <input
                   type="text"
                   required
@@ -378,7 +405,7 @@ export default function ChartsPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Serie 2 (Eje Y2)</label>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.seriesLabel || "Serie"} 2</label>
                 <input
                   type="text"
                   required
@@ -392,7 +419,7 @@ export default function ChartsPage() {
             {/* Config Colors */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Color Serie 1</label>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.colorLabel || "Color"} 1</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
@@ -404,7 +431,7 @@ export default function ChartsPage() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Color Serie 2</label>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.colorLabel || "Color"} 2</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
@@ -420,13 +447,13 @@ export default function ChartsPage() {
             {/* Field list inputs */}
             <div className="space-y-2">
               <div className="flex justify-between items-center border-b border-zinc-900 pb-1.5">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Dataset de Puntos</label>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.dataRowsLabel || "Dataset de Puntos"}</label>
                 <button
                   type="button"
                   onClick={handleAddField}
                   className="text-[10px] font-bold text-violet-400 hover:text-violet-300 flex items-center gap-1 focus:outline-none"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Añadir Punto
+                  <Plus className="w-3.5 h-3.5" /> {t.addField || "Añadir Punto"}
                 </button>
               </div>
 
@@ -436,7 +463,7 @@ export default function ChartsPage() {
                     <input
                       type="text"
                       required
-                      placeholder="Label"
+                      placeholder={t.labelCol || "Label"}
                       value={field.label}
                       onChange={(e) => handleFieldChange(index, "label", e.target.value)}
                       className="w-16 px-1.5 py-1 bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 text-xs text-center"
@@ -475,7 +502,7 @@ export default function ChartsPage() {
               disabled={formLoading}
               className="w-full py-2.5 px-4 font-bold text-xs text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              {formLoading ? "Generando..." : "Generar Gráfico Interactivo"}
+              {formLoading ? (t.submitting || "Generando...") : (t.submitBtn || "Generar Gráfico Interactivo")}
             </button>
           </form>
         </div>

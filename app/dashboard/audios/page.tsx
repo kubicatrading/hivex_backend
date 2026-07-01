@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   Music, Play, Pause, Volume2, VolumeX, Trash2, Clock, Disc, ChevronRight, UploadCloud
 } from "lucide-react";
+import { translations } from "@/lib/translations";
 
 interface AudioDocument {
   id: string;
@@ -23,6 +24,29 @@ interface AudioDocument {
 export default function AudiosPage() {
   const [audios, setAudios] = useState<AudioDocument[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Global Language Selection State
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("hivex_selected_language") || "en";
+      setSelectedLanguage(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleLangChangedEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail === "string") {
+        setSelectedLanguage(customEvent.detail);
+      }
+    };
+    window.addEventListener("languageChanged", handleLangChangedEvent);
+    return () => {
+      window.removeEventListener("languageChanged", handleLangChangedEvent);
+    };
+  }, []);
 
   // Active audio playing state
   const [selectedAudio, setSelectedAudio] = useState<AudioDocument | null>(null);
@@ -198,7 +222,9 @@ export default function AudiosPage() {
   };
 
   const handleDeleteAudio = async (id: string) => {
-    if (confirm("¿Estás seguro de que deseas eliminar este audio?")) {
+    const lang = selectedLanguage || "en";
+    const t = translations[lang]?.audios || translations["en"].audios;
+    if (confirm(t.confirmDelete || "¿Estás seguro de que deseas eliminar este audio?")) {
       try {
         const { error } = await supabase.from("documents").delete().eq("id", id);
         if (error) throw error;
@@ -215,16 +241,19 @@ export default function AudiosPage() {
     }
   };
 
+  const lang = selectedLanguage || "en";
+  const t = translations[lang]?.audios || translations["en"].audios;
+
   return (
     <div className="space-y-10">
       {/* Page Title Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
-            Estación de Audio
+            {t.title || "Estación de Audio"}
           </h1>
           <p className="text-zinc-400 font-light mt-1 text-sm md:text-base">
-            Reproductor premium con renderizado de ondas de sonido y gestor de pistas multimedia.
+            {t.subtitle || "Reproductor premium con renderizado de ondas de sonido y gestor de pistas multimedia."}
           </p>
         </div>
       </div>
@@ -260,13 +289,13 @@ export default function AudiosPage() {
 
               <div>
                 <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
-                  {selectedAudio ? selectedAudio.metadata.genre : "Audio"}
+                  {selectedAudio ? selectedAudio.metadata.genre : (t.selectedAudioGenre || "Audio")}
                 </span>
                 <h2 className="text-xl font-extrabold text-white mt-3 tracking-tight">
-                  {selectedAudio ? selectedAudio.title : "Selecciona una pista"}
+                  {selectedAudio ? selectedAudio.title : (t.selectTrack || "Selecciona una pista")}
                 </h2>
                 <p className="text-xs text-zinc-500 font-light mt-1 max-w-sm">
-                  {selectedAudio ? selectedAudio.description : "Sin descripción disponible."}
+                  {selectedAudio ? selectedAudio.description : (t.noDescription || "Sin descripción disponible.")}
                 </p>
               </div>
             </div>
@@ -286,7 +315,7 @@ export default function AudiosPage() {
                   );
                 })
               ) : (
-                <div className="text-xs text-zinc-600 font-mono">Sin espectro disponible</div>
+                <div className="text-xs text-zinc-600 font-mono">{t.noSpectrum || "Sin espectro disponible"}</div>
               )}
             </div>
 
@@ -348,7 +377,7 @@ export default function AudiosPage() {
 
           {/* AUDIO LIST CONTAINER */}
           <div className="space-y-4">
-            <h3 className="text-base font-bold text-white">Listado de Pistas y Podcast</h3>
+            <h3 className="text-base font-bold text-white">{t.playlistTitle || "Listado de Pistas y Podcast"}</h3>
             <div className="grid sm:grid-cols-2 gap-4">
               {loading ? (
                 [1, 2].map((i) => (
@@ -356,7 +385,7 @@ export default function AudiosPage() {
                 ))
               ) : audios.length === 0 ? (
                 <div className="p-6 text-center rounded-2xl bg-zinc-900/20 border border-zinc-900 col-span-2 text-sm text-zinc-500">
-                  Aún no tienes pistas de audio cargadas. Sube una a la derecha.
+                  {t.noAudios || "Aún no tienes pistas de audio cargadas. Sube una a la derecha."}
                 </div>
               ) : (
                 audios.map((a) => (
@@ -398,12 +427,12 @@ export default function AudiosPage() {
         <div className="lg:col-span-4 rounded-2xl border border-zinc-900 bg-zinc-900/20 p-6 space-y-6">
           <div className="flex items-center gap-2">
             <UploadCloud className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-base font-bold text-white">Subir Pista (Enlace)</h3>
+            <h3 className="text-base font-bold text-white">{t.uploadTitle || "Subir Pista (Enlace)"}</h3>
           </div>
 
           <form onSubmit={handleCreateAudio} className="space-y-5">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Título de la Pista</label>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.trackTitleLabel || "Título de la Pista"}</label>
               <input
                 type="text"
                 required
@@ -415,7 +444,7 @@ export default function AudiosPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Descripción</label>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.descriptionLabel || "Descripción"}</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -425,23 +454,23 @@ export default function AudiosPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Género Musical</label>
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.genreLabel || "Género Musical"}</label>
               <select
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
                 className="w-full px-3 py-2 bg-zinc-900/60 border border-zinc-800 focus:border-emerald-500 rounded-xl text-zinc-300 text-xs focus:outline-none"
               >
-                <option value="Ambient">Ambient / Relajante</option>
-                <option value="Synthwave">Synthwave / Retro</option>
-                <option value="Electronic">Electrónica / Techno</option>
-                <option value="LoFi">Lo-Fi / HipHop</option>
-                <option value="Podcast">Podcast / Grabación</option>
+                <option value="Ambient">{selectedLanguage === "es" ? "Ambient / Relajante" : selectedLanguage === "de" ? "Ambient / Entspannend" : selectedLanguage === "tr" ? "Ambient / Dinlendirici" : "Ambient / Relaxing"}</option>
+                <option value="Synthwave">{selectedLanguage === "es" ? "Synthwave / Retro" : selectedLanguage === "de" ? "Synthwave / Retro" : selectedLanguage === "tr" ? "Synthwave / Retro" : "Synthwave / Retro"}</option>
+                <option value="Electronic">{selectedLanguage === "es" ? "Electrónica / Techno" : selectedLanguage === "de" ? "Elektronik / Techno" : selectedLanguage === "tr" ? "Elektronik / Techno" : "Electronic / Techno"}</option>
+                <option value="LoFi">{selectedLanguage === "es" ? "Lo-Fi / HipHop" : selectedLanguage === "de" ? "Lo-Fi / HipHop" : selectedLanguage === "tr" ? "Lo-Fi / HipHop" : "Lo-Fi / HipHop"}</option>
+                <option value="Podcast">{selectedLanguage === "es" ? "Podcast / Grabación" : selectedLanguage === "de" ? "Podcast / Aufnahme" : selectedLanguage === "tr" ? "Podcast / Kayıt" : "Podcast / Recording"}</option>
               </select>
             </div>
 
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">URL del Archivo de Audio</label>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{t.audioUrlLabel || "URL del Archivo de Audio"}</label>
                 <span className="text-[9px] text-zinc-500 font-light">MP3 directa</span>
               </div>
               <input
@@ -453,7 +482,7 @@ export default function AudiosPage() {
                 className="w-full px-3 py-2 bg-zinc-900/60 border border-zinc-800 focus:border-emerald-500 rounded-xl text-zinc-200 placeholder-zinc-500 focus:outline-none text-xs"
               />
               <span className="text-[9px] text-zinc-600 block leading-tight font-light italic">
-                * Para probar, puedes usar enlaces como `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3`
+                {t.audioUrlHelp || "* Para probar, puedes usar enlaces MP3 directos"}
               </span>
             </div>
 
@@ -462,7 +491,7 @@ export default function AudiosPage() {
               disabled={formLoading}
               className="w-full py-2.5 px-4 font-bold text-xs text-black bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              {formLoading ? "Subiendo..." : "Subir Recurso de Audio"}
+              {formLoading ? (t.submitting || "Subiendo...") : (t.submitBtn || "Subir Recurso de Audio")}
             </button>
           </form>
         </div>

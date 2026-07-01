@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   BarChart3, Music, Video, Database, ArrowRight, ShieldCheck, Clock, Plus 
 } from "lucide-react";
+import { translations } from "@/lib/translations";
 
 interface DashboardDocument {
   id: string;
@@ -24,6 +25,39 @@ export default function DashboardPage() {
   });
   const [recentDocs, setRecentDocs] = useState<DashboardDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasGoogleToken, setHasGoogleToken] = useState(false);
+
+  // Global Language Selection State
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("hivex_selected_language") || "en";
+      setSelectedLanguage(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleLangChangedEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && typeof customEvent.detail === "string") {
+        setSelectedLanguage(customEvent.detail);
+      }
+    };
+    window.addEventListener("languageChanged", handleLangChangedEvent);
+    return () => {
+      window.removeEventListener("languageChanged", handleLangChangedEvent);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("google_gcloud_token");
+      setTimeout(() => {
+        setHasGoogleToken(!!token);
+      }, 0);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -58,11 +92,14 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, []);
 
+  const lang = selectedLanguage || "en";
+  const t = translations[lang]?.overview || translations["en"].overview;
+
   const metricCards = [
     {
-      name: "Gráficos & Métricas",
+      name: t.chartsCardTitle || "Charts & Metrics",
       value: stats.charts,
-      description: "Visualizaciones de datos cargadas",
+      description: t.chartsCardDesc || "Loaded data visualizations",
       color: "from-violet-500 to-indigo-500",
       textColor: "text-violet-400",
       bgLight: "bg-violet-500/5",
@@ -71,9 +108,9 @@ export default function DashboardPage() {
       link: "/dashboard/charts"
     },
     {
-      name: "Archivos de Audio",
+      name: t.audioCardTitle || "Audio Files",
       value: stats.audios,
-      description: "Pistas y grabaciones sonoras",
+      description: t.audioCardDesc || "Sound tracks and recordings",
       color: "from-emerald-500 to-teal-500",
       textColor: "text-emerald-400",
       bgLight: "bg-emerald-500/5",
@@ -82,9 +119,9 @@ export default function DashboardPage() {
       link: "/dashboard/audios"
     },
     {
-      name: "Archivos de Vídeo",
+      name: t.videoCardTitle || "Video Files",
       value: stats.videos,
-      description: "Videotutoriales y clips",
+      description: t.videoCardDesc || "Video tutorials and clips",
       color: "from-sky-500 to-blue-500",
       textColor: "text-sky-400",
       bgLight: "bg-sky-500/5",
@@ -100,17 +137,17 @@ export default function DashboardPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl">
-            Resumen General
+            {t.title || "Overview"}
           </h1>
           <p className="text-zinc-400 font-light mt-1 text-sm md:text-base">
-            Monitorea, organiza y gestiona tus recursos analíticos y multimedia.
+            {t.subtitle || "Monitor, organize, and manage your analytical and multimedia resources."}
           </p>
         </div>
 
         {/* Quick Database Action */}
         <div className="flex items-center gap-3 bg-zinc-900/40 p-1.5 rounded-xl border border-zinc-800/40 text-xs font-medium text-zinc-400">
           <Database className="w-4 h-4 text-violet-400 ml-1.5" />
-          <span>Almacenamiento: {stats.total * 4.2} MB de 100 MB</span>
+          <span>{t.storage || "Storage"}: {stats.total * 4.2} MB {t.of || "of"} 100 MB</span>
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         </div>
       </div>
@@ -153,9 +190,9 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Clock className="w-5 h-5 text-zinc-400" />
-              Documentos Recientes
+              {t.recentDocs || "Recent Documents"}
             </h2>
-            <span className="text-xs text-zinc-500">Últimas subidas</span>
+            <span className="text-xs text-zinc-500">{t.latestUploads || "Latest uploads"}</span>
           </div>
 
           <div className="space-y-4">
@@ -165,7 +202,7 @@ export default function DashboardPage() {
               ))
             ) : recentDocs.length === 0 ? (
               <div className="p-8 text-center rounded-2xl bg-zinc-900/20 border border-zinc-900 text-sm text-zinc-500">
-                Aún no tienes documentos cargados. Comienza a añadir en las secciones laterales.
+                {t.noDocs || "No documents uploaded yet. Start adding them in the sidebar sections."}
               </div>
             ) : (
               recentDocs.map((doc) => {
@@ -192,10 +229,10 @@ export default function DashboardPage() {
 
                     <div className="text-right flex-shrink-0">
                       <span className="text-[10px] font-mono font-bold text-zinc-500 block uppercase">
-                        {doc.type}
+                        {doc.type === "chart" ? (lang === "es" ? "Gráfico" : lang === "de" ? "Diagramm" : lang === "tr" ? "Grafik" : "Chart") : doc.type === "audio" ? "Audio" : (lang === "es" ? "Vídeo" : lang === "de" ? "Video" : lang === "tr" ? "Video" : "Video")}
                       </span>
                       <span className="text-[10px] text-zinc-500">
-                        {new Date(doc.created_at).toLocaleDateString("es-ES", {
+                        {new Date(doc.created_at).toLocaleDateString(lang === "en" ? "en-US" : lang === "es" ? "es-ES" : lang === "de" ? "de-DE" : "tr-TR", {
                           day: "numeric",
                           month: "short"
                         })}
@@ -212,7 +249,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-5 space-y-6">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-violet-400" />
-            Estatus del Sistema
+            {t.systemStatus || "System Status"}
           </h2>
 
           <div className="rounded-2xl border border-zinc-900 bg-zinc-900/20 p-6 space-y-6 relative overflow-hidden">
@@ -224,42 +261,56 @@ export default function DashboardPage() {
                 <span className="text-sm text-zinc-400">Supabase Auth</span>
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Operativo
+                  {t.operational || "Operational"}
                 </span>
               </div>
               <div className="flex items-center justify-between border-b border-zinc-900/50 pb-3">
                 <span className="text-sm text-zinc-400">PostgreSQL DB</span>
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Operativo
+                  {t.operational || "Operational"}
                 </span>
               </div>
               <div className="flex items-center justify-between border-b border-zinc-900/50 pb-3">
                 <span className="text-sm text-zinc-400">Supabase Storage</span>
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Operativo
+                  {t.operational || "Operational"}
                 </span>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between border-b border-zinc-900/50 pb-3">
                 <span className="text-sm text-zinc-400">Edge Middleware</span>
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Operativo
+                  {t.operational || "Operational"}
                 </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-zinc-400">Gemini API Connection</span>
+                {hasGoogleToken ? (
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
+                    {t.googleConnected || "Connected (Google Cloud)"}
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold text-zinc-500 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                    {t.googleDisconnected || "Disconnected"}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Custom CTA */}
             <div className="p-4 rounded-xl bg-violet-600/5 border border-violet-500/10 text-center">
-              <h4 className="text-sm font-bold text-white mb-1">¿Necesitas añadir más datos?</h4>
-              <p className="text-xs text-zinc-400 font-light mb-3">Sube nuevos recursos analíticos o multimedia en sus respectivos módulos.</p>
+              <h4 className="text-sm font-bold text-white mb-1">{t.needMoreData || "Need to add more data?"}</h4>
+              <p className="text-xs text-zinc-400 font-light mb-3">{t.needMoreDataDesc || "Upload new analytical or multimedia resources in their respective modules."}</p>
               <div className="flex justify-center gap-2">
                 <Link
                   href="/dashboard/charts"
                   className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-xs font-bold text-white flex items-center gap-1"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Nuevo Gráfico
+                  <Plus className="w-3.5 h-3.5" /> {t.newChart || "New Chart"}
                 </Link>
               </div>
             </div>
