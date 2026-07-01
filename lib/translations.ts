@@ -25,6 +25,7 @@ export const translations: TranslationDictionary = {
       verifyingSession: "Verifying secure session...",
       controlConsole: "HIVEX Control Console",
       globalLanguage: "Global Language:",
+      administration: "Administration",
     },
     login: {
       titleSignIn: "Sign In to HIVEX",
@@ -165,6 +166,7 @@ export const translations: TranslationDictionary = {
       verifyingSession: "Verificando sesión segura...",
       controlConsole: "Consola de Control HIVEX",
       globalLanguage: "Idioma Global:",
+      administration: "Administración",
     },
     login: {
       titleSignIn: "Iniciar Sesión en HIVEX",
@@ -305,6 +307,7 @@ export const translations: TranslationDictionary = {
       verifyingSession: "Sichere Sitzung überprüfen...",
       controlConsole: "HIVEX Kontrollkonsole",
       globalLanguage: "Globale Sprache:",
+      administration: "Verwaltung",
     },
     login: {
       titleSignIn: "Bei HIVEX anmelden",
@@ -445,6 +448,7 @@ export const translations: TranslationDictionary = {
       verifyingSession: "Güvenli oturum doğrulanıyor...",
       controlConsole: "HIVEX Kontrol Konsolu",
       globalLanguage: "Global Dil:",
+      administration: "Yönetim",
     },
     login: {
       titleSignIn: "HIVEX'e Giriş Yap",

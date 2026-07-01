@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { 
   Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2,
-  Radio, ChevronDown, ChevronRight, Heart
+  Radio, ChevronDown, ChevronRight, Heart, Settings
 } from "lucide-react";
 import { translations } from "@/lib/translations";
 
@@ -122,10 +122,13 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const lang = selectedLanguage || "en";
   const t = translations[lang]?.sidebar || translations["en"].sidebar;
 
+  const isAdmin = profile?.email && (profile.email === "admin@kubicatrading.es" || profile.email.startsWith("admin@kubicatrading"));
+
   const navItems = [
     { name: t.overview || "Resumen General", path: "/dashboard", icon: LayoutDashboard },
     { name: t.audioStation || "Estación de Audio", path: "/dashboard/audios", icon: Music },
-    { name: t.favorites || "Vídeos preferidos", path: "/dashboard/videos?favorite=true", icon: Heart }
+    { name: t.favorites || "Vídeos preferidos", path: "/dashboard/videos?favorite=true", icon: Heart },
+    ...(isAdmin ? [{ name: t.administration || "Administración", path: "/dashboard/admin", icon: Settings }] : [])
   ];
 
   if (authLoading) {

@@ -877,9 +877,24 @@ export default function VideosPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   // Concurrency lock for sync process
   const isSyncingRef = useRef(false);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setUserEmail(user.email || null);
+        }
+      } catch (err) {
+        console.error("Error fetching user session for admin button:", err);
+      }
+    };
+    fetchUser();
+  }, []);
 
   // Active playing states
   const [selectedVideo, setSelectedVideo] = useState<VideoDocument | null>(null);
@@ -2202,6 +2217,16 @@ export default function VideosPage() {
 
   const handleResetTestingVideos = async () => {
     if (isResetting) return;
+
+    // Safety check: if there are no videos, complete successfully and exit early
+    if (videos.length === 0) {
+      globallySyncedUrls.clear();
+      setActiveStudyVideo(null);
+      setSelectedVideo(null);
+      console.log("La videoteca ya está completamente vacía.");
+      return;
+    }
+
     const confirmReset = window.confirm(
       selectedLanguage === "es"
         ? "¿Estás seguro de que deseas vaciar por completo la videoteca para pruebas? Se eliminarán todos los vídeos de la base de datos."
@@ -3137,17 +3162,19 @@ export default function VideosPage() {
         </div>
 
         <div className="flex flex-col gap-2.5 self-start md:self-auto">
-          {/* RESET BUTTON */}
-          <button
-            onClick={handleResetTestingVideos}
-            disabled={isResetting || syncing}
-            className="px-5 py-2 rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-400 hover:text-red-300 text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Trash2 className={`w-4 h-4 ${isResetting ? "animate-spin text-red-400" : ""}`} />
-            {isResetting 
-              ? (selectedLanguage === "es" ? "Restableciendo..." : selectedLanguage === "de" ? "Zurücksetzen..." : selectedLanguage === "tr" ? "Sıfırlanıyor..." : "Resetting...") 
-              : (selectedLanguage === "es" ? "Restablecer Videoteca (Reset)" : selectedLanguage === "de" ? "Videothek zurücksetzen" : selectedLanguage === "tr" ? "Kütüphaneyi Sıfırla" : "Reset Video Library")}
-          </button>
+          {/* RESET BUTTON - Only visible to superuser */}
+          {userEmail && (userEmail === "admin@kubicatrading.es" || userEmail.startsWith("admin@kubicatrading")) && (
+            <button
+              onClick={handleResetTestingVideos}
+              disabled={isResetting || syncing}
+              className="px-5 py-2 rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-400 hover:text-red-300 text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Trash2 className={`w-4 h-4 ${isResetting ? "animate-spin text-red-400" : ""}`} />
+              {isResetting 
+                ? (selectedLanguage === "es" ? "Restableciendo..." : selectedLanguage === "de" ? "Zurücksetzen..." : selectedLanguage === "tr" ? "Sıfırlanıyor..." : "Resetting...") 
+                : (selectedLanguage === "es" ? "Restablecer Videoteca (Reset)" : selectedLanguage === "de" ? "Videothek zurücksetzen" : selectedLanguage === "tr" ? "Kütüphaneyi Sıfırla" : "Reset Video Library")}
+            </button>
+          )}
 
           {/* SYNC BUTTON */}
           <button
