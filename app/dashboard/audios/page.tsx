@@ -301,7 +301,7 @@ export default function AudiosPage() {
             </div>
 
             {/* WAVEFORM VISUALIZATION */}
-            <div className="w-full flex items-end justify-center gap-1.5 h-16 pt-4 px-4 relative z-10">
+            <div className="w-full flex items-end justify-center gap-1 sm:gap-1.5 h-16 pt-4 px-4 relative z-10">
               {selectedAudio?.metadata?.waveform ? (
                 selectedAudio.metadata.waveform.map((peak: number, idx: number) => {
                   // Determine peak active color state
@@ -309,7 +309,7 @@ export default function AudiosPage() {
                   return (
                     <div
                       key={idx}
-                      className={`w-1.5 rounded-full transition-all duration-300 ${isActive ? "bg-emerald-400" : "bg-zinc-800"}`}
+                      className={`w-1 sm:w-1.5 rounded-full transition-all duration-300 ${isActive ? "bg-emerald-400" : "bg-zinc-800"}`}
                       style={{ height: `${peak}%` }}
                     />
                   );

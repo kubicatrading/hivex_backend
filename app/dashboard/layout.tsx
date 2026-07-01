@@ -72,7 +72,10 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           
           data.forEach((doc: { metadata?: { channel_title?: string } }) => {
             if (doc.metadata && doc.metadata.channel_title) {
-              uniqueChannels.add(doc.metadata.channel_title);
+              const ch = doc.metadata.channel_title;
+              if (ch !== "HIVEX Demo") {
+                uniqueChannels.add(ch);
+              }
             }
           });
           
@@ -140,13 +143,37 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       <div className="absolute top-[20%] left-[-10%] w-[350px] h-[350px] bg-glow-purple rounded-full pointer-events-none opacity-40" />
 
       {/* MOBILE HEADER BAR */}
-      <header className="md:hidden flex items-center justify-between w-full h-16 px-6 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md fixed top-0 left-0 z-40">
+      <header className="md:hidden flex items-center justify-between w-full h-16 px-4 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md fixed top-0 left-0 z-40">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-violet-600 to-emerald-500 flex items-center justify-center font-bold text-xs text-white">
             H
           </div>
           <span className="font-bold text-sm tracking-widest text-white">HIVEX</span>
         </div>
+
+        {/* Mobile flag switcher */}
+        <div className="flex items-center gap-1 bg-zinc-900/40 border border-zinc-900 px-2 py-1 rounded-xl shadow-inner">
+          {[
+            { code: "en", flag: "🇺🇸", label: "English" },
+            { code: "de", flag: "🇩🇪", label: "Deutsch" },
+            { code: "tr", flag: "🇹🇷", label: "Türkçe" },
+            { code: "es", flag: "🇪🇸", label: "Español" }
+          ].map((lang) => (
+            <button
+              key={lang.code}
+              onClick={() => handleLanguageChange(lang.code)}
+              title={lang.label}
+              className={`text-xs p-1 rounded-md border transition-all duration-200 flex items-center justify-center ${
+                selectedLanguage === lang.code
+                  ? "bg-violet-600/10 border-violet-500/30 text-white scale-105 shadow-md shadow-violet-500/5"
+                  : "bg-transparent border-transparent text-zinc-400"
+              }`}
+            >
+              <span className="text-sm leading-none">{lang.flag}</span>
+            </button>
+          ))}
+        </div>
+
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="p-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
@@ -154,6 +181,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
       </header>
+
+      {/* SIDEBAR BACKDROP FOR MOBILE */}
+      {sidebarOpen && (
+        <div 
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-45 md:hidden transition-opacity duration-300"
+        />
+      )}
 
       {/* SIDEBAR NAVIGATION (Desktop & Mobile drawer) */}
       <aside className={`
@@ -301,13 +336,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       {/* MAIN VIEWPORT */}
       <main className="flex-grow flex flex-col min-w-0 relative z-10 pt-16 md:pt-0">
         {/* GLOBAL TOP NAVIGATION & LANGUAGE BAR */}
-        <header className="sticky top-16 md:top-0 z-30 w-full border-b border-zinc-900/60 bg-zinc-950/70 backdrop-blur-md px-6 md:px-10 py-3.5 flex items-center justify-between">
-          <div className="hidden md:flex items-center gap-3">
+        <header className="hidden md:flex sticky top-0 z-30 w-full border-b border-zinc-900/60 bg-zinc-950/70 backdrop-blur-md px-10 py-3.5 items-center justify-between">
+          <div className="flex items-center gap-3">
             <span className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">{t.controlConsole || "Consola de Control HIVEX"}</span>
             <span className="text-xs text-zinc-600">|</span>
             <span className="text-xs text-zinc-500 bg-zinc-900/40 px-2 py-0.5 rounded-md border border-zinc-800 font-mono">v2.1 Premium</span>
           </div>
-          <div className="md:hidden flex-grow" /> {/* Spacer on mobile */}
           
           {/* PREMIUM FLAG SWITCHER */}
           <div className="flex items-center gap-3 select-none">
@@ -341,7 +375,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="flex-grow p-6 md:p-10 max-w-7xl w-full mx-auto space-y-8">
+        <div className="flex-grow p-4 sm:p-6 md:p-10 max-w-7xl w-full mx-auto space-y-8">
           {children}
         </div>
       </main>

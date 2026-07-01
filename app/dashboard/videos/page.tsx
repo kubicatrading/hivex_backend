@@ -2910,50 +2910,68 @@ export default function VideosPage() {
                         <div className="relative z-10 flex flex-col gap-4 w-full">
                           <div className="flex flex-col md:flex-row items-center gap-4 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-2xl select-none">
                             
-                            {/* Play/Pause & Reset controls */}
-                            <div className="flex items-center gap-3 shrink-0">
-                              {isPlayingAudio && !isPausedAudio ? (
-                                <button
-                                  onClick={pauseAudio}
-                                  className="w-12 h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
-                                  title={t.pauseAudio || "Pausar Narración"}
-                                >
-                                  <Pause className="w-4.5 h-4.5 fill-current" />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={isPausedAudio ? resumeAudio : startAudioSummary}
-                                  className="w-12 h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
-                                  title={t.playTranslatedAudio || "Iniciar Narración"}
-                                >
-                                  <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
-                                </button>
-                              )}
+                            {/* Row 1: Controls, index markers, and percentage badge (mobile) */}
+                            <div className="w-full md:w-auto flex items-center justify-between md:justify-start gap-4 shrink-0">
+                              {/* Group controls and index markers together */}
+                              <div className="flex items-center gap-4">
+                                {/* Play/Pause & Reset controls */}
+                                <div className="flex items-center gap-3 shrink-0">
+                                  {isPlayingAudio && !isPausedAudio ? (
+                                    <button
+                                      onClick={pauseAudio}
+                                      className="w-12 h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
+                                      title={t.pauseAudio || "Pausar Narración"}
+                                    >
+                                      <Pause className="w-4.5 h-4.5 fill-current" />
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={isPausedAudio ? resumeAudio : startAudioSummary}
+                                      className="w-12 h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
+                                      title={t.playTranslatedAudio || "Iniciar Narración"}
+                                    >
+                                      <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
+                                    </button>
+                                  )}
 
-                              <button
-                                onClick={stopAudio}
-                                disabled={!isPlayingAudio && activeSentenceIndex === -1}
-                                className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all ${
-                                  isPlayingAudio || activeSentenceIndex >= 0
-                                    ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800"
-                                    : "bg-zinc-950/20 border-zinc-900/20 text-zinc-600 cursor-not-allowed"
-                                }`}
-                                title={selectedLanguage === "es" ? "Reiniciar Narración" : selectedLanguage === "de" ? "Erzählung zurücksetzen" : selectedLanguage === "tr" ? "Anlatımı Sıfırla" : "Reset Narration"}
-                              >
-                                <RotateCcw className="w-4 h-4" />
-                              </button>
+                                  <button
+                                    onClick={stopAudio}
+                                    disabled={!isPlayingAudio && activeSentenceIndex === -1}
+                                    className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all ${
+                                      isPlayingAudio || activeSentenceIndex >= 0
+                                        ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800"
+                                        : "bg-zinc-950/20 border-zinc-900/20 text-zinc-600 cursor-not-allowed"
+                                    }`}
+                                    title={selectedLanguage === "es" ? "Reiniciar Narración" : selectedLanguage === "de" ? "Erzählung zurücksetzen" : selectedLanguage === "tr" ? "Anlatımı Sıfırla" : "Reset Narration"}
+                                  >
+                                    <RotateCcw className="w-4 h-4" />
+                                  </button>
+                                </div>
+
+                                {/* Sentence indices / markers */}
+                                <div className="flex items-center gap-1 text-xs shrink-0 font-mono font-bold text-zinc-400">
+                                  <span className="text-violet-400">
+                                    {activeSentenceIndex >= 0 ? String(activeSentenceIndex + 1).padStart(2, '0') : "00"}
+                                  </span>
+                                  <span className="text-zinc-600">/</span>
+                                  <span>{String(totalSentences).padStart(2, '0')}</span>
+                                </div>
+                              </div>
+
+                              {/* Percentage Badge (Mobile only) */}
+                              <div className="md:hidden shrink-0">
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                  {(() => {
+                                    const percent = totalSentences > 0 
+                                      ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
+                                      : 0;
+                                    return `${percent}%`;
+                                  })()}
+                                </span>
+                              </div>
                             </div>
 
-                            {/* Sentence indices / markers */}
-                            <div className="flex items-center gap-1 text-xs shrink-0 font-mono font-bold text-zinc-400">
-                              <span className="text-violet-400">
-                                {activeSentenceIndex >= 0 ? String(activeSentenceIndex + 1).padStart(2, '0') : "00"}
-                              </span>
-                              <span className="text-zinc-600">/</span>
-                              <span>{String(totalSentences).padStart(2, '0')}</span>
-                            </div>
-
-                            {/* Range Slider Scrubber */}
+                            {/* Row 2: Range Slider Scrubber */}
                             <div className="flex-1 w-full flex items-center">
                               <input
                                 type="range"
@@ -2974,8 +2992,8 @@ export default function VideosPage() {
                               />
                             </div>
 
-                            {/* Percentage Badge */}
-                            <div className="shrink-0">
+                            {/* Percentage Badge (Desktop only) */}
+                            <div className="hidden md:block shrink-0">
                               <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
                                 {(() => {
                                   const percent = totalSentences > 0 

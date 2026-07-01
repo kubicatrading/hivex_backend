@@ -34,6 +34,12 @@ interface WindowWithGoogle extends Window {
   google?: GoogleGsi;
 }
 
+const USERNAME_MAPPINGS: Record<string, string> = {
+  jsaavedra: "semeviene@hotmail.es",
+  cyildirim: "cerendeinert@hotmail.de",
+  admin: "admin@kubicatrading.es",
+};
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,8 +100,16 @@ function LoginForm() {
           router.push("/dashboard");
         }, 1500);
       } else {
-        // If it's a simple username, automatically append @kubicatrading.es
-        const processedEmail = email.includes("@") ? email.trim() : `${email.trim()}@kubicatrading.es`;
+        const trimmedEmail = email.trim();
+        let processedEmail = trimmedEmail;
+        if (!trimmedEmail.includes("@")) {
+          const username = trimmedEmail.toLowerCase();
+          if (USERNAME_MAPPINGS[username]) {
+            processedEmail = USERNAME_MAPPINGS[username];
+          } else {
+            processedEmail = `${username}@kubicatrading.es`;
+          }
+        }
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email: processedEmail,
           password,
@@ -322,22 +336,15 @@ function LoginForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@email.com"
+              placeholder={lang === "es" ? "usuario o correo" : lang === "de" ? "Benutzername oder E-Mail" : lang === "tr" ? "kullanıcı adı veya e-posta" : "username or email"}
               className="w-full pl-11 pr-4 py-3 bg-zinc-900/60 border border-zinc-800 focus:border-violet-500 rounded-xl text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-all text-sm"
             />
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center">
-            <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{t.password || "Password"}</label>
-            {!isRegister && (
-              <a href="#" className="text-xs text-zinc-500 hover:text-zinc-400">
-                {lang === "es" ? "¿Olvidó su contraseña?" : lang === "de" ? "Passwort vergessen?" : lang === "tr" ? "Şifremi unuttum?" : "Forgot password?"}
-              </a>
-            )}
-          </div>
-          <div className="relative">
+        <div className="grid grid-cols-2 gap-y-1.5 items-center">
+          <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider col-start-1 row-start-1">{t.password || "Password"}</label>
+          <div className="relative col-span-2 row-start-2">
             <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
             <input
               type="password"
@@ -348,6 +355,11 @@ function LoginForm() {
               className="w-full pl-11 pr-4 py-3 bg-zinc-900/60 border border-zinc-800 focus:border-violet-500 rounded-xl text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20 transition-all text-sm"
             />
           </div>
+          {!isRegister && (
+            <a href="#" className="text-xs text-zinc-500 hover:text-zinc-400 col-start-2 row-start-1 justify-self-end">
+              {lang === "es" ? "¿Olvidó su contraseña?" : lang === "de" ? "Passwort vergessen?" : lang === "tr" ? "Şifremi unuttum?" : "Forgot password?"}
+            </a>
+          )}
         </div>
 
         <button

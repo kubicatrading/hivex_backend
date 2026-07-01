@@ -40,7 +40,7 @@ export const translations: TranslationDictionary = {
       haveAccount: "Already have an account?",
       getStarted: "Get Started Free",
       demoNotice: "Local Demo Mode enabled. Use any password or demo credentials.",
-      invalidCredentials: "Invalid credentials. Use cyildirim, jsaavedra, or demo@hivex.com (password: hivex1234).",
+      invalidCredentials: "Invalid credentials. Use cyildirim, jsaavedra, or demo@hivex.com (password: hivex1234#).",
     },
     overview: {
       title: "Overview",
@@ -180,7 +180,7 @@ export const translations: TranslationDictionary = {
       haveAccount: "¿Ya tienes una cuenta?",
       getStarted: "Comenzar Gratis",
       demoNotice: "Modo Demostración Local activo. Usa cualquier contraseña o credenciales de demo.",
-      invalidCredentials: "Credenciales de demostración inválidas. Usa cyildirim, jsaavedra, o demo@hivex.com (contraseña: hivex1234).",
+      invalidCredentials: "Credenciales de demostración inválidas. Usa cyildirim, jsaavedra, o demo@hivex.com (contraseña: hivex1234#).",
     },
     overview: {
       title: "Resumen General",
@@ -320,7 +320,7 @@ export const translations: TranslationDictionary = {
       haveAccount: "Bereits ein Konto vorhanden?",
       getStarted: "Kostenlos starten",
       demoNotice: "Lokaler Demo-Modus aktiv. Verwenden Sie ein beliebiges Passwort oder Demo-Anmeldedaten.",
-      invalidCredentials: "Ungültige Demo-Anmeldedaten. Verwenden Sie cyildirim, jsaavedra oder demo@hivex.com (Kennwort: hivex1234).",
+      invalidCredentials: "Ungültige Demo-Anmeldedaten. Verwenden Sie cyildirim, jsaavedra oder demo@hivex.com (Kennwort: hivex1234#).",
     },
     overview: {
       title: "Übersicht",
@@ -460,7 +460,7 @@ export const translations: TranslationDictionary = {
       haveAccount: "Zaten bir hesabınız var mı?",
       getStarted: "Ücretsiz Başlayın",
       demoNotice: "Yerel Demo Modu etkin. İstediğiniz şifreyi veya demo kimlik bilgilerini kullanın.",
-      invalidCredentials: "Geçersiz demo kimlik bilgileri. cyildirim, jsaavedra veya demo@hivex.com kullanın (şifre: hivex1234).",
+      invalidCredentials: "Geçersiz demo kimlik bilgileri. cyildirim, jsaavedra veya demo@hivex.com kullanın (şifre: hivex1234#).",
     },
     overview: {
       title: "Genel Bakış",

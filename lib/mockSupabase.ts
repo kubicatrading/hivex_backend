@@ -76,47 +76,7 @@ const SEED_AUDIOS = [
   }
 ];
 
-const SEED_VIDEOS = [
-  {
-    id: "video-1",
-    title: "SaaS Platform Introduction Walkthrough",
-    description: "Video tutorial demostrando las capacidades del dashboard y gestión de archivos.",
-    type: "video",
-    file_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-    metadata: {
-      duration: "0:15",
-      resolution: "1080p",
-      thumbnail: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80"
-    },
-    created_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: "video-2",
-    title: "Sleek Animation Showreel",
-    description: "Colección de animaciones fluidas y cinemáticas en ultra alta definición.",
-    type: "video",
-    file_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-    metadata: {
-      duration: "10:53",
-      resolution: "1080p",
-      thumbnail: "https://images.unsplash.com/photo-1634017839464-5c339ebe3cb4?auto=format&fit=crop&w=800&q=80"
-    },
-    created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  },
-  {
-    id: "video-3",
-    title: "Stock Market History Analysis",
-    description: "Análisis histórico de los ciclos económicos de Wall Street desde 1929.",
-    type: "video",
-    file_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-    metadata: {
-      duration: "9:56",
-      resolution: "1080p",
-      thumbnail: "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?auto=format&fit=crop&w=800&q=80"
-    },
-    created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() // 10 days old!
-  }
-];
+const SEED_VIDEOS: any[] = [];
 
 interface MockUser {
   id: string;
@@ -150,7 +110,13 @@ class MockSupabase {
   }
 
   private getUsers(): MockUser[] {
-    return this.getStorage<MockUser[]>("hivex_users", []);
+    const users = this.getStorage<MockUser[]>("hivex_users", []);
+    // Ensure we don't keep stale mock users with the old password "hivex1234"
+    const cleanedUsers = users.filter((u: MockUser) => u.password !== "hivex1234");
+    if (cleanedUsers.length !== users.length) {
+      this.setStorage("hivex_users", cleanedUsers);
+    }
+    return cleanedUsers;
   }
 
   private getSession() {
@@ -170,6 +136,13 @@ class MockSupabase {
       changed = true;
     }
 
+    // Definitively filter out any video documents starting with "video-" (the old seed demo videos)
+    const initialLength = globalDocs.length;
+    globalDocs = globalDocs.filter(d => !d.id.startsWith("video-"));
+    if (globalDocs.length !== initialLength) {
+      changed = true;
+    }
+
     // Migration / Fallback: scan all existing user-specific documents keys in localStorage and merge them
     if (typeof window !== "undefined") {
       const globalIds = new Set(globalDocs.map(d => d.id));
@@ -182,7 +155,7 @@ class MockSupabase {
               const parsed = JSON.parse(dataStr) as MockDocument[];
               if (Array.isArray(parsed)) {
                 for (const doc of parsed) {
-                  if (doc && doc.id && !globalIds.has(doc.id)) {
+                  if (doc && doc.id && !doc.id.startsWith("video-") && !globalIds.has(doc.id)) {
                     globalDocs.push(doc);
                     globalIds.add(doc.id);
                     changed = true;
@@ -241,20 +214,29 @@ class MockSupabase {
       );
 
       if (!matchedUser) {
-        if ((identifier === "cyildirim" || identifier === "cyildirim@hivex.com") && password === "hivex1234") {
+        if ((identifier === "cyildirim" || identifier === "cyildirim@hivex.com" || identifier === "cerendeinert@hotmail.de") && password === "hivex1234#") {
           const newUser: MockUser = {
             id: "cyildirim-user-id",
-            email: "cyildirim@hivex.com",
-            user_metadata: { full_name: "Ceyhun Yildirim" },
+            email: "cerendeinert@hotmail.de",
+            user_metadata: { full_name: "Ceren Yildirim" },
             created_at: new Date().toISOString()
           };
           this.setStorage("hivex_users", [...users, { ...newUser, password }]);
           matchedUser = newUser;
-        } else if ((identifier === "jsaavedra" || identifier === "jsaavedra@hivex.com") && password === "hivex1234") {
+        } else if ((identifier === "jsaavedra" || identifier === "jsaavedra@hivex.com" || identifier === "semeviene@hotmail.es") && password === "hivex1234#") {
           const newUser: MockUser = {
             id: "jsaavedra-user-id",
-            email: "jsaavedra@hivex.com",
-            user_metadata: { full_name: "Juan Saavedra" },
+            email: "semeviene@hotmail.es",
+            user_metadata: { full_name: "Juan Manuel Saavedra" },
+            created_at: new Date().toISOString()
+          };
+          this.setStorage("hivex_users", [...users, { ...newUser, password }]);
+          matchedUser = newUser;
+        } else if ((identifier === "admin" || identifier === "admin@kubicatrading.es") && password === "hivex1234#") {
+          const newUser: MockUser = {
+            id: "admin-user-id",
+            email: "admin@kubicatrading.es",
+            user_metadata: { full_name: "Admin" },
             created_at: new Date().toISOString()
           };
           this.setStorage("hivex_users", [...users, { ...newUser, password }]);
@@ -272,7 +254,7 @@ class MockSupabase {
       }
 
       if (!matchedUser) {
-        return { data: { user: null, session: null }, error: { message: "Credenciales de demostración inválidas. Usa cyildirim, jsaavedra, o demo@hivex.com (contraseña: hivex1234)." } };
+        return { data: { user: null, session: null }, error: { message: "Credenciales de demostración inválidas. Usa cyildirim, jsaavedra, admin o tu dirección de correo (contraseña: hivex1234#)." } };
       }
       
       const userWithoutPassword = { ...matchedUser };
