@@ -37,10 +37,9 @@ interface WindowWithGoogle extends Window {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const isRegisterParam = searchParams.get("register") === "true";
-
-  const [isRegister, setIsRegister] = useState(isRegisterParam);
-  const [prevIsRegisterParam, setPrevIsRegisterParam] = useState(isRegisterParam);
+  
+  // Registration is disabled for production internal-only usage
+  const isRegister = false;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -66,11 +65,6 @@ function LoginForm() {
 
   const lang = selectedLanguage || "en";
   const t = translations[lang]?.login || translations["en"].login;
-
-  if (isRegisterParam !== prevIsRegisterParam) {
-    setPrevIsRegisterParam(isRegisterParam);
-    setIsRegister(isRegisterParam);
-  }
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,8 +94,10 @@ function LoginForm() {
           router.push("/dashboard");
         }, 1500);
       } else {
+        // If it's a simple username, automatically append @kubicatrading.es
+        const processedEmail = email.includes("@") ? email.trim() : `${email.trim()}@kubicatrading.es`;
         const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
+          email: processedEmail,
           password,
         });
         if (signInError) throw signInError;
@@ -276,23 +272,10 @@ function LoginForm() {
       {/* Header Form */}
       <div className="text-center space-y-3 mb-8">
         <h2 className="text-3xl font-extrabold text-white tracking-tight">
-          {isRegister ? t.titleRegister : t.titleSignIn}
+          {t.titleSignIn}
         </h2>
-        <p className="text-sm text-zinc-400 font-light">
-          {isRegister 
-            ? t.haveAccount || "Already have an account? " 
-            : t.noAccount || "New to HIVEX? "}
-          <button
-            onClick={() => {
-              setIsRegister(!isRegister);
-              setError(null);
-              setSuccess(null);
-            }}
-            type="button"
-            className="text-violet-400 font-semibold hover:text-violet-300 transition-colors focus:outline-none"
-          >
-            {isRegister ? t.signIn : t.getStarted}
-          </button>
+        <p className="text-sm text-zinc-500 font-light">
+          {lang === "es" ? "Acceso restringido para personal autorizado" : "Restricted access for authorized personnel"}
         </p>
       </div>
 
