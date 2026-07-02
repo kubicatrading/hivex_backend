@@ -8,7 +8,7 @@ import { translations } from "@/lib/translations";
 import { 
   Video, Play, Trash2, UploadCloud, Monitor, Sparkles, AlertCircle, Eye, Clock, Volume2,
   ChevronDown, ChevronUp, BookOpen, Briefcase, FileText, Headphones, Pause, Square, RotateCcw,
-  Languages, Heart, TrendingUp
+  Languages, Heart, TrendingUp, AlertTriangle, Loader2, EyeOff
 } from "lucide-react";
 
 // Chart Snapper and Legends helper
@@ -1149,6 +1149,222 @@ function ShimmerSkeleton() {
         <div className="h-3 bg-zinc-800 rounded-lg w-4/5"></div>
       </div>
       <div className="h-4 bg-zinc-800 rounded-lg w-1/2"></div>
+    </div>
+  );
+}
+
+interface ParsedChart {
+  timestamp: string;
+  seconds: number;
+  title: string;
+  bullets: string[];
+  legend: string;
+}
+
+function parseChartsMarkdown(content: string): ParsedChart[] {
+  if (!content || content.includes("No se detectaron gráficos") || content.includes("No charts detected")) {
+    return [];
+  }
+
+  const sections = content.split(/####\s+/);
+  const parsed: ParsedChart[] = [];
+
+  for (let i = 1; i < sections.length; i++) {
+    const section = sections[i].trim();
+    if (!section) continue;
+
+    const lines = section.split("\n");
+    const headerLine = lines[0].trim();
+
+    const timestampRegex = /\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?/;
+    const match = headerLine.match(timestampRegex);
+    if (!match) continue;
+
+    const timestamp = match[1];
+    const parts = timestamp.split(":").map(Number);
+    let seconds = 0;
+    if (parts.length === 3) {
+      seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    } else if (parts.length === 2) {
+      seconds = parts[0] * 60 + parts[1];
+    }
+
+    const title = headerLine
+      .replace(timestampRegex, "")
+      .replace(/[\[\]\*#\-\:]/g, "")
+      .trim();
+
+    const bullets: string[] = [];
+    let legend = "";
+
+    for (let j = 1; j < lines.length; j++) {
+      const line = lines[j].trim();
+      if (!line) continue;
+
+      if (line.startsWith("-") || line.startsWith("*")) {
+        if (line.toLowerCase().includes("leyenda:") || line.toLowerCase().includes("legend:") || (line.startsWith("*") && line.endsWith("*") && !line.startsWith("-"))) {
+          legend = line.replace(/^\*+/, "").replace(/\*+$/, "").trim();
+        } else {
+          bullets.push(line.replace(/^[\-\*\s]+/, "").trim());
+        }
+      } else if (line.toLowerCase().includes("leyenda:") || line.toLowerCase().includes("legend:")) {
+        legend = line.replace(/[_\*]/g, "").trim();
+      } else if (line.startsWith("_") && line.endsWith("_")) {
+        legend = line.replace(/^_+/, "").replace(/_+$/, "").trim();
+      } else {
+        if (!legend && bullets.length > 0) {
+          bullets[bullets.length - 1] += " " + line;
+        }
+      }
+    }
+
+    parsed.push({
+      timestamp,
+      seconds,
+      title: title || `Visualización @ ${timestamp}`,
+      bullets,
+      legend
+    });
+  }
+
+  return parsed;
+}
+
+function YoutubeCorsWarning({ selectedLanguage }: { selectedLanguage: string }) {
+  const t = {
+    es: {
+      title: "Restricción de Captura de Fotogramas (CORS)",
+      desc: "Debido a las políticas de seguridad del navegador (CORS) y al sandbox de YouTube, no es posible capturar capturas de pantalla del reproductor iframe de YouTube en tiempo real.",
+      detail: "Sin embargo, puedes pulsar el botón 'Ir' para saltar directamente a este segundo exacto en el vídeo principal."
+    },
+    en: {
+      title: "Frame Capture Restriction (CORS)",
+      desc: "Due to browser security policies (CORS) and YouTube's iframe sandbox, capturing real-time screenshots from the YouTube player is not allowed.",
+      detail: "However, you can click the 'Play' button to seek directly to this exact second in the main video player."
+    },
+    de: {
+      title: "Einschränkung der Bilderfassung (CORS)",
+      desc: "Aufgrund von Browsersicherheitsrichtlinien (CORS) und der Sandbox von YouTube ist das Erfassen von Screenshots aus dem YouTube-Player in Echtzeit nicht möglich.",
+      detail: "Sie können jedoch auf die Schaltfläche 'Ansehen' klicken, um direkt zu dieser genauen Sekunde im Hauptvideo zu springen."
+    },
+    tr: {
+      title: "Ekran Görüntüsü Yakalama Kısıtlaması (CORS)",
+      desc: "Tarayıcı güvenlik politikaları (CORS) ve YouTube iframe sanal alanı nedeniyle, YouTube oynatıcısından gerçek zamanlı ekran görüntüsü yakalanamamaktadır.",
+      detail: "Ancak, ana video oynatıcıda doğrudan bu saniyeye atlamak için 'Git' düğmesine tıklayabilirsiniz."
+    }
+  }[selectedLanguage as "es" | "en" | "de" | "tr"] || {
+    title: "Frame Capture Restriction (CORS)",
+    desc: "Due to browser security policies (CORS) and YouTube's iframe sandbox, capturing real-time screenshots from the YouTube player is not allowed.",
+    detail: "However, you can click the 'Play' button to seek directly to this exact second in the main video player."
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center p-6 bg-rose-950/25 border border-rose-900/40 rounded-xl aspect-[16/9] w-full text-center">
+      <EyeOff className="w-8 h-8 text-rose-400 mb-3 animate-pulse" />
+      <h4 className="text-xs font-black text-rose-200 tracking-wide uppercase mb-1">{t.title}</h4>
+      <p className="text-[11px] text-rose-300/80 leading-relaxed max-w-[280px] mb-2">{t.desc}</p>
+      <p className="text-[10px] text-zinc-500 font-medium leading-relaxed max-w-[260px]">{t.detail}</p>
+    </div>
+  );
+}
+
+function VideoFrameSnapshot({ src, targetTime }: { src: string; targetTime: number }) {
+  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(false);
+    setSnapshotUrl(null);
+
+    const video = document.createElement("video");
+    video.src = src;
+    video.crossOrigin = "anonymous";
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.currentTime = targetTime;
+    videoRef.current = video;
+
+    const handleSeeked = () => {
+      if (!active) return;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+          if (active) {
+            setSnapshotUrl(dataUrl);
+            setLoading(false);
+          }
+        } else {
+          throw new Error("Could not get 2d context");
+        }
+      } catch (err) {
+        console.error("Error generating frame snapshot:", err);
+        if (active) {
+          setError(true);
+          setLoading(false);
+        }
+      }
+    };
+
+    const handleError = () => {
+      if (active) {
+        setError(true);
+        setLoading(false);
+      }
+    };
+
+    video.addEventListener("seeked", handleSeeked);
+    video.addEventListener("error", handleError);
+
+    video.load();
+
+    return () => {
+      active = false;
+      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("error", handleError);
+      video.src = "";
+    };
+  }, [src, targetTime]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 border border-zinc-900 rounded-xl aspect-[16/9] text-center w-full">
+        <Loader2 className="w-6 h-6 text-emerald-400 animate-spin mb-2" />
+        <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">Generando Snapshot...</span>
+      </div>
+    );
+  }
+
+  if (error || !snapshotUrl) {
+    return (
+      <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 border border-zinc-900 rounded-xl aspect-[16/9] text-center w-full">
+        <AlertTriangle className="w-6 h-6 text-zinc-600 mb-2" />
+        <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">Snapshot no disponible</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950">
+      <img
+        src={snapshotUrl}
+        alt={`Snapshot at ${targetTime}s`}
+        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-350 flex items-end p-3">
+        <span className="text-[9px] font-black tracking-wide text-white uppercase bg-zinc-900/95 px-2 py-1 rounded border border-zinc-850">
+          Timestamp: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
+        </span>
+      </div>
     </div>
   );
 }
@@ -3230,25 +3446,6 @@ export default function VideosPage() {
 
                 {/* C. GRÁFICOS Y VISUALIZACIONES DETECTADAS */}
                 {(transcribing || charts || translationLoading || !transcriptionErrorFinal) && (() => {
-                  let chartType: "yield-curve" | "dxy-gold" | "candlestick" = "candlestick";
-                  if (charts) {
-                    const t = charts.toLowerCase();
-                    if (t.includes("fed") || t.includes("rate") || t.includes("interest") || t.includes("bond") || t.includes("curva") || t.includes("tipos") || t.includes("selloff")) {
-                      chartType = "yield-curve";
-                    } else if (t.includes("petro") || t.includes("dollar") || t.includes("gold") || t.includes("dxy") || t.includes("oro") || t.includes("devaluation") || t.includes("real")) {
-                      chartType = "dxy-gold";
-                    }
-                  }
-
-                  let chartLegend = "";
-                  if (chartType === "yield-curve") {
-                    chartLegend = getChartMetadata("fed").legend;
-                  } else if (chartType === "dxy-gold") {
-                    chartLegend = getChartMetadata("gold").legend;
-                  } else {
-                    chartLegend = getChartMetadata("").legend;
-                  }
-
                   return (
                     <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
                       <button
@@ -3322,45 +3519,107 @@ export default function VideosPage() {
                                   </div>
                                 )}
 
-                                {charts ? (
-                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                                    {/* Col 1: SVG Chart with elegant frame and legend */}
-                                    <div className="rounded-xl border border-zinc-900 bg-zinc-950/50 p-4 space-y-4">
-                                      <div className="aspect-[4/3] rounded-lg overflow-hidden border border-zinc-900">
-                                        <FinancialChartSnapshot type={chartType} />
-                                      </div>
-                                      <p className="text-[11px] text-zinc-400 font-medium italic leading-relaxed text-justify px-1">
-                                        {chartLegend}
-                                      </p>
-                                    </div>
+                                {(() => {
+                                  const parsedCharts = parseChartsMarkdown(charts);
+                                  if (parsedCharts.length > 0) {
+                                    return (
+                                      <div className="space-y-8 select-text">
+                                        {parsedCharts.map((chart, idx) => (
+                                          <div 
+                                            key={idx} 
+                                            className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center p-6 rounded-2xl border border-zinc-900/60 bg-zinc-950/20 backdrop-blur-md hover:border-zinc-800/80 hover:bg-zinc-950/40 transition-all duration-300 relative group"
+                                          >
+                                            {/* Left Column: Visual Snapshot / YouTube Alert */}
+                                            <div className="w-full">
+                                              {isYt ? (
+                                                <YoutubeCorsWarning selectedLanguage={selectedLanguage} />
+                                              ) : (
+                                                <VideoFrameSnapshot 
+                                                  src={activeStudyVideo.file_url} 
+                                                  targetTime={chart.seconds} 
+                                                />
+                                              )}
+                                            </div>
 
-                                    {/* Col 2: Interactive Markdown Renderer */}
-                                    <div>
-                                      <MarkdownRenderer 
-                                        content={charts} 
-                                        modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
-                                        selectedLanguage={selectedLanguage}
-                                        onSeek={(seconds) => {
-                                          setPlayerTime(seconds);
-                                          if (studyVideoRef.current) {
-                                            studyVideoRef.current.currentTime = seconds;
-                                            studyVideoRef.current.play().catch(err => console.log("Autoplay local video prevented:", err));
-                                          }
-                                        }}
-                                      />
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="py-6 text-center text-xs text-zinc-500">
-                                    {selectedLanguage === "es"
-                                      ? "No se detectaron gráficos en este vídeo."
-                                      : selectedLanguage === "de"
-                                      ? "In diesem Video wurden keine Grafiken erkannt."
-                                      : selectedLanguage === "tr"
-                                      ? "Bu videoda herhangi bir grafik tespit edilmedi."
-                                      : "No charts detected in this video."}
-                                  </div>
-                                )}
+                                            {/* Right Column: Title, Play Button, Bullets, Legend */}
+                                            <div className="space-y-4">
+                                              <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                                    <span className="text-[10px] font-black tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">
+                                                      {chart.timestamp}
+                                                    </span>
+                                                    <span className="text-[9px] font-black tracking-widest text-zinc-500 bg-zinc-900/80 px-2 py-0.5 rounded-full uppercase">
+                                                      {selectedLanguage === "es" ? "Gráfico Detectado" : selectedLanguage === "de" ? "Grafik Erkannt" : selectedLanguage === "tr" ? "Grafik Tespit Edildi" : "Chart Detected"}
+                                                    </span>
+                                                  </div>
+                                                  <h4 className="text-sm font-extrabold text-white tracking-tight leading-snug">
+                                                    {chart.title}
+                                                  </h4>
+                                                </div>
+                                                <button
+                                                  onClick={() => {
+                                                    setPlayerTime(chart.seconds);
+                                                    if (studyVideoRef.current) {
+                                                      studyVideoRef.current.currentTime = chart.seconds;
+                                                      studyVideoRef.current.play().catch(err => console.log("Autoplay prevented:", err));
+                                                    }
+                                                  }}
+                                                  className="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 hover:text-emerald-300 transition-all shadow-md shrink-0 flex items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider px-3"
+                                                >
+                                                  <Play className="w-3.5 h-3.5 fill-current" />
+                                                  <span>{selectedLanguage === "es" ? "Ir" : selectedLanguage === "de" ? "Ansehen" : selectedLanguage === "tr" ? "Git" : "Play"}</span>
+                                                </button>
+                                              </div>
+
+                                              {chart.bullets.length > 0 && (
+                                                <ul className="space-y-2 text-xs text-zinc-400 leading-relaxed font-medium">
+                                                  {chart.bullets.map((bullet, bIdx) => {
+                                                    const parts = bullet.split(/\*\*([^*]+)\*\*/);
+                                                    return (
+                                                      <li key={bIdx} className="flex items-start gap-2">
+                                                        <span className="text-emerald-500 font-extrabold select-none mt-0.5">•</span>
+                                                        <span>
+                                                          {parts.map((part, pIdx) => 
+                                                            pIdx % 2 === 1 ? <strong key={pIdx} className="text-zinc-100 font-extrabold">{part}</strong> : part
+                                                          )}
+                                                        </span>
+                                                      </li>
+                                                    );
+                                                  })}
+                                                </ul>
+                                              )}
+
+                                              {chart.legend && (
+                                                <p className="text-[11px] text-zinc-500 font-medium italic border-t border-zinc-900/60 pt-3 leading-relaxed text-justify">
+                                                  <span className="text-[10px] not-italic font-black tracking-wider uppercase text-zinc-400 mr-1.5">
+                                                    {selectedLanguage === "es" ? "Conclusión Clave:" : selectedLanguage === "de" ? "Fazit:" : selectedLanguage === "tr" ? "Ana Sonuç:" : "Key Takeaway:"}
+                                                  </span>
+                                                  {chart.legend.replace(/^(leyenda|legend):\s*/i, "")}
+                                                </p>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    );
+                                  } else {
+                                    return (
+                                      <div className="py-12 text-center">
+                                        <EyeOff className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
+                                        <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">
+                                          {selectedLanguage === "es"
+                                            ? "No se detectaron gráficos en este vídeo."
+                                            : selectedLanguage === "de"
+                                            ? "In diesem Video wurden keine Grafiken erkannt."
+                                            : selectedLanguage === "tr"
+                                            ? "Bu videoda herhangi bir grafik tespit edilmedi."
+                                            : "No charts detected in this video."}
+                                        </p>
+                                      </div>
+                                    );
+                                  }
+                                })()}
                               </>
                             )}
                           </div>

@@ -62,6 +62,155 @@ export function extractYoutubeId(fileUrl: string, videoId?: string): string | nu
   return null;
 }
 
+function getRecommendedIntervalText(durationStr: string): string {
+  if (!durationStr) return "cada 3 o 4 minutos";
+  
+  const parts = durationStr.split(":").map(p => parseInt(p, 10));
+  if (parts.some(isNaN)) return "cada 3 o 4 minutos";
+  
+  let totalSeconds = 0;
+  if (parts.length === 3) {
+    totalSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  } else if (parts.length === 2) {
+    totalSeconds = parts[0] * 60 + parts[1];
+  } else if (parts.length === 1) {
+    totalSeconds = parts[0];
+  } else {
+    return "cada 3 o 4 minutos";
+  }
+
+  if (totalSeconds <= 600) {
+    return "cada 1 o 2 minutos";
+  } else if (totalSeconds <= 1800) {
+    return "cada 3 o 4 minutos";
+  } else if (totalSeconds <= 3600) {
+    return "cada 5 o 6 minutos";
+  } else if (totalSeconds <= 7200) {
+    return "cada 8 o 10 minutos";
+  } else {
+    return "cada 12 o 15 minutos";
+  }
+}
+
+function cleanGeminiJsonResponse(rawText: string): string {
+  let cleaned = rawText.trim();
+  
+  // 1. Remove markdown code block wraps (```json ... ``` or ``` ... ```)
+  if (cleaned.startsWith("```")) {
+    const match = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (match) {
+      cleaned = match[1].trim();
+    }
+  }
+  
+  // 2. Extract content between the first '{' and the last '}' inclusive.
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  }
+  
+  return cleaned;
+}
+
+function sanitizeJsonString(raw: string): string {
+  let inString = false;
+  let result = "";
+  let i = 0;
+  while (i < raw.length) {
+    const char = raw[i];
+    if (char === '"') {
+      let backslashes = 0;
+      let j = i - 1;
+      while (j >= 0 && raw[j] === '\\') {
+        backslashes++;
+        j--;
+      }
+      if (backslashes % 2 === 0) {
+        inString = !inString;
+      }
+      result += char;
+    } else if (inString) {
+      if (char === '\n') {
+        result += '\\n';
+      } else if (char === '\r') {
+        result += '\\r';
+      } else if (char === '\t') {
+        result += '\\t';
+      } else {
+        const code = char.charCodeAt(0);
+        if (code < 32) {
+          result += "\\u" + code.toString(16).padStart(4, "0");
+        } else {
+          result += char;
+        }
+      }
+    } else {
+      result += char;
+    }
+    i++;
+  }
+  return result;
+}
+
+function tryExtractAndRepairJson(raw: string): { transcription: string; analysis: string } | null {
+  try {
+    const clean = raw.trim();
+    
+    // 1. Find start of transcription value
+    const startRegex = /['"]?transcription['"]?\s*:\s*['"]/i;
+    const startMatch = startRegex.exec(clean);
+    if (!startMatch) return null;
+    const valStartPos = startMatch.index + startMatch[0].length;
+    
+    // 2. Find the boundary between transcription value and analysis value
+    const boundaryRegex = /['"]\s*,?\s*['"]?analysis['"]?\s*:\s*['"]/i;
+    const boundaryMatch = boundaryRegex.exec(clean);
+    if (!boundaryMatch) return null;
+    
+    const valEndPos = boundaryMatch.index;
+    const aValStartPos = boundaryMatch.index + boundaryMatch[0].length;
+    
+    // 3. Find the end of analysis value
+    const endRegex = /['"]\s*\}\s*$/;
+    const endMatch = endRegex.exec(clean);
+    let aValEndPos;
+    if (endMatch) {
+      aValEndPos = endMatch.index;
+    } else {
+      const lastQuote = clean.lastIndexOf('"');
+      const lastSingleQuote = clean.lastIndexOf("'");
+      const lastQuoteIndex = Math.max(lastQuote, lastSingleQuote);
+      if (lastQuoteIndex === -1 || lastQuoteIndex <= aValStartPos) return null;
+      aValEndPos = lastQuoteIndex;
+    }
+    
+    // Slice out the raw values
+    const rawTranscriptionValue = clean.slice(valStartPos, valEndPos);
+    const rawAnalysisValue = clean.slice(aValStartPos, aValEndPos);
+    
+    const normalizeUnescape = (str: string) => {
+      return str
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\\\/g, '\\');
+    };
+    
+    const normalizedTranscription = normalizeUnescape(rawTranscriptionValue);
+    const normalizedAnalysis = normalizeUnescape(rawAnalysisValue);
+    
+    return {
+      transcription: normalizedTranscription,
+      analysis: normalizedAnalysis
+    };
+  } catch (e) {
+    console.warn("tryExtractAndRepairJson error:", e);
+    return null;
+  }
+}
+
 export async function transcribeVideoCore(params: {
   videoId: string;
   fileUrl: string;
@@ -79,6 +228,7 @@ export async function transcribeVideoCore(params: {
 
   // Extract and preserve YouTube Case-Sensitive ID from fileUrl or videoId
   const actualYtId = extractYoutubeId(fileUrl, videoId);
+  const intervalText = getRecommendedIntervalText(duration);
   
   let promptText = "";
 
@@ -91,8 +241,18 @@ export async function transcribeVideoCore(params: {
       console.log(`Fetching actual YouTube transcript for ID: ${actualYtId}...`);
       const transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
       if (transcriptLines && transcriptLines.length > 0) {
-        rawTranscriptText = transcriptLines.map(line => line.text).join(" ");
-        console.log(`Successfully fetched ${transcriptLines.length} transcript lines from YouTube!`);
+        // Format each line with its starting timestamp [MM:SS] or [HH:MM:SS] so that Gemini gets accurate timing information
+        rawTranscriptText = transcriptLines.map(line => {
+          const totalSeconds = Math.floor((line.offset || 0) / 1000);
+          const hours = Math.floor(totalSeconds / 3600);
+          const m = Math.floor((totalSeconds % 3600) / 60);
+          const s = Math.floor(totalSeconds % 60);
+          const timestamp = hours > 0
+            ? `[${hours.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}]`
+            : `[${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}]`;
+          return `${timestamp} ${line.text}`;
+        }).join("\n");
+        console.log(`Successfully fetched ${transcriptLines.length} transcript lines from YouTube with injected timestamps!`);
       } else {
         throw new Error(`La descarga de subtítulos para el vídeo con ID ${actualYtId} retornó un conjunto vacío. Por favor, asegúrate de que el vídeo cuenta con subtítulos en YouTube.`);
       }
@@ -101,15 +261,15 @@ export async function transcribeVideoCore(params: {
     }
 
     // Build high-fidelity unified refinement and summary prompt
-    promptText = `Below is the raw, auto-generated transcript of a YouTube video titled "${title}".
+    promptText = `Below is the raw, auto-generated transcript of a YouTube video titled "${title}". Every spoken line is prefixed with its starting timestamp in brackets like [MM:SS] or [HH:MM:SS].
 Your task is to analyze it, correct automatic speech recognition errors, perform a high-fidelity verbatim refinement, content summary, and investment analysis.
 
 The "analysis" property MUST be written entirely in Spanish with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
 
 You MUST return a JSON object with exactly the following structure:
 {
-  "transcription": "A single continuous paragraph of refined, verbatim, word-for-word transcription of everything said in American English. Write in the first person, maintaining the exact voice and tone of the speaker (Andrei Jikh). Do not omit filler words, hesitations or repetitions. No carriage returns, no line breaks, no markdown formatting.",
-  "analysis": "### 📝 Detailed Content Summary\\n\\nDivide the summary into logical segments with chronological fourth-level headings like: #### [MM:SS] **Bold Heading of the Segment** (no bullet points or hyphens in headings). Under each heading, add bulleted sub-paragraphs with hyphens and bold text to highlight key concepts. Strictly objective, neutral, no financial analysis.\\n\\n---\\n\\n### 📊 Gráficos y Visualizaciones Detectadas\\n\\nIdentifica cronológicamente cualquier gráfico, tabla de datos, diagrama o recurso visual mostrado en pantalla o discutido. REGLA CRÍTICA DE DETECCIÓN: Si en el transcurso del vídeo se mencionan de forma seguida porcentajes, números o datos estadísticos precisos (por ejemplo, cifras de rendimiento, spreads, tasas de interés o proyecciones), asume con total seguridad que en ese momento se proyectó en pantalla una tarjeta visual o un gráfico estático de datos con poco movimiento (split de pantalla o frame de datos fijo por más de 5 segundos). Debes identificar estas partes obligatoriamente como gráficos o recursos de visualización de datos. Ejemplos de marcas reales que DEBES incluir: [02:09] (Rendimiento de Letras del Tesoro con porcentajes > 5%), [03:32] (Evolución de IPC/Inflación con números precisos), [04:02] (Diferencial de Tipos de Interés frente a HYSAs), [04:45] (Tasa de Crecimiento de Dividendos comparada con Inflación). En cambio, evita de forma absoluta generar gráficos en puntos puramente conversacionales sin cifras (por ejemplo, alrededor de [09:56] no hay gráficos de datos, es charla fluida general). Para cada gráfico detectado, añade una sección con un encabezado cronológico como: #### [MM:SS] **Título Descriptivo del Gráfico**. Bajo cada encabezado, escribe una lista con viñetas (-) describiendo las métricas clave, datos o ejes mostrados. Inmediatamente después de las viñetas, añade una única línea en cursiva: *Leyenda: [Explicación resumida de la conclusión clave del gráfico a pie de gráfico].* Si el vídeo no contiene gráficos o recursos visuales de datos, escribe exactamente: *No se detectaron gráficos en este vídeo.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+  "transcription": "A single continuous paragraph of refined, verbatim, word-for-word transcription of everything said in American English. Write in the first person, maintaining the exact voice and tone of the speaker (Andrei Jikh). Do not omit filler words, hesitations or repetitions. No carriage returns, no line breaks, no markdown formatting. Do NOT include any [MM:SS] or [HH:MM:SS] timestamps in this verbatim transcription; output pure conversational text.",
+  "analysis": "### 📝 Detailed Content Summary\\n\\nREGLA CRÍTICA DE COBERTURA TOTAL: El vídeo dura un total de ${duration}. Es obligatorio estructurar el resumen detallado de forma secuencial y uniforme cubriendo de principio a fin la totalidad del metraje, desde el inicio [00:00] hasta el minuto de finalización o cierre del vídeo (cerca de ${duration}), asegurándose de distribuir las marcas de tiempo de forma equilibrada a lo largo de toda la duración (por ejemplo, ${intervalText}) y de no resumir únicamente el inicio o la primera mitad. Divide el resumen en segmentos lógicos con encabezados cronológicos de cuarto nivel como: #### [MM:SS] o #### [HH:MM:SS] **Bold Heading of the Segment** (sin viñetas ni guiones en los encabezados). Bajo cada encabezado, añade subpárrafos con viñetas usando guiones (-) y texto en negrita para resaltar conceptos clave. Estrictamente objetivo, neutral, sin análisis financiero.\\n\\n---\\n\\n### 📊 Gráficos y Visualizaciones Detectadas\\n\\nIdentifica cronológicamente cualquier gráfico, tabla de datos, diagrama o recurso visual mostrado en pantalla o discutido. REGLA CRÍTICA DE DETECCIÓN: Si en el transcurso del vídeo se mencionan de forma seguida porcentajes, números o datos estadísticos precisos (por ejemplo, cifras de rendimiento, spreads, tasas de interés o proyecciones), asume con total seguridad que en ese momento se proyectó en pantalla una tarjeta visual o un gráfico estático de datos con poco movimiento (split de pantalla o frame de datos fijo por más de 5 segundos). Debes identificar estas partes obligatoriamente como gráficos o recursos de visualización de datos. Ejemplos de marcas reales que DEBES incluir: [02:09] (Rendimiento de Letras del Tesoro con porcentajes > 5%), [03:32] (Evolución de IPC/Inflación con números precisos), [04:02] (Diferencial de Tipos de Interés frente a HYSAs), [04:45] (Tasa de Crecimiento de Dividendos comparada con Inflación). En cambio, evita de forma absoluta generar gráficos en puntos puramente conversacionales sin cifras (por ejemplo, alrededor de [09:56] no hay gráficos de datos, es charla fluida general). Para cada gráfico detectado, añade una sección con un encabezado cronológico como: #### [MM:SS] o #### [HH:MM:SS] **Título Descriptivo del Gráfico**. Bajo cada encabezado, escribe una lista con viñetas (-) describiendo las métricas clave, datos o ejes mostrados. Inmediatamente después de las viñetas, añade una única línea en cursiva: *Leyenda: [Explicación resumida de la conclusión clave del gráfico a pie de gráfico].* Si el vídeo no contiene gráficos o recursos visuales de datos, escribe exactamente: *No se detectaron gráficos en este vídeo.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
 }
 
 Raw transcript text:
@@ -130,7 +290,8 @@ The "analysis" property MUST be written entirely in Spanish with a high-fidelity
 You MUST return a JSON object with exactly the following structure:
 {
   "transcription": "A single continuous paragraph of synthesized, high-fidelity verbatim transcription of everything said in American English. Write in the first person, maintaining the exact voice and tone of the speaker (Andrei Jikh). No carriage returns, no line breaks, no markdown formatting.",
-  "analysis": "### 📝 Detailed Content Summary\\n\\nDivide the summary into logical segments with chronological fourth-level headings like: #### [MM:SS] **Bold Heading of the Segment** (no bullet points or hyphens in headings). Under each heading, add bulleted sub-paragraphs with hyphens and bold text to highlight key concepts. Strictly objective, neutral, no financial analysis.\\n\\n---\\n\\n### 📊 Gráficos y Visualizaciones Detectadas\\n\\nIdentifica cronológicamente cualquier gráfico, tabla de datos, diagrama o recurso visual mostrado en pantalla o discutido. REGLA CRÍTICA DE DETECCIÓN: Si en el transcurso del vídeo se mencionan de forma seguida porcentajes, números o datos estadísticos precisos (por ejemplo, cifras de rendimiento, spreads, tasas de interés o proyecciones), asume con total seguridad que en ese momento se proyectó en pantalla una tarjeta visual o un gráfico estático de datos con poco movimiento (split de pantalla o frame de datos fijo por más de 5 segundos). Debes identificar estas partes obligatoriamente como gráficos o recursos de visualización de datos. Ejemplos de marcas reales que DEBES incluir: [02:09] (Rendimiento de Letras del Tesoro con porcentajes > 5%), [03:32] (Evolución de IPC/Inflación con números precisos), [04:02] (Diferencial de Tipos de Interés frente a HYSAs), [04:45] (Tasa de Crecimiento de Dividendos comparada con Inflación). En cambio, evita de forma absoluta generar gráficos en puntos puramente conversacionales sin cifras (por ejemplo, alrededor de [09:56] no hay gráficos de datos, es charla fluida general). Para cada gráfico detectado, añade una sección con un encabezado cronológico como: #### [MM:SS] **Título Descriptivo del Gráfico**. Bajo cada encabezado, escribe una lista con viñetas (-) describiendo las métricas clave, datos o ejes mostrados. Inmediatamente después de las viñetas, añade una única línea en cursiva: *Leyenda: [Explicación resumida de la conclusión clave del gráfico a pie de gráfico].* Si el vídeo no contiene gráficos o recursos visuales de datos, escribe exactamente: *No se detectaron gráficos en este vídeo.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+  "analysis": "### 📝 Detailed Content Summary\\n\\nREGLA CRÍTICA DE COBERTURA TOTAL: El vídeo dura un total de ${duration}. Es obligatorio estructurar el resumen detallado de forma secuencial y uniforme cubriendo de principio a fin la totalidad del metraje, desde el inicio [00:00] hasta el minuto de finalización o cierre del vídeo (cerca de ${duration}), asegurándose de distribuir las marcas de tiempo de forma equilibrada a lo largo de toda la duración (por ejemplo, ${intervalText}) y de no resumir únicamente el inicio o la primera mitad. Divide el resumen en segmentos lógicos con encabezados cronológicos de cuarto nivel como: #### [MM:SS] o #### [HH:MM:SS] **Bold Heading of the Segment** (sin viñetas ni guiones en los encabezados). Bajo cada encabezado, añade subpárrafos con viñetas usando guiones (-) y texto en negrita para resaltar conceptos clave. Estrictamente objetivo, neutral, sin análisis financiero.\\n\\n---\\n\\n### 📊 Gráficos y Visualizaciones Detectadas\\n\\nIdentifica cronológicamente cualquier gráfico, tabla de datos, diagrama o recurso visual mostrado en pantalla o discutido. REGLA CRÍTICA DE DETECCIÓN: Si en el transcurso del vídeo se mencionan de forma seguida porcentajes, números o datos estadísticos precisos (por ejemplo, cifras de rendimiento, spreads, tasas de interés o proyecciones), asume con total seguridad que en ese momento se proyectó en pantalla una tarjeta visual o un gráfico estático de datos con poco movimiento (split de pantalla o frame de datos fijo por más de 5 segundos). Debes identificar estas partes obligatoriamente como gráficos o recursos de visualización de datos. Ejemplos de marcas reales que DEBES incluir: [02:09] (Rendimiento de Letras del Tesoro con porcentajes > 5%), [03:32] (Evolución de IPC/Inflación con números precisos), [04:02] (Diferencial de Tipos de Interés frente a HYSAs), [04:45] (Tasa de Crecimiento de Dividendos comparada con Inflación). En cambio, evita de forma absoluta generar gráficos en puntos puramente conversacionales sin cifras (por ejemplo, alrededor de [09:56] no hay gráficos de datos, es charla fluida general). Para cada gráfico detectado, añade una sección con un encabezado cronológico como: #### [MM:SS] o #### [HH:MM:SS] **Título Descriptivo del Gráfico**. Bajo cada encabezado, escribe una lista con viñetas (-) describiendo las métricas clave, datos o ejes mostrados. Inmediatamente después de las viñetas, añade una única línea en cursiva: *Leyenda: [Explicación resumida de la conclusión clave del gráfico a pie de gráfico].* Si el vídeo no contiene gráficos o recursos visuales de datos, escribe exactamente: *No se detectaron gráficos en este vídeo.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+}
 }`;
   }
 
@@ -206,7 +367,8 @@ You MUST return a JSON object with exactly the following structure:
         ],
         generationConfig: {
           temperature: 0.2,
-          responseMimeType: "application/json"
+          responseMimeType: "application/json",
+          maxOutputTokens: 8192
         }
       };
 
@@ -232,7 +394,17 @@ You MUST return a JSON object with exactly the following structure:
 
         if (apiResponse && apiResponse.trim().length > 0) {
           try {
-            const parsed = JSON.parse(apiResponse.trim());
+            const cleanedResponse = cleanGeminiJsonResponse(apiResponse);
+            let parsed;
+            const repaired = tryExtractAndRepairJson(cleanedResponse);
+            if (repaired) {
+              console.log(`[Parser] Successfully extracted and repaired JSON fields structurally.`);
+              parsed = repaired;
+            } else {
+              console.log(`[Parser] Structural extraction failed, falling back to stateful sanitizer and JSON.parse...`);
+              const sanitized = sanitizeJsonString(cleanedResponse);
+              parsed = JSON.parse(sanitized);
+            }
             const transcriptionPart = (parsed.transcription || "")
               .replace(/[#*>\-`_~]/g, "")
               .replace(/[\r\n]+/g, " ")
@@ -246,10 +418,12 @@ You MUST return a JSON object with exactly the following structure:
               console.log(`Transcription: Successful unified refinement & summary using ${attempt.name}!`);
               break;
             } else {
-              errorDetails.push(`${attempt.name}: El objeto JSON devuelto no contiene los campos obligatorios.`);
+              errorDetails.push(`${attempt.name}: El objeto JSON devuelto no contiene los campos obligatorios "transcription" o "analysis".`);
             }
           } catch (jsonErr) {
-            errorDetails.push(`${attempt.name}: Error al decodificar la respuesta JSON.`);
+            const errorMsg = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+            console.error(`[Parser Error] Failed to parse JSON response from ${attempt.name}. Error: ${errorMsg}\nRaw text received (first 1000 chars):\n${apiResponse}`);
+            errorDetails.push(`${attempt.name}: Error al decodificar la respuesta JSON (${errorMsg}).`);
           }
         } else {
           errorDetails.push(`${attempt.name}: Respuesta vacía sin contenido.`);

@@ -73,21 +73,21 @@ async function handleSync() {
           title: "The Fed Just Made A Major Decision (Interest Rate Update)",
           publishedAt: new Date(now).toISOString(), // Published today
           description: "The Federal Reserve just held their meeting. Interest rates are higher for longer but we might see cuts soon. What does this mean for savings accounts, HYSA, dividend stocks, and the stock market index? We look at real estate and how to prepare.",
-          duration: "14:15"
+          duration: "26:00"
         },
         {
           videoId: "market-move-2026",
           title: "Why The Stock Market Is Preparing For A Big Move",
           publishedAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(), // Published today (2 hours ago)
           description: "Is a recession coming? Stock market warning signs are flashing. We cover CPI inflation numbers, geopolitics in trade routes, and why gold or bonds might be a great hedge right now. Let's look at my dividend growth investing portfolio strategy.",
-          duration: "11:50"
+          duration: "26:00"
         },
         {
           videoId: "btc-devaluation-2026",
           title: "Bitcoin vs. Global Currency Devaluation & Petro Dollar",
           publishedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(), // Published 2 days ago (EXCLUDED by today's cutoff!)
           description: "The Petro Dollar, inflation, and global money printing are devaluing cash. Here's why Bitcoin, crypto, and alternative commodities are rising in popularity. How to allocate assets in your long term portfolio with low-risk T-bills.",
-          duration: "13:05"
+          duration: "26:00"
         }
       ];
 
@@ -277,6 +277,26 @@ async function handleSync() {
 #### [09:15] **Inflation Concerns and Geopolitics**
 - **Métricas de inflación persistentes**: Los datos recientes del IPC indican que la inflación sigue siendo persistente debido a los elevados costes del sector servicios y a las limitaciones de la cadena de suministro.
 - **Presiones geopolíticas de oferta**: Las disputas comerciales en curso y las realineaciones geopolíticas están elevando estructuralmente los costes de fabricación globales.
+
+#### [11:15] **Estrategia Inmobiliaria y REITs**
+- **Presión en el sector inmobiliario**: Las tasas hipotecarias elevadas y persistentes han frenado la actividad de compra de viviendas particulares, beneficiando el mercado de alquiler.
+- **Enfoque selectivo en REITs**: Andrei sugiere considerar fideicomisos de inversión en bienes raíces (REITs) residenciales y comerciales especializados con balances sólidos y bajo endeudamiento.
+
+#### [13:00] **Conclusiones Estratégicas y Plan de Acción**
+- **Promedio de coste monetario (DCA)**: Se reitera el plan de acumular de manera constante y disciplinada en fondos indexados del mercado amplio y empresas DGI para mitigar las fluctuaciones a corto plazo.
+- **Mantener liquidez estratégica**: Conservar una porción de efectivo en cuentas HYSAs o letras del Tesoro de corta duración para aprovechar correcciones de valoración en renta variable.
+
+#### [17:40] **Análisis de Liquidez, Deuda de Tarjetas de Crédito y Ahorro Bancario**
+- **Aumento preocupante en deuda de tarjetas**: Los informes muestran un incremento acelerado en los saldos de tarjetas de crédito y tasas de morosidad, lo que indica tensiones en el presupuesto del consumidor promedio.
+- **Optimización de rendimientos líquidos**: Se destaca la importancia de rentabilizar todo el capital ocioso en cuentas de ahorro premium o fondos monetarios para mitigar la devaluación adquisitiva.
+
+#### [22:10] **Asignación Defensiva frente a Fluctuaciones Macroeconómicas**
+- **Diversificación resiliente**: Andrei detalla cómo construir una cartera equilibrada que pueda absorber impactos inflacionarios combinando renta variable de dividendos crecientes y renta fija a corto plazo.
+- **Enfoque en la paciencia financiera**: Se aconseja no intentar predecir el fondo del mercado, sino mantener compras periódicas constantes y consistentes en activos generadores de valor productivo.
+
+#### [25:30] **Cierre y Conclusión de la Sesión**
+- **Síntesis del plan de acción**: Resumen de los tres pilares estratégicos de la sesión: maximizar rendimiento de liquidez, acumular dividendos de calidad y mantener una exposición prudente libre de apalancamiento excesivo.
+- **Consejo final**: Andrei incentiva a la audiencia a mantenerse enfocados en el largo plazo y construir disciplina financiera diaria como el mayor motor de riqueza.
 
 ---
 
