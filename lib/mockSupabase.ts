@@ -301,9 +301,24 @@ class MockSupabase {
     return {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       select: (_query: string = "*") => {
-        return {
-          order: (column: string, { ascending = true } = {}) => {
-            const sorted = [...docs].sort((a: MockDocument, b: MockDocument) => {
+        const createBuilder = (currentDocs: MockDocument[]): any => {
+          const resultPromise = Promise.resolve({
+            data: table === "profiles"
+              ? { id: userId, email: session?.user?.email || "demo@hivex.com", full_name: session?.user?.user_metadata?.full_name || "Alex Hivex" }
+              : currentDocs,
+            error: null
+          });
+
+          const builder = Object.create(resultPromise);
+          builder.currentDocs = currentDocs;
+
+          builder.eq = function(column: string, value: any) {
+            const filtered = this.currentDocs.filter((d: MockDocument) => d[column] === value);
+            return createBuilder(filtered);
+          };
+
+          builder.order = function(column: string, { ascending = true } = {}) {
+            const sorted = [...this.currentDocs].sort((a: MockDocument, b: MockDocument) => {
               const valA = a[column];
               const valB = b[column];
               if (valA === undefined || valB === undefined || valA === null || valB === null) return 0;
@@ -311,22 +326,33 @@ class MockSupabase {
               if (valA > valB) return ascending ? 1 : -1;
               return 0;
             });
-            return Promise.resolve({ data: sorted, error: null });
-          },
-          eq: (column: string, value: string) => {
-            if (column === "type") {
-              const filtered = docs.filter((d: MockDocument) => d.type === value);
-              return Promise.resolve({ data: filtered, error: null });
-            }
-            return Promise.resolve({ data: docs, error: null });
-          },
-          single: () => {
-            return Promise.resolve({ data: table === "profiles" ? { id: userId, email: session?.user?.email || "demo@hivex.com", full_name: session?.user?.user_metadata?.full_name || "Alex Hivex" } : docs[0], error: null });
-          },
-          then: (resolve: (value: { data: unknown; error: null }) => void) => {
-            resolve({ data: table === "profiles" ? { id: userId, email: session?.user?.email || "demo@hivex.com", full_name: session?.user?.user_metadata?.full_name || "Alex Hivex" } : docs, error: null });
-          }
+            return createBuilder(sorted);
+          };
+
+          builder.single = function() {
+            const singlePromise = Promise.resolve({
+              data: table === "profiles"
+                ? { id: userId, email: session?.user?.email || "demo@hivex.com", full_name: session?.user?.user_metadata?.full_name || "Alex Hivex" }
+                : this.currentDocs[0] || null,
+              error: null
+            });
+            return singlePromise;
+          };
+
+          builder.then = function(onfulfilled?: any, onrejected?: any) {
+            return resultPromise.then(onfulfilled, onrejected);
+          };
+          builder.catch = function(onrejected?: any) {
+            return resultPromise.catch(onrejected);
+          };
+          builder.finally = function(onfinally?: any) {
+            return resultPromise.finally(onfinally);
+          };
+
+          return builder;
         };
+
+        return createBuilder([...docs]);
       },
 
       insert: (data: unknown) => {
@@ -343,13 +369,21 @@ class MockSupabase {
           return { data: newItems, error: null };
         };
 
-        const builder = {
-          select: () => {
-            return Promise.resolve(saveAndGetResult());
-          },
-          then: (resolve: (value: { data: unknown; error: null }) => void) => {
-            resolve(saveAndGetResult());
-          }
+        const resultPromise = Promise.resolve(saveAndGetResult());
+        const builder = Object.create(resultPromise);
+
+        builder.select = () => {
+          return resultPromise;
+        };
+
+        builder.then = function(onfulfilled?: any, onrejected?: any) {
+          return resultPromise.then(onfulfilled, onrejected);
+        };
+        builder.catch = function(onrejected?: any) {
+          return resultPromise.catch(onrejected);
+        };
+        builder.finally = function(onfinally?: any) {
+          return resultPromise.finally(onfinally);
         };
 
         return builder;
@@ -358,8 +392,37 @@ class MockSupabase {
       delete: () => {
         return {
           eq: async (column: string, value: string) => {
-            const updatedDocs = docs.filter((d: MockDocument) => d[column] !== value);
+            // Guarantee absolute persistence of knowledge base items in offline/mock mode
+            const updatedDocs = docs.filter((d: MockDocument) => {
+              const matchesFilter = d[column] === value;
+              const isPersistentKnowledge = d.type && d.type.startsWith("knowledge_");
+              return !matchesFilter || isPersistentKnowledge;
+            });
             this.setDocuments(userId, updatedDocs);
+
+            if (typeof window !== "undefined") {
+              for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith("hivex_docs_") && key !== "hivex_docs_global") {
+                  try {
+                    const dataStr = localStorage.getItem(key);
+                    if (dataStr) {
+                      const parsed = JSON.parse(dataStr) as MockDocument[];
+                      if (Array.isArray(parsed)) {
+                        const filtered = parsed.filter((d: MockDocument) => {
+                          const matchesFilter = d[column] === value;
+                          const isPersistentKnowledge = d.type && d.type.startsWith("knowledge_");
+                          return !matchesFilter || isPersistentKnowledge;
+                        });
+                        localStorage.setItem(key, JSON.stringify(filtered));
+                      }
+                    }
+                  } catch (e) {
+                    console.warn("[MockSupabase Delete] Error filtering user key:", key, e);
+                  }
+                }
+              }
+            }
             return { data: null, error: null };
           }
         };

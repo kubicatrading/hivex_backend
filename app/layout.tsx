@@ -1,14 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Syncopate, Cormorant_Garamond } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const syncopate = Syncopate({
+  variable: "--font-logo",
+  weight: "700",
+  subsets: ["latin"],
+});
+
+const cormorantGaramond = Cormorant_Garamond({
+  variable: "--font-serif",
+  weight: ["300", "400", "600"],
+  style: ["normal", "italic"],
   subsets: ["latin"],
 });
 
@@ -24,9 +32,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${geistSans.variable} ${geistMono.variable} min-h-full bg-zinc-950 text-zinc-100 flex flex-col`}>
+      <body className={`${inter.variable} ${syncopate.variable} ${cormorantGaramond.variable} min-h-full bg-background text-foreground flex flex-col`}>
         {children}
       </body>
     </html>
   );
 }
+

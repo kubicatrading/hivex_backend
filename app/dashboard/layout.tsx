@@ -9,6 +9,8 @@ import {
   Radio, ChevronDown, ChevronRight, Heart, Settings
 } from "lucide-react";
 import { translations } from "@/lib/translations";
+import { Logo } from "@/components/Logo";
+
 
 interface UserProfile {
   email?: string;
@@ -147,12 +149,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
       {/* MOBILE HEADER BAR */}
       <header className="md:hidden flex items-center justify-between w-full h-16 px-4 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md fixed top-0 left-0 z-40">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-violet-600 to-emerald-500 flex items-center justify-center font-bold text-xs text-white">
-            H
-          </div>
-          <span className="font-bold text-sm tracking-widest text-white">HIVEX</span>
-        </div>
+        <Logo href="/dashboard" className="scale-75 origin-left" />
+
 
         {/* Mobile flag switcher */}
         <div className="flex items-center gap-1 bg-zinc-900/40 border border-zinc-900 px-2 py-1 rounded-xl shadow-inner">
@@ -201,14 +199,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         <div className="space-y-8">
           {/* Logo Brand */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600 to-emerald-500 flex items-center justify-center font-bold text-lg text-white shadow-lg shadow-violet-500/10">
-                H
-              </div>
-              <span className="font-extrabold text-xl tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                HIVEX
-              </span>
-            </div>
+            <Logo href="/dashboard" className="scale-90 origin-left" />
+
             {/* Mobile close button */}
             <button
               onClick={() => setSidebarOpen(false)}
@@ -245,7 +237,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                     className={`
                       w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 group
                       ${isActive 
-                        ? "bg-violet-600/10 border border-violet-500/25 text-violet-400 shadow-md shadow-violet-500/5" 
+                        ? "bg-zinc-900/50 border-l-2 border-l-violet-400 text-zinc-100 shadow-sm rounded-r-xl rounded-l-none pl-3.5" 
                         : "text-zinc-400 border border-transparent hover:text-zinc-200 hover:bg-zinc-900/40"
                       }
                     `}

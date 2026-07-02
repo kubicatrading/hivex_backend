@@ -1,5 +1,5 @@
 "use client";
-/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/set-state-in-effect */
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
@@ -8,7 +8,7 @@ import { translations } from "@/lib/translations";
 import { 
   Video, Play, Trash2, UploadCloud, Monitor, Sparkles, AlertCircle, Eye, Clock, Volume2,
   ChevronDown, ChevronUp, BookOpen, Briefcase, FileText, Headphones, Pause, Square, RotateCcw,
-  Languages, Heart
+  Languages, Heart, TrendingUp
 } from "lucide-react";
 
 // Chart Snapper and Legends helper
@@ -358,6 +358,80 @@ function parseInlineStyles(text: string): React.ReactNode {
   }) as React.ReactNode;
 }
 
+// Robust, self-healing parser to handle standard, loose, or translated chart tags
+function parseChartTag(rawContent: string): { type: "yield-curve" | "dxy-gold" | "candlestick"; caption: string } | null {
+  let clean = rawContent.trim();
+
+  // Helper to normalize the chart type to our 3 canonical types
+  const normalize = (typeStr: string): "yield-curve" | "dxy-gold" | "candlestick" | null => {
+    const s = typeStr.trim().toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // remove accents
+    if (s.includes("yield") || s.includes("rendimiento") || s.includes("rendite") || s.includes("verim") || s.includes("curva") || s.includes("bono") || s.includes("interes") || s.includes("rate") || s.includes("rendicion")) {
+      return "yield-curve";
+    }
+    if (s.includes("dxy") || s.includes("gold") || s.includes("oro") || s.includes("altin") || s.includes("dollar") || s.includes("dolar") || s.includes("dxy-gold")) {
+      return "dxy-gold";
+    }
+    if (s.includes("candle") || s.includes("vela") || s.includes("kerzen") || s.includes("mum") || s.includes("candlestick") || s.includes("grafico")) {
+      return "candlestick";
+    }
+    // Direct match fallback
+    if (s === "yield-curve" || s === "dxy-gold" || s === "candlestick") {
+      return s as "yield-curve" | "dxy-gold" | "candlestick";
+    }
+    return null;
+  };
+
+  // 1. Direct pipe-separated format support: type | caption
+  if (clean.includes("|")) {
+    const parts = clean.split("|");
+    const typeStr = parts[0].trim().replace(/['"']/g, "").toLowerCase();
+    const caption = parts.slice(1).join("|").trim();
+    const normalizedType = normalize(typeStr);
+    if (normalizedType) {
+      return {
+        type: normalizedType,
+        caption
+      };
+    }
+  }
+
+  // 2. Standard JSON format fallback
+  try {
+    clean = clean.replace(/\\"/g, '"');
+    clean = clean.replace(/\\\\"/g, '"');
+    const data = JSON.parse(clean);
+    if (data && data.type) {
+      const normalizedType = normalize(data.type);
+      if (normalizedType) {
+        return {
+          type: normalizedType,
+          caption: data.caption || ""
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Failed standard JSON parse of chart content, trying loose parsing:", rawContent, e);
+    try {
+      const typeMatch = rawContent.match(/["']?type["']?\s*:\s*["']([^"']+)["']/);
+      const captionMatch = rawContent.match(/["']?caption["']?\s*:\s*["']([^"']+)["']/);
+      if (typeMatch && typeMatch[1]) {
+        const normalizedType = normalize(typeMatch[1]);
+        if (normalizedType) {
+          return {
+            type: normalizedType,
+            caption: captionMatch ? captionMatch[1] : ""
+          };
+        }
+      }
+    } catch (looseErr) {
+      console.error("Loose parsing also failed:", looseErr);
+    }
+  }
+  return null;
+}
+
+
 // Custom helper to extract seconds from timestamps in format [MM:SS] or [HH:MM:SS]
 function extractSeconds(text: string): number | null {
   const match = text.match(/\[(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\]/);
@@ -397,33 +471,222 @@ function getEmbedUrl(url: string, seconds: number | null): string {
 }
 
 // Safely splits raw database transcription into 3 key segments (verbatim, summary, report)
+// Safely splits raw database transcription into 3 key segments (verbatim, summary, report)
 function splitTranscription(text: string) {
-  if (!text) return { transcription: "", summary: "", report: "" };
+  if (!text) return { transcription: "", summary: "", charts: "", report: "" };
   
-  const parts = text.split(/\n\s*---\s*\n/);
-  let transcription = parts[0] || "";
-  let summary = parts[1] || "";
-  let report = parts[2] || "";
+  // Step 1: Attempt standard robust split using various markdown horizontal line syntaxes
+  // Matches: ---, ***, ===, ___, - - - with optional spaces or trailing text (like "--- Parte 2 ---")
+  const regexSplit = /\n\s*(?:---|===|\*\*\*|___|- - -)[^\n]*\n/;
+  const parts = text.split(regexSplit);
   
-  if (parts.length === 1) {
-    transcription = text;
-    summary = "";
-    report = "";
-  } else if (parts.length === 2) {
+  let transcription = "";
+  let summary = "";
+  let charts = "";
+  let report = "";
+  
+  if (parts.length >= 4) {
     transcription = parts[0] || "";
     summary = parts[1] || "";
-    report = "";
+    charts = parts[2] || "";
+    report = parts.slice(3).join("\n---\n") || "";
+  } else if (parts.length === 3) {
+    transcription = parts[0] || "";
+    summary = parts[1] || "";
+    charts = "";
+    report = parts[2] || "";
+  } else {
+    // Step 2: Heuristic Heading-based Fallback Slicing
+    const lines = text.split("\n");
+    let summaryIdx = -1;
+    let chartsIdx = -1;
+    let reportIdx = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // strip accents
+      
+      if (trimmed.startsWith("#") || trimmed.startsWith("- #") || trimmed.startsWith("**")) {
+        const headerText = trimmed.replace(/^[\s\-\*#]*/, "").replace(/^\*\*|\*\*$/g, "").trim();
+        
+        if (summaryIdx === -1) {
+          if (headerText.includes("resumen") || headerText.includes("summary") || headerText.includes("zusammenfassung") || headerText.includes("ozet") || headerText.includes("part 2") || headerText.includes("parte 2")) {
+            summaryIdx = i;
+          }
+        } else if (chartsIdx === -1) {
+          if (headerText.includes("grafico") || headerText.includes("chart") || headerText.includes("diagrama") || headerText.includes("visualizac") || headerText.includes("part 3") || headerText.includes("parte 3")) {
+            const isReport = headerText.includes("informe") || headerText.includes("report") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("invers");
+            if (isReport && !headerText.includes("grafic") && !headerText.includes("chart") && !headerText.includes("visualizac")) {
+              reportIdx = i;
+            } else {
+              chartsIdx = i;
+            }
+          }
+        } else if (reportIdx === -1) {
+          if (headerText.includes("informe") || headerText.includes("report") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("invers") || headerText.includes("part 4") || headerText.includes("parte 4")) {
+            reportIdx = i;
+          }
+        }
+      }
+    }
+
+    if (summaryIdx !== -1 && chartsIdx !== -1 && reportIdx !== -1 && reportIdx > chartsIdx && chartsIdx > summaryIdx) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx, chartsIdx).join("\n");
+      charts = lines.slice(chartsIdx, reportIdx).join("\n");
+      report = lines.slice(reportIdx).join("\n");
+    } else if (summaryIdx !== -1 && reportIdx !== -1 && reportIdx > summaryIdx) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx, reportIdx).join("\n");
+      charts = "";
+      report = lines.slice(reportIdx).join("\n");
+    } else if (summaryIdx !== -1 && chartsIdx !== -1 && chartsIdx > summaryIdx) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx, chartsIdx).join("\n");
+      charts = lines.slice(chartsIdx).join("\n");
+      report = "";
+    } else if (summaryIdx !== -1) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx).join("\n");
+      charts = "";
+      report = "";
+    } else {
+      transcription = parts[0] || "";
+      summary = parts[1] || "";
+      charts = parts[2] || "";
+      report = parts.slice(3).join("\n---\n") || "";
+      
+      if (parts.length === 1) {
+        transcription = text;
+        summary = "";
+        charts = "";
+        report = "";
+      } else if (parts.length === 2) {
+        transcription = parts[0] || "";
+        summary = parts[1] || "";
+        charts = "";
+        report = "";
+      } else if (parts.length === 3) {
+        transcription = parts[0] || "";
+        summary = parts[1] || "";
+        charts = "";
+        report = parts[2] || "";
+      }
+    }
   }
   
   // Clean redundant title headers at the beginning of each part if present
-  const cleanSummary = summary.replace(/^#*\s*(?:Resumen Detallado|Resumen Detallado del Contenido|Resumen|Detailed Summary)[^\n]*\n+/i, "").trim();
-  const cleanReport = report.replace(/^#*\s*(?:Informe de Inversión|Informe de Análisis|Informe|Investment Report)[^\n]*\n+/i, "").trim();
+  const cleanSummary = summary.replace(/^#*\s*(?:Resumen Detallado|Resumen Detallado del Contenido|Resumen|Detailed Summary|Zusammenfassung|Ozet|Part 2|Parte 2)[^\n]*\n+/i, "").trim();
+  const cleanCharts = charts.replace(/^#*\s*(?:Graficos y Visualizaciones Detectadas|Graficos y Visualizaciones|Graficos|Charts and Visualizations|Charts|Visualizaciones|Part 3|Parte 3)[^\n]*\n+/i, "").trim();
+  const cleanReport = report.replace(/^#*\s*(?:Informe de Inversión|Informe de Análisis|Informe|Investment Report|Investitionsbericht|Rapor|Analysis|Part 4|Parte 4|Part 3|Parte 3)[^\n]*\n+/i, "").trim();
   
   return {
     transcription: transcription.trim(),
     summary: cleanSummary,
+    charts: cleanCharts,
     report: cleanReport
   };
+}
+
+// Persiste por separado la transcripción literal, el resumen estructurado, los gráficos y el análisis de inversión
+async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: string; metadata?: any }, transcriptionText: string) {
+  try {
+    const splitResult = splitTranscription(transcriptionText);
+    const channelTitle = videoDoc.metadata?.channel_title || "Andrei Jikh";
+    const dateStr = new Date().toISOString();
+    const fileUrl = videoDoc.file_url || "";
+
+    // 1. Literal transcription
+    const transcriptionDoc = {
+      title: `[Transcripción] - ${videoDoc.title}`,
+      description: `Transcripción completa literal de ${videoDoc.title}`,
+      type: "knowledge_transcription",
+      file_url: fileUrl,
+      metadata: {
+        fecha_transcripcion: dateStr,
+        canal_origen: channelTitle,
+        nombre_video: videoDoc.title,
+        texto_transcripcion: splitResult.transcription
+      }
+    };
+
+    // 2. Content summary
+    const summaryDoc = {
+      title: `[Resumen] - ${videoDoc.title}`,
+      description: `Resumen de contenido completo de ${videoDoc.title}`,
+      type: "knowledge_summary",
+      file_url: fileUrl,
+      metadata: {
+        fecha_resumen: dateStr,
+        canal_origen: channelTitle,
+        nombre_video: videoDoc.title,
+        resumen_markdown: splitResult.summary
+      }
+    };
+
+    // 3. Charts and Visualizations
+    const chartsDoc = {
+      title: `[Gráficos] - ${videoDoc.title}`,
+      description: `Gráficos y visualizaciones detectadas de ${videoDoc.title}`,
+      type: "knowledge_charts",
+      file_url: fileUrl,
+      metadata: {
+        fecha_graficos: dateStr,
+        canal_origen: channelTitle,
+        nombre_video: videoDoc.title,
+        graficos_markdown: splitResult.charts
+      }
+    };
+
+    // 4. Investment analysis report
+    const analysisDoc = {
+      title: `[Análisis] - ${videoDoc.title}`,
+      description: `Informe de análisis financiero de ${videoDoc.title}`,
+      type: "knowledge_analysis",
+      file_url: fileUrl,
+      metadata: {
+        fecha_informe: dateStr,
+        canal_origen: channelTitle,
+        nombre_video: videoDoc.title,
+        informe_completo: splitResult.report
+      }
+    };
+
+    const docsToInsert = [
+      { doc: transcriptionDoc, type: "knowledge_transcription" },
+      { doc: summaryDoc, type: "knowledge_summary" },
+      { doc: chartsDoc, type: "knowledge_charts" },
+      { doc: analysisDoc, type: "knowledge_analysis" }
+    ];
+
+    for (const item of docsToInsert) {
+      // Query to avoid duplicate rows for the same file_url and type
+      const { data: existing, error: checkErr } = await supabase
+        .from("documents")
+        .select("id")
+        .eq("type", item.type)
+        .eq("file_url", fileUrl);
+
+      if (checkErr) {
+        console.warn(`[Base de Conocimiento] Error al verificar existencia de ${item.type}:`, checkErr);
+      }
+
+      if (!existing || existing.length === 0) {
+        const { error: insertErr } = await supabase
+          .from("documents")
+          .insert(item.doc as any);
+        if (insertErr) {
+          console.warn(`[Base de Conocimiento] Error al insertar ${item.type} para ${videoDoc.title}:`, insertErr);
+        } else {
+          console.log(`[Base de Conocimiento] Persistido con éxito ${item.type} para: ${videoDoc.title}`);
+        }
+      } else {
+        console.log(`[Base de Conocimiento] Documento de tipo ${item.type} ya existe para: ${videoDoc.title}. No se duplica.`);
+      }
+    }
+  } catch (err) {
+    console.error("[Base de Conocimiento] Error al procesar guardado persistente:", err);
+  }
 }
 
 // Extrae de forma estable la clave de caché global basada en el ID de YouTube o URL del vídeo
@@ -466,9 +729,13 @@ function getGlobalCacheKey(videoDoc: { id: string; file_url?: string }): string 
 function MarkdownRenderer({
   content,
   onSeek,
+  modelUsed,
+  selectedLanguage = "es",
 }: {
   content: string;
   onSeek?: (seconds: number) => void;
+  modelUsed?: string;
+  selectedLanguage?: string;
 }) {
   if (!content) return null;
 
@@ -562,6 +829,18 @@ function MarkdownRenderer({
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
     let trimmed = line.trim();
+
+    // Support nested or bulleted charts e.g. "- [CHART: ...]" -> "[CHART: ...]"
+    if (/^[\s\-\*]*\[CHART:\s*/i.test(trimmed)) {
+      trimmed = trimmed.replace(/^[\s\-\*]*/, "").trim();
+    }
+
+    // Check if line is a Chart block (ignore trailing dots or extra trailing characters after the closing bracket)
+    const chartMatch = trimmed.match(/^\[CHART:\s*([^\]]+)\]/i);
+    if (chartMatch) {
+      // Completely discard/ignore simulated charts as requested by the user
+      continue;
+    }
 
     // Support nested or bulleted headers e.g. "- #### [MM:SS] Title" -> "#### [MM:SS] Title"
     if (/^[\s\-\*]*####\s+/.test(line)) {
@@ -832,18 +1111,20 @@ const globallySyncedUrls = new Set<string>();
 // Text-to-Speech (TTS) formatting and cleaning helpers
 function cleanSummaryForSpeech(summaryStr: string): string {
   if (!summaryStr) return "";
-  // 1. Remove timestamps in brackets like [MM:SS] or [H:MM:SS]
-  let text = summaryStr.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "");
-  // 2. Remove markdown title indicators (###, ##, #)
+  // 1. Completely strip any chart blocks like [CHART: ...] so the TTS ignores them
+  let text = summaryStr.replace(/\[CHART:\s*[\s\S]*?\]/gi, "");
+  // 2. Remove timestamps in brackets like [MM:SS] or [H:MM:SS]
+  text = text.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "");
+  // 3. Remove markdown title indicators (###, ##, #)
   text = text.replace(/#+\s+/g, "");
-  // 3. Remove inline styles like **, *, _, `
+  // 4. Remove inline styles like **, *, _, `
   text = text.replace(/[\*\_`]/g, "");
-  // 4. Remove list markers like "-", "*", "1.", "2."
+  // 5. Remove list markers like "-", "*", "1.", "2."
   text = text.replace(/^\s*[\-\*]\s+/gm, "");
   text = text.replace(/^\s*\d+\.\s+/gm, "");
-  // 5. Remove blockquote markers ">"
+  // 6. Remove blockquote markers ">"
   text = text.replace(/^\s*>\s*/gm, "");
-  // 6. Normalize double line breaks, multiple spaces, and trim
+  // 7. Normalize double line breaks, multiple spaces, and trim
   text = text.replace(/\s+/g, " ").trim();
   return text;
 }
@@ -902,6 +1183,7 @@ export default function VideosPage() {
   const [playerTime, setPlayerTime] = useState<number | null>(null);
   const [transcriptionExpanded, setTranscriptionExpanded] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false); // Collapsed by default for a cleaner study desk
+  const [chartsExpanded, setChartsExpanded] = useState(false);
   const [reportExpanded, setReportExpanded] = useState(false);
   const studyVideoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -911,6 +1193,8 @@ export default function VideosPage() {
   const [playbackRate, setPlaybackRate] = useState(1.0); // Default to 1.0, options: 1.0, 1.5, 2.0
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number>(-1);
   const [totalSentences, setTotalSentences] = useState<number>(0);
+  const [sentenceChunks, setSentenceChunks] = useState<string[]>([]);
+
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
 
@@ -1450,6 +1734,7 @@ export default function VideosPage() {
   useEffect(() => {
     if (!activeStudyVideo) {
       sentenceChunksRef.current = [];
+      setSentenceChunks([]);
       setTotalSentences(0);
       setActiveSentenceIndex(-1);
       return;
@@ -1474,9 +1759,11 @@ export default function VideosPage() {
       const cleanedText = cleanSummaryForSpeech(summary);
       const chunks = chunkTextForSpeech(cleanedText);
       sentenceChunksRef.current = chunks;
+      setSentenceChunks(chunks);
       setTotalSentences(chunks.length);
     } else {
       sentenceChunksRef.current = [];
+      setSentenceChunks([]);
       setTotalSentences(0);
     }
     setActiveSentenceIndex(-1);
@@ -1529,6 +1816,9 @@ export default function VideosPage() {
             console.log(`[Caché Global] Recuperando transcripción instantánea desde localStorage para: ${videoDoc.title}`);
             const transcriptionText = cached.transcription;
             const modelUsed = cached.modelUsed || "Google Vertex AI Gemini 1.5 Pro";
+
+            // Asegurar la presencia en la base de conocimiento persistente
+            saveVideoKnowledgeBase(videoDoc, transcriptionText);
 
             // Sincronizar de forma silenciosa la base de datos Supabase del usuario actual para asociarlo de forma nativa
             const updatedMetadata = {
@@ -1706,6 +1996,9 @@ export default function VideosPage() {
         } else {
           console.log(`[Asíncrono] Transcripción guardada y cacheada en BBDD con éxito para: ${videoDoc.title}!`);
         }
+
+        // Persistir los metadatos en la base de conocimiento duradera de forma asíncrona
+        saveVideoKnowledgeBase(videoDoc, data.transcription);
 
         // Stop progress and set success
         clearInterval(progressInterval);
@@ -2212,29 +2505,96 @@ export default function VideosPage() {
     return () => clearInterval(interval);
   }, [checkOldVideos, videos]);
 
+  // VIDEO RE-ANALYSIS FUNCTIONALITY
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
+
+  const handleReanalyzeVideo = async (videoDoc: VideoDocument) => {
+    if (isReanalyzing) return;
+
+    const confirmReanalyze = window.confirm(
+      selectedLanguage === "es"
+        ? "¿Re-analizar este vídeo con el modelo premium de Google Gemini? Esto borrará el análisis anterior y generará uno nuevo con soporte de gráficos."
+        : selectedLanguage === "de"
+        ? "Dieses Video mit dem Premium-Modell von Google Gemini erneut analysieren? Dies löscht die vorherige Analyse und generiert eine neue mit Diagramm-Support."
+        : selectedLanguage === "tr"
+        ? "Bu videoyu Google Gemini premium modeli ile yeniden analiz etmek istiyor musunuz? Bu işlem önceki analizi silecek ve grafik desteğiyle yenisini oluşturacaktır."
+        : "Re-analyze this video with Google Gemini's premium model? This will clear the previous analysis and generate a new one with chart support."
+    );
+    if (!confirmReanalyze) return;
+
+    setIsReanalyzing(true);
+
+    try {
+      // 1. Clear local/localStorage caches
+      if (typeof window !== "undefined") {
+        const cacheKey = getGlobalCacheKey({ id: videoDoc.id, file_url: videoDoc.file_url });
+        localStorage.removeItem(cacheKey);
+      }
+
+      // 2. Prepare empty metadata and update Supabase
+      const updatedMetadata = {
+        ...videoDoc.metadata,
+        transcription: undefined,
+        transcription_model: undefined,
+        translations: undefined
+      };
+
+      // Also clean the translations cache for this video
+      setTranslationsCache(prev => {
+        const updated = { ...prev };
+        delete updated[videoDoc.id];
+        return updated;
+      });
+
+      const { error: updateError } = await supabase
+        .from("documents")
+        .update({ metadata: updatedMetadata })
+        .eq("id", videoDoc.id);
+
+      if (updateError) throw updateError;
+
+      // 3. Clear transient transcribing states and unlock this video ID so it can transcribe again
+      transcribingVideoIdsRef.current.delete(videoDoc.id);
+
+      const cleanedVideoDoc = {
+        ...videoDoc,
+        metadata: {
+          ...videoDoc.metadata,
+          transcription: undefined,
+          transcription_model: undefined,
+          translations: undefined
+        }
+      };
+
+      // 4. Update parent lists & states so they reflect the loading state
+      setVideos(prev => prev.map(v => v.id === videoDoc.id ? cleanedVideoDoc : v));
+      setSelectedVideo(prev => prev && prev.id === videoDoc.id ? cleanedVideoDoc : prev);
+      setActiveStudyVideo(cleanedVideoDoc);
+
+      // 5. Trigger asynchronously
+      triggerBackgroundTranscription(cleanedVideoDoc);
+
+    } catch (err) {
+      console.error("Error trigger background re-analysis:", err);
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
+
   // TESTING RESET FUNCTIONALITY
   const [isResetting, setIsResetting] = useState(false);
 
   const handleResetTestingVideos = async () => {
     if (isResetting) return;
 
-    // Safety check: if there are no videos, complete successfully and exit early
-    if (videos.length === 0) {
-      globallySyncedUrls.clear();
-      setActiveStudyVideo(null);
-      setSelectedVideo(null);
-      console.log("La videoteca ya está completamente vacía.");
-      return;
-    }
-
     const confirmReset = window.confirm(
       selectedLanguage === "es"
-        ? "¿Estás seguro de que deseas vaciar por completo la videoteca para pruebas? Se eliminarán todos los vídeos de la base de datos."
+        ? "¿Estás seguro de que deseas vaciar por completo la videoteca y audioteca para pruebas? Se eliminarán todos los vídeos y audios asociados de la base de datos."
         : selectedLanguage === "de"
-        ? "Sind Sie sicher, dass Sie die Videobibliothek zu Testzwecken vollständig leeren möchten? Alle Videos werden aus der Datenbank gelöscht."
+        ? "Sind Sie sicher, dass Sie die Video- und Audiobibliothek zu Testzwecken vollständig leeren möchten? Alle Videos und zugehörigen Audios werden aus der Datenbank gelöscht."
         : selectedLanguage === "tr"
-        ? "Test amaçlı video kütüphanesini tamamen boşaltmak istediğinizden emin misiniz? Tüm videolar veritabanından silinecektir."
-        : "Are you sure you want to completely clear the video library for testing? All videos will be deleted from the database."
+        ? "Test amaçlı video ve ses kütüphanesini tamamen boşaltmak istediğinizden emin misiniz? Tüm videolar ve ilgili sesler veritabanından silinecektir."
+        : "Are you sure you want to completely clear the video and audio library for testing? All videos and associated audios will be deleted from the database."
     );
     if (!confirmReset) return;
 
@@ -2247,6 +2607,13 @@ export default function VideosPage() {
         .eq("type", "video");
       if (error) throw error;
 
+      // 1b. Delete all audio documents from Supabase
+      const { error: audioError } = await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "audio");
+      if (audioError) throw audioError;
+
       // 2. Clear globally synced URLs
       globallySyncedUrls.clear();
 
@@ -2257,17 +2624,17 @@ export default function VideosPage() {
       // 4. Refetch videos
       await fetchVideos();
 
-      console.log("Videoteca vaciada con éxito.");
+      console.log("Videoteca y audioteca vaciadas con éxito.");
     } catch (err) {
-      console.error("Error al vaciar la videoteca:", err);
+      console.error("Error al vaciar la videoteca y audioteca:", err);
       alert(
         selectedLanguage === "es"
-          ? "Error al vaciar la videoteca."
+          ? "Error al vaciar la videoteca y audioteca."
           : selectedLanguage === "de"
-          ? "Fehler beim Leeren der Videobibliothek."
+          ? "Fehler beim Leeren der Video- und Audiobibliothek."
           : selectedLanguage === "tr"
-          ? "Video kütüphanesi boşaltılırken hata oluştu."
-          : "Error clearing the video library."
+          ? "Video ve ses kütüphanesi boşaltılırken hata oluştu."
+          : "Error clearing the video and audio library."
       );
     } finally {
       setIsResetting(false);
@@ -2416,6 +2783,7 @@ export default function VideosPage() {
     setPlayerTime(null);
     setTranscriptionExpanded(false);
     setSummaryExpanded(true);
+    setChartsExpanded(false);
     setReportExpanded(false);
   }, [activeStudyVideo]);
 
@@ -2556,6 +2924,17 @@ export default function VideosPage() {
             <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-mono text-emerald-400 font-bold">
               {selectedLanguage === "es" ? "Canal" : selectedLanguage === "de" ? "Kanal" : selectedLanguage === "tr" ? "Kanal" : "Channel"}: {activeStudyVideo.metadata.channel_title || "Andrei Jikh"}
             </div>
+            <button
+              onClick={() => handleReanalyzeVideo(activeStudyVideo)}
+              disabled={isReanalyzing || transcribing}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 hover:border-amber-500/50 text-[11px] font-mono text-amber-400 font-bold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isReanalyzing || transcribing ? 'animate-spin' : ''}`} />
+              {isReanalyzing || transcribing 
+                ? (selectedLanguage === "es" ? "Re-analizando..." : selectedLanguage === "de" ? "Wird neu analysiert..." : selectedLanguage === "tr" ? "Yeniden Analiz Ediliyor..." : "Re-analyzing...")
+                : (selectedLanguage === "es" ? "Re-analizar Inteligencia" : selectedLanguage === "de" ? "Intelligenz neu analysieren" : selectedLanguage === "tr" ? "Zekayı Yeniden Analiz Et" : "Re-analyze Intelligence")
+              }
+            </button>
           </div>
         </div>
 
@@ -2601,7 +2980,7 @@ export default function VideosPage() {
 
           {/* 2. THREE COLLAPSIBLE STUDY CABIN SECTIONS */}
           {(() => {
-            const { transcription, summary, report } = splitTranscription(transcriptionText);
+            const { transcription, summary, charts, report } = splitTranscription(transcriptionText);
             
             return (
               <div className="space-y-6">
@@ -2640,7 +3019,10 @@ export default function VideosPage() {
                           {(transcribing || transcriptionModel) && (
                             <div className="flex items-center justify-between flex-wrap gap-2">
                               <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full bg-emerald-500 ${transcribing ? "animate-pulse" : "animate-pulse"}`} />
+                                <div className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </div>
                                 <span className="text-xs font-bold text-zinc-400">
                                   {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
                                 </span>
@@ -2649,8 +3031,11 @@ export default function VideosPage() {
                                 </span>
                               </div>
                               <div>
-                                <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1">
-                                  <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${transcribing ? "animate-ping" : ""}`} />
+                                <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                  <span className="relative flex h-1.5 w-1.5">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                  </span>
                                   {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
                                 </span>
                               </div>
@@ -2672,7 +3057,7 @@ export default function VideosPage() {
                                 ) : selectedLanguage === "de" ? (
                                   <>Verbindungstipp: Stellen Sie sicher, dass für die Projekt-ID <span className="font-semibold text-zinc-400">558326121700</span> die Abrechnung aktiv ist und die <span className="font-semibold text-zinc-400">Vertex AI API</span> in der Google Cloud Console aktiviert ist. Sie können sie mit einem Klick aktivieren auf: <a href="https://console.cloud.google.com/apis/library/aiplatform.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 underline font-semibold">GCP-Konsole</a>.</>
                                 ) : selectedLanguage === "tr" ? (
-                                  <>Bağlantı İpucu: <span className="font-semibold text-zinc-400">558326121700</span> proje kimliği için faturalandırmanın etkin olduğundan ve Google Cloud Konsolunda <span className="font-semibold text-zinc-400">Vertex AI API</span>'sinin etkinleştirildiğinden emin olun. Tek bir tıklama ile etkinleştirebilirsiniz: <a href="https://console.cloud.google.com/apis/library/aiplatform.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 underline font-semibold">GCP Konsolu</a>.</>
+                                  <>Bağlantı İpucu: <span className="font-semibold text-zinc-400">558326121700</span> proje kimliği için faturalandırmanın etkin olduğundan ve Google Cloud Konsolunda <span className="font-semibold text-zinc-400">Vertex AI API</span>&apos;sinin etkinleştirildiğinden emin olun. Tek bir tıklama ile etkinleştirebilirsiniz: <a href="https://console.cloud.google.com/apis/library/aiplatform.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 underline font-semibold">GCP Konsolu</a>.</>
                                 ) : (
                                   <>Connection Tip: Make sure the project ID <span className="font-semibold text-zinc-400">558326121700</span> has active billing and the <span className="font-semibold text-zinc-400">Vertex AI API</span> is enabled in the Google Cloud Console. You can enable it with one click at: <a href="https://console.cloud.google.com/apis/library/aiplatform.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 underline font-semibold">GCP Console</a>.</>
                                 )}
@@ -2751,7 +3136,11 @@ export default function VideosPage() {
                         </div>
                       ) : (
                         <div className="relative z-10 mt-1 select-text">
-                          <MarkdownRenderer content={transcription || "No hay transcripción disponible."} />
+                          <MarkdownRenderer 
+                            content={transcription || "No hay transcripción disponible."} 
+                            modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
+                            selectedLanguage={selectedLanguage}
+                          />
                         </div>
                       )}
                     </div>
@@ -2792,22 +3181,194 @@ export default function VideosPage() {
                           {transcribing || translationLoading ? (
                             <ShimmerSkeleton />
                           ) : (
-                            <MarkdownRenderer 
-                              content={summary || "No hay resumen detallado disponible."} 
-                              onSeek={(seconds) => {
-                                setPlayerTime(seconds);
-                                if (studyVideoRef.current) {
-                                  studyVideoRef.current.currentTime = seconds;
-                                  studyVideoRef.current.play().catch(err => console.log("Autoplay local video prevented:", err));
-                                }
-                              }}
-                            />
+                            <>
+                              {/* Model Consumption Banner */}
+                              {transcriptionModel && (
+                                <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between flex-wrap gap-2 pb-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative flex h-2 w-2">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </div>
+                                    <span className="text-xs font-bold text-zinc-400">
+                                      {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
+                                    </span>
+                                    <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
+                                      {transcriptionModel}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                      <span className="relative flex h-1.5 w-1.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                      </span>
+                                      {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                              <MarkdownRenderer 
+                                content={summary || "No hay resumen detallado disponible."} 
+                                modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
+                                selectedLanguage={selectedLanguage}
+                                onSeek={(seconds) => {
+                                  setPlayerTime(seconds);
+                                  if (studyVideoRef.current) {
+                                    studyVideoRef.current.currentTime = seconds;
+                                    studyVideoRef.current.play().catch(err => console.log("Autoplay local video prevented:", err));
+                                  }
+                                }}
+                              />
+                            </>
                           )}
                         </div>
                       </div>
                     </div>
                   </div>
                 )}
+
+                {/* C. GRÁFICOS Y VISUALIZACIONES DETECTADAS */}
+                {(transcribing || charts || translationLoading || !transcriptionErrorFinal) && (() => {
+                  let chartType: "yield-curve" | "dxy-gold" | "candlestick" = "candlestick";
+                  if (charts) {
+                    const t = charts.toLowerCase();
+                    if (t.includes("fed") || t.includes("rate") || t.includes("interest") || t.includes("bond") || t.includes("curva") || t.includes("tipos") || t.includes("selloff")) {
+                      chartType = "yield-curve";
+                    } else if (t.includes("petro") || t.includes("dollar") || t.includes("gold") || t.includes("dxy") || t.includes("oro") || t.includes("devaluation") || t.includes("real")) {
+                      chartType = "dxy-gold";
+                    }
+                  }
+
+                  let chartLegend = "";
+                  if (chartType === "yield-curve") {
+                    chartLegend = getChartMetadata("fed").legend;
+                  } else if (chartType === "dxy-gold") {
+                    chartLegend = getChartMetadata("gold").legend;
+                  } else {
+                    chartLegend = getChartMetadata("").legend;
+                  }
+
+                  return (
+                    <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
+                      <button
+                        onClick={() => setChartsExpanded(!chartsExpanded)}
+                        className="w-full px-6 py-4 bg-zinc-900/10 hover:bg-zinc-900/20 border-b border-zinc-900/40 flex items-center justify-between transition-all group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <TrendingUp className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+                          <div className="text-left">
+                            <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
+                              {selectedLanguage === "es"
+                                ? "Gráficos y Visualizaciones Detectadas"
+                                : selectedLanguage === "de"
+                                ? "Erkannte Grafiken und Visualisierungen"
+                                : selectedLanguage === "tr"
+                                ? "Tespit Edilen Grafikler ve Görselleştirmeler"
+                                : "Detected Charts & Visualizations"}
+                            </h3>
+                            <p className="text-[10px] text-zinc-500 font-medium">
+                              {selectedLanguage === "es"
+                                ? "Análisis Técnico Multidimensional y Métricas de Mercado"
+                                : selectedLanguage === "de"
+                                ? "Multidimensionale technische Analyse und Marktkennzahlen"
+                                : selectedLanguage === "tr"
+                                ? "Çok Boyutlu Teknik Analiz ve Piyasa Metrikleri"
+                                : "Multidimensional Technical Analysis & Market Metrics"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="p-1.5 rounded-lg bg-zinc-900/50 group-hover:bg-zinc-800/80 border border-zinc-800/30 text-zinc-400 group-hover:text-white transition-all">
+                          {chartsExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </div>
+                      </button>
+
+                      <div 
+                        className={`transition-all duration-300 ease-in-out overflow-hidden ${
+                          chartsExpanded ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+                        }`}
+                      >
+                        <div className="p-6 relative select-text">
+                          <div className="absolute top-0 left-0 w-32 h-32 bg-indigo-500/5 blur-[40px] pointer-events-none" />
+                          <div className="relative z-10">
+                            {transcribing || translationLoading ? (
+                              <ShimmerSkeleton />
+                            ) : (
+                              <>
+                                {/* Model Consumption Banner */}
+                                {transcriptionModel && (
+                                  <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between flex-wrap gap-2 pb-3">
+                                    <div className="flex items-center gap-2">
+                                      <div className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                      </div>
+                                      <span className="text-xs font-bold text-zinc-400">
+                                        {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
+                                      </span>
+                                      <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
+                                        {transcriptionModel}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                        <span className="relative flex h-1.5 w-1.5">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                        </span>
+                                        {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {charts ? (
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                                    {/* Col 1: SVG Chart with elegant frame and legend */}
+                                    <div className="rounded-xl border border-zinc-900 bg-zinc-950/50 p-4 space-y-4">
+                                      <div className="aspect-[4/3] rounded-lg overflow-hidden border border-zinc-900">
+                                        <FinancialChartSnapshot type={chartType} />
+                                      </div>
+                                      <p className="text-[11px] text-zinc-400 font-medium italic leading-relaxed text-justify px-1">
+                                        {chartLegend}
+                                      </p>
+                                    </div>
+
+                                    {/* Col 2: Interactive Markdown Renderer */}
+                                    <div>
+                                      <MarkdownRenderer 
+                                        content={charts} 
+                                        modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
+                                        selectedLanguage={selectedLanguage}
+                                        onSeek={(seconds) => {
+                                          setPlayerTime(seconds);
+                                          if (studyVideoRef.current) {
+                                            studyVideoRef.current.currentTime = seconds;
+                                            studyVideoRef.current.play().catch(err => console.log("Autoplay local video prevented:", err));
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="py-6 text-center text-xs text-zinc-500">
+                                    {selectedLanguage === "es"
+                                      ? "No se detectaron gráficos en este vídeo."
+                                      : selectedLanguage === "de"
+                                      ? "In diesem Video wurden keine Grafiken erkannt."
+                                      : selectedLanguage === "tr"
+                                      ? "Bu videoda herhangi bir grafik tespit edilmedi."
+                                      : "No charts detected in this video."}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* NEW TTS AUDIO NARRATION SECTION */}
                 {(transcribing || summary || translationLoading) && (
@@ -3032,10 +3593,10 @@ export default function VideosPage() {
 
                           {/* Interactive text bubble showing the active reading sentence */}
                           <div className="h-12 bg-zinc-950/20 border border-zinc-900/60 rounded-xl px-4 flex items-center justify-between gap-4 overflow-hidden relative">
-                            {activeSentenceIndex >= 0 && sentenceChunksRef.current[activeSentenceIndex] ? (
+                            {activeSentenceIndex >= 0 && sentenceChunks[activeSentenceIndex] ? (
                               <>
                                 <div className="text-xs text-zinc-300 font-medium truncate flex-1 select-none italic">
-                                  "{sentenceChunksRef.current[activeSentenceIndex]}"
+                                  &ldquo;{sentenceChunks[activeSentenceIndex]}&rdquo;
                                 </div>
                                 {isPlayingAudio && !isPausedAudio && (
                                   <div className="flex items-center gap-0.5 shrink-0 h-6">
@@ -3082,7 +3643,7 @@ export default function VideosPage() {
                   </div>
                 )}
 
-                {/* C. INFORME DE ANÁLISIS DE INVERSIÓN */}
+                {/* D. INFORME DE ANÁLISIS DE INVERSIÓN */}
                 {(transcribing || report || translationLoading || !transcriptionErrorFinal) && (
                   <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
                     <button
@@ -3093,7 +3654,7 @@ export default function VideosPage() {
                         <Briefcase className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
                         <div className="text-left">
                           <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
-                            {t.summaryTab || "Informe de Análisis de Inversión"}
+                            {selectedLanguage === "es" ? "Informe de Análisis de Inversión" : t.summaryTab || "Informe de Análisis de Inversión"}
                           </h3>
                           <p className="text-[10px] text-zinc-500 font-medium">
                             {selectedLanguage === "es"
@@ -3122,17 +3683,47 @@ export default function VideosPage() {
                           {transcribing || translationLoading ? (
                             <ShimmerSkeleton />
                           ) : (
-                            <MarkdownRenderer 
-                              content={report || (
-                                selectedLanguage === "es"
-                                  ? "No hay informe de análisis de inversión disponible."
-                                  : selectedLanguage === "de"
-                                  ? "Kein Investitionsanalysebericht verfügbar."
-                                  : selectedLanguage === "tr"
-                                  ? "Yatırım analiz raporu bulunmuyor."
-                                  : "No investment analysis report available."
-                              )} 
-                            />
+                            <>
+                              {/* Model Consumption Banner */}
+                              {transcriptionModel && (
+                                <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between flex-wrap gap-2 pb-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="relative flex h-2 w-2">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </div>
+                                    <span className="text-xs font-bold text-zinc-400">
+                                      {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
+                                    </span>
+                                    <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
+                                      {transcriptionModel}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                      <span className="relative flex h-1.5 w-1.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                      </span>
+                                      {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                              <MarkdownRenderer 
+                                content={report || (
+                                  selectedLanguage === "es"
+                                    ? "No hay informe de análisis de inversión disponible."
+                                    : selectedLanguage === "de"
+                                    ? "Kein Investitionsanalysebericht verfügbar."
+                                    : selectedLanguage === "tr"
+                                    ? "Yatırım analiz raporu bulunmuyor."
+                                    : "No investment analysis report available."
+                                )} 
+                                modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
+                                selectedLanguage={selectedLanguage}
+                              />
+                            </>
                           )}
                         </div>
                       </div>

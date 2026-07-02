@@ -40,13 +40,14 @@ export async function POST(request: Request) {
     console.log(`Translate API: Translating content of size ${text.length} characters to "${targetLanguage}"`);
 
     // 2. Build high-fidelity translation prompt
-    const promptText = `A continuación se muestra el contenido del estudio de un video estructurado en tres partes separadas por la línea '---'.
+    const promptText = `A continuación se muestra el contenido del estudio de un video estructurado en cuatro partes separadas por la línea '---'.
 Tu tarea es traducir absolutamente todo el texto al idioma de destino: "${targetLanguage}", manteniendo la terminología correcta y las reglas especificadas abajo.
 
-Estructura de las tres partes:
+Estructura de las cuatro partes:
 - Parte 1: Transcripción literal en primera persona, manteniendo la voz del hablante original (Andrei Jikh).
 - Parte 2: Resumen Detallado y Objetivo del Contenido (con encabezados ### y ####, marcas de tiempo [MM:SS] y listas de viñetas indentadas).
-- Parte 3: Informe de Análisis de Inversión (con secciones macroeconómicas, de activos, geopolíticas y alertas).
+- Parte 3: Gráficos y Visualizaciones Detectadas (con encabezados ### y ####, marcas de tiempo [MM:SS], descripciones de gráficos, datos relevantes e indicaciones de leyenda en cursiva).
+- Parte 4: Informe de Análisis de Inversión (con secciones macroeconómicas, de activos, geopolíticas y alertas).
 
 REGLAS ABSOLUTAS:
 1. Traduce fielmente todo el texto al idioma solicitado: "${targetLanguage}".

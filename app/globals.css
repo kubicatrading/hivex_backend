@@ -1,26 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=Inter:wght@300;400;500;600;700&family=Syncopate:wght@700&display=swap');
+
 @import "tailwindcss";
 
 :root {
-  --background: #09090b; /* zinc-950 */
-  --foreground: #f4f4f5; /* zinc-100 */
-  --card: #09090b;
-  --card-foreground: #f4f4f5;
-  --popover: #09090b;
-  --popover-foreground: #f4f4f5;
-  --primary: #8b5cf6; /* violet-500 */
-  --primary-foreground: #ffffff;
-  --secondary: #18181b; /* zinc-900 */
-  --secondary-foreground: #f4f4f5;
-  --muted: #18181b;
-  --muted-foreground: #a1a1aa; /* zinc-400 */
-  --accent: #27272a; /* zinc-800 */
-  --accent-foreground: #f4f4f5;
-  --border: #27272a;
-  --input: #27272a;
-  --ring: #8b5cf6;
+  --background: #0B0C0D;       /* Negro Antracita profundo ultra-premium */
+  --foreground: #F5F5F7;       /* Blanco Platino */
+  --card: #0B0C0D;
+  --card-foreground: #F5F5F7;
+  --popover: #0B0C0D;
+  --popover-foreground: #F5F5F7;
+  --primary: #D4AF37;          /* Oro Champagne */
+  --primary-foreground: #0B0C0D;
+  --secondary: #121416;        /* Gris Antracita medio */
+  --secondary-foreground: #F5F5F7;
+  --muted: #121416;
+  --muted-foreground: #86868b; /* Gris apagado de la landing */
+  --accent: #1B1E21;           /* Gris Antracita claro/borde */
+  --accent-foreground: #F5F5F7;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.04);
+  --ring: #D4AF37;
 }
 
-@theme inline {
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-primary: var(--primary);
@@ -34,13 +36,55 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --font-sans: 'Inter', sans-serif;
+
+  /* Override Tailwind Zinc color scale with corporate Anthracite greys */
+  --color-zinc-50: #FAFAFB;
+  --color-zinc-100: #F5F5F7;
+  --color-zinc-200: #C2C2C7;
+  --color-zinc-300: #86868B;
+  --color-zinc-400: #606A72;
+  --color-zinc-500: #484F56;
+  --color-zinc-600: #30353A;
+  --color-zinc-700: #24282D;
+  --color-zinc-800: #1B1E21;
+  --color-zinc-900: #121416;
+  --color-zinc-950: #0B0C0D;
+
+  /* Override Violet and Purple scales with elegant Champagne Gold scales */
+  --color-violet-50: #fbf9f0;
+  --color-violet-100: #f5eed3;
+  --color-violet-200: #ebdca7;
+  --color-violet-300: #dfc471;
+  --color-violet-400: #d4af37;
+  --color-violet-500: #be9729;
+  --color-violet-600: #a17920;
+  --color-violet-700: #815b19;
+  --color-violet-800: #624314;
+  --color-violet-900: #493310;
+  --color-violet-950: #2d1e09;
+
+  --color-purple-50: #fbf9f0;
+  --color-purple-100: #f5eed3;
+  --color-purple-200: #ebdca7;
+  --color-purple-300: #dfc471;
+  --color-purple-400: #d4af37;
+  --color-purple-500: #be9729;
+  --color-purple-600: #a17920;
+  --color-purple-700: #815b19;
+  --color-purple-800: #624314;
+  --color-purple-900: #493310;
+  --color-purple-950: #2d1e09;
+
+  /* Premium typography family definitions (mapped to next/font/google) */
+  --font-sans: var(--font-sans);
+  --font-logo: var(--font-logo);
+  --font-serif: var(--font-serif);
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -52,16 +96,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #09090b;
+  background: #111315;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: rgba(212, 175, 55, 0.3);
 }
 
 /* Premium Animations */
@@ -70,38 +114,83 @@ body {
     opacity: 0.15;
   }
   50% {
-    opacity: 0.3;
+    opacity: 0.35;
   }
 }
 
 .bg-glow-purple {
   filter: blur(120px);
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.4) 0%, rgba(139, 92, 246, 0) 70%);
+  background: radial-gradient(circle, rgba(212, 175, 55, 0.25) 0%, rgba(212, 175, 55, 0) 70%);
   animation: pulseGlow 8s infinite ease-in-out;
 }
 
 .bg-glow-emerald {
   filter: blur(120px);
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0) 70%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 70%);
   animation: pulseGlow 10s infinite ease-in-out alternate;
 }
 
 .glass-morphism {
-  background: rgba(18, 18, 22, 0.7);
-  backdrop-filter: blur(16px);
+  background: rgba(11, 12, 13, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .glass-morphism-card {
-  background: rgba(15, 15, 20, 0.4);
+  background: rgba(18, 20, 22, 0.45);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-morphism-card:hover {
-  background: rgba(20, 20, 25, 0.6);
-  border-color: rgba(139, 92, 246, 0.25);
-  box-shadow: 0 10px 30px -10px rgba(139, 92, 246, 0.15);
+  background: rgba(27, 30, 33, 0.65);
+  border-color: rgba(212, 175, 55, 0.25);
+  box-shadow: 0 10px 40px -10px rgba(212, 175, 55, 0.15);
   transform: translateY(-2px);
 }
+/* Official HIVEX Brand Header Navbar Styles */
+.navbar {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 1000;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(11, 12, 13, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Official HIVEX Brand Header Logo Integration */
+.nav-logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-logo-img {
+  width: auto;
+  height: 48px; /* Default height in navbar */
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.15));
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-logo:hover .nav-logo-img {
+  transform: scale(1.05);
+  filter: drop-shadow(0 0 22px rgba(212, 175, 55, 0.45)) drop-shadow(0 0 8px rgba(255, 255, 255, 0.25));
+}
+

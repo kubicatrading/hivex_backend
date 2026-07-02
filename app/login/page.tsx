@@ -7,6 +7,7 @@ import Script from "next/script";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { Mail, Lock, User, Loader2, ArrowLeft, ShieldAlert, Sparkles } from "lucide-react";
 import { translations } from "@/lib/translations";
+import { Logo } from "@/components/Logo";
 
 interface GoogleGsiResponse {
   access_token?: string;
@@ -365,7 +366,7 @@ function LoginForm() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 px-4 font-bold text-sm text-white bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 rounded-xl transition-all shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+          className="w-full py-3.5 px-4 font-bold text-sm text-zinc-950 bg-violet-400 hover:bg-violet-500 border border-transparent rounded-xl transition-all duration-300 shadow-lg shadow-violet-500/10 hover:shadow-violet-500/25 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
         >
           {loading ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -457,11 +458,8 @@ export default function LoginPage() {
         {lang === "es" ? "Volver al Inicio" : lang === "de" ? "Zurück zur Startseite" : lang === "tr" ? "Ana Sayfaya Dön" : "Back to Home"}
       </Link>
 
-      <div className="mb-6 flex items-center gap-2 relative z-10">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 to-emerald-500 flex items-center justify-center font-bold text-sm text-white">
-          H
-        </div>
-        <span className="font-extrabold text-lg tracking-wider text-white">HIVEX</span>
+      <div className="mb-6 flex flex-col items-center relative z-10">
+        <Logo href="/" className="scale-[1.6]" />
       </div>
 
       <Suspense fallback={

@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 350" width="100%" height="100%">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@700&amp;display=swap');
+      .bg {
+        fill: none;
+      }
+      .hex-outer {
+        fill: #FFFFFF;
+      }
+      .hex-center-wire {
+        fill: none;
+        stroke: #FFFFFF;
+        stroke-width: 3.5;
+        stroke-linejoin: round;
+      }
+      .hex-center-circle {
+        fill: none;
+        stroke: #FFFFFF;
+        stroke-width: 2.5;
+      }
+      .hex-center-inner {
+        fill: none;
+        stroke: #FFFFFF;
+        stroke-width: 2.5;
+        stroke-linejoin: round;
+      }
+      .hex-line {
+        stroke: #FFFFFF;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+      }
+      .logo-text {
+        font-family: 'Syncopate', 'Montserrat', 'Helvetica Neue', sans-serif;
+        font-size: 42px;
+        font-weight: 700;
+        fill: #FFFFFF;
+        text-anchor: middle;
+        letter-spacing: 0.3em;
+      }
+    </style>
+    
+    <!-- A single pointy-topped hexagon centered at 0,0 with radius 30 -->
+    <!-- Points: 0,-30  25.98,-15  25.98,15  0,30  -25.98,15  -25.98,-15 -->
+    <polygon id="hex-filled" class="hex-outer" points="0,-30 25.98,-15 25.98,15 0,30 -25.98,15 -25.98,-15" />
+  </defs>
+
+  <!-- Background (transparent) -->
+  <rect width="500" height="350" class="bg" />
+
+  <!-- Logo Symbol Container (centered at 250, 130) -->
+  <g transform="translate(250, 130)">
+    <!-- 6 Surrounding Pointy-Topped Hexagons (Radius 30, Center Spacing 64) -->
+    <!-- Top -->
+    <use href="#hex-filled" x="0" y="-64" />
+    <!-- Bottom -->
+    <use href="#hex-filled" x="0" y="64" />
+    <!-- Top-Right -->
+    <use href="#hex-filled" x="55.42" y="-32" />
+    <!-- Bottom-Right -->
+    <use href="#hex-filled" x="55.42" y="32" />
+    <!-- Top-Left -->
+    <use href="#hex-filled" x="-55.42" y="-32" />
+    <!-- Bottom-Left -->
+    <use href="#hex-filled" x="-55.42" y="32" />
+
+    <!-- Central Hexagon Wireframe (Pointy-Topped) -->
+    <!-- Outer boundary (Radius 30) -->
+    <polygon class="hex-center-wire" points="0,-30 25.98,-15 25.98,15 0,30 -25.98,15 -25.98,-15" />
+    <!-- Middle Circle Ring (Radius 16) -->
+    <circle cx="0" cy="0" r="16" class="hex-center-circle" />
+    <!-- Inner boundary (Radius 9) -->
+    <polygon class="hex-center-inner" points="0,-9 7.79,-4.5 7.79,4.5 0,9 -7.79,4.5 -7.79,-4.5" />
+    
+    <!-- Radial Lines connecting outer and inner vertices -->
+    <line class="hex-line" x1="0" y1="-9" x2="0" y2="-30" />
+    <line class="hex-line" x1="7.79" y1="-4.5" x2="25.98" y2="-15" />
+    <line class="hex-line" x1="7.79" y1="4.5" x2="25.98" y2="15" />
+    <line class="hex-line" x1="0" y1="9" x2="0" y2="30" />
+    <line class="hex-line" x1="-7.79" y1="4.5" x2="-25.98" y2="15" />
+    <line class="hex-line" x1="-7.79" y1="-4.5" x2="-25.98" y2="-15" />
+  </g>
+
+  <!-- Logo Text "HIVEX" (centered at 250, 275) -->
+  <text x="256.3" y="280" class="logo-text">HIVEX</text>
+</svg>

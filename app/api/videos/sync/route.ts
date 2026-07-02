@@ -61,13 +61,12 @@ async function handleSync() {
     }
 
     const now = Date.now();
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const CUTOFF_TIMESTAMP = todayStart.getTime(); // Strictly today
+    // Allow syncing any video published within the last 24 hours (1-day moving window backward)
+    const CUTOFF_TIMESTAMP = now - 24 * 60 * 60 * 1000;
     const syncedVideos: AnalysedVideo[] = [];
 
     if (useFallback) {
-      // Create hyper-realistic mock videos inside the active current day window
+      // Create hyper-realistic mock videos inside the active 24-hour window
       const fallbackData = [
         {
           videoId: "fed-decision-2026",
@@ -266,42 +265,72 @@ async function handleSync() {
 ### 📝 Detailed Content Summary
 
 #### [00:00] **Introduction and Fed Rate Decision**
-- **Interest Rates Unchanged**: The Federal Reserve has officially announced that interest rates will remain steady at their current high levels to combat persistent CPI inflation.
-- **HYSA Yields Stay High**: This decision means that High-Yield Savings Accounts (HYSAs) will continue to offer attractive yields of around 4.5% to 5.25% for the foreseeable future.
-- **Impact on Mortgages**: Borrowing costs, including home loans and auto financing, will remain elevated, keeping pressure on the real estate sector.
+- **Tasas de interés sin cambios**: La Reserva Federal ha anunciado oficialmente que las tasas de interés se mantendrán estables en sus altos niveles actuales para combatir la persistente inflación del IPC.
+- **Rendimientos de HYSA altos**: Esta decisión significa que las cuentas de ahorro de alto rendimiento (HYSA) seguirán ofreciendo tasas atractivas de alrededor del 4,5% al 5,25% en el futuro previsible.
+- **Impacto en hipotecas**: Los costos de endeudamiento, incluidos los préstamos hipotecarios y la financiación de automóviles, seguirán elevados, manteniendo la presión sobre el sector inmobiliario.
 
 #### [04:30] **Stock Market Valuations and Portfolio Allocation**
-- **Divergence in Stock Market**: The major indexes (S&P 500, Nasdaq) are being driven to near-record highs by a handful of mega-cap tech stocks, while broader market breadth remains weak.
-- **Dividend Growth Strategy**: Andrei emphasizes focusing on Dividend Growth Investing (DGI) to generate consistent, resilient passive cash flow in volatile environments.
-- **Treasury Bills as Refuges**: Allocating a portion of assets to short-term U.S. Treasury Bills (T-Bills) offers a safe, risk-free yield near 5%.
+- **Divergencia en el mercado bursátil**: Los principales índices (S&P 500, Nasdaq) están siendo impulsados a máximos históricos por un puñado de acciones tecnológicas de gran capitalización, mientras que la amplitud del mercado general sigue siendo débil.
+- **Estrategia de crecimiento de dividendos**: Andrei enfatiza centrarse en la inversión en crecimiento de dividendos (DGI) para generar un flujo de caja pasivo constante y resistente en entornos volátiles.
+- **Letras del Tesoro como refugio**: Asignar una parte de los activos a Letras del Tesoro de EE. UU. a corto plazo (T-Bills) ofrece un rendimiento seguro y libre de riesgo cercano al 5%.
 
 #### [09:15] **Inflation Concerns and Geopolitics**
-- **Sticky CPI Metrics**: Recent CPI numbers indicate that inflation remains persistent due to high service-sector costs and supply chain constraints.
-- **Geopolitical Supply Pressures**: Ongoing trade disputes and geopolitical realignments are structurally raising manufacturing costs.
+- **Métricas de inflación persistentes**: Los datos recientes del IPC indican que la inflación sigue siendo persistente debido a los elevados costes del sector servicios y a las limitaciones de la cadena de suministro.
+- **Presiones geopolíticas de oferta**: Las disputas comerciales en curso y las realineaciones geopolíticas están elevando estructuralmente los costes de fabricación globales.
+
+---
+
+### 📊 Gráficos y Visualizaciones Detectadas
+
+#### [02:09] **Rendimiento de Letras del Tesoro a Corto Plazo (T-Bills)**
+- **Rendimiento superior al 5%**: El gráfico de barras muestra la rentabilidad anualizada de las letras a 1, 3 y 6 meses en comparación con la inflación subyacente.
+- **Diferencial positivo**: Se observa un claro spread de rendimiento real frente a las cuentas de ahorro bancarias tradicionales de bancos comerciales físicos.
+*Leyenda: Las Letras del Tesoro a corto plazo representan actualmente el refugio libre de riesgo más rentable para aparcar capital de oportunidad.*
+
+#### [03:32] **Gráfico de Evolución del IPC e Inflación Persistente**
+- **Persistencia en servicios**: La curva lineal muestra un estancamiento en el descenso de la inflación subyacente debido a los elevados costos de la energía y salarios del sector servicios.
+- **Trayectoria persistente**: Los números de inflación confirman que los precios se mantienen rígidos a la baja.
+*Leyenda: La inflación persistente del IPC fundamenta plenamente la decisión de la Fed de mantener tipos elevados.*
+
+#### [04:02] **Diferencial de Tipos de Interés de la Fed frente a HYSAs**
+- **Sincronía de tasas**: La correlación de dispersión detalla cómo los rendimientos de las cuentas de ahorro de alto rendimiento se ajustan con un ligero rezago ante variaciones de la tasa federal.
+- **Rendimiento neto atractivo**: El spread real se mantiene positivo, incentivando el ahorro líquido de bajo riesgo.
+*Leyenda: Las cuentas de ahorro de alto rendimiento siguen ofreciendo una excelente rentabilidad real en la coyuntura actual.*
+
+#### [04:45] **Tasa de Crecimiento de Dividendos (DGI) vs. Inflación**
+- **Protección de poder adquisitivo**: El gráfico comparativo resalta que las empresas DGI de alta calidad aumentan dividendos por encima del ritmo histórico del IPC.
+- **Crecimiento compuesto acumulado**: El interés compuesto generado por la reinversión supera significativamente a la renta fija tradicional a largo plazo.
+*Leyenda: El crecimiento continuo de los dividendos actúa como la cobertura contra la inflación por excelencia para carteras patrimoniales.*
 
 ---
 
 ### 💼 Investment Analysis Report
 
 ### 📈 Macroeconomic Trends & Markets
-The macroeconomic environment is defined by sticky inflation and a tight monetary stance from the Federal Reserve. While nominal stock market indexes show resilience, underlying corporate margins are compressing under the weight of higher cost of capital. A cautious but invested approach is favored.
+- **Presión inflacionaria**: El entorno macroeconómico está definido por una inflación persistente y una postura restrictiva de la Reserva Federal.
+- **Compresión de márgenes**: Aunque los índices nominales muestran resistencia, los márgenes corporativos subyacentes se reducen por el elevado costo del capital.
+- **Prudencia estratégica**: Se recomienda mantener una exposición moderada pero altamente selectiva, priorizando empresas con bajo nivel de endeudamiento y fuerte poder de fijación de precios.
 
 ### 💼 Investment Vehicles & Assets
-- **Renta Fija / Letras**: Lock in risk-free yields near 5% using short-term T-Bills and utilize HYSAs for immediate cash needs.
-- **Renta Variable**: Accumulate premium dividend-growth stocks with deep competitive moats (moats) and strong cash flows, using Dollar-Cost Averaging (DCA).
-- **Alternative Assets**: Limit high-risk assets like Bitcoin (BTC) to 5-10% of total allocation for asymmetric long-term potential.
+- **Renta Fija y Letras**: Asegure rendimientos libres de riesgo cercanos al 5% utilizando T-Bills a corto plazo y cuentas de ahorro de alto rendimiento (HYSA) para la liquidez inmediata.
+- **Renta Variable Selectiva**: Acumule acciones con fuerte crecimiento de dividendos (DGI) y flujos de caja robustos mediante promedio de coste monetario (DCA) para asegurar flujos pasivos consistentes.
+- **Activos Alternativos**: Limite activos volátiles como Bitcoin al 5-10% de la cartera total para capturar un potencial de revalorización asimétrico sin comprometer la estabilidad.
 
 ### 🌍 Geopolitical Factors & Logistics
-Global trade fragmentation forces nearshoring and supply chain duplication, which acts as a structural inflationary floor, preventing rates from returning to the post-2008 lows of near-zero.
+- **Desglobalización y Reconfiguración**: La fragmentación del comercio internacional obliga a acelerar procesos de relocalización o *nearshoring* global.
+- **Suelo inflacionario estructural**: La duplicación y descentralización de las cadenas de suministro actúa como un soporte de costes persistente en los modelos de producción global.
+- **Costes de financiación elevados**: Las tensiones logísticas impiden un retorno rápido de los tipos de interés a los niveles cercanos a cero que caracterizaron la era post-2008.
 
 ### 🎯 Investment Decisions & Key Signals
-- **Signal**: Fed pivot delayed.
-- **Decision**: Extend duration of fixed income slightly if rates begin to drop; otherwise, keep rolling short-term paper.
-- **Signal**: Tech earnings concentration.
-- **Decision**: Rebalance profits into undervalued defensive sectors.
+- **Señal de política monetaria**: Retraso continuado en el pivote o recorte de tipos por parte de la Reserva Federal.
+- **Estrategia correspondiente**: Mantener posiciones líquidas y de alta calidad a corto plazo, ampliando la duración de la cartera de renta fija únicamente al confirmarse un cambio de ciclo.
+- **Señal de concentración sectorial**: Concentración extrema de las ganancias en un puñado de acciones del sector tecnológico de gran capitalización.
+- **Estrategia correspondiente**: Rebalancear gradualmente las plusvalías acumuladas hacia sectores defensivos e infravalorados con valoraciones atractivas.
 
 ### ⚠️ Risk Alerts & Breaking News
-High commercial real estate debt maturities coming due in 2026 pose a systemic refinancing risk to regional banks. Keep liquidity levels high to capitalize on potential distressed asset sales.`;
+- **Crisis inmobiliaria comercial**: Los masivos vencimientos de deuda en el sector de oficinas plantean un severo riesgo de refinanciación a partir de 2026.
+- **Vulnerabilidad de la banca regional**: Las entidades con alta exposición a activos inmobiliarios comerciales podrían sufrir tensiones de liquidez y crisis de solvencia localizadas.
+- **Gestión conservadora de liquidez**: Se aconseja mantener una posición holgada de efectivo libre de riesgo para capturar oportunidades ante posibles liquidaciones o ventas forzosas de activos distress.`;
 
               transcriptionMap[fv.file_url] = {
                 transcription: realisticMockTranscription,
