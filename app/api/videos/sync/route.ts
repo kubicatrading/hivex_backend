@@ -153,7 +153,25 @@ async function handleSync() {
 
         // Fetch actual duration from YouTube watch page
         console.log(`Fetching real duration for YouTube video ${videoId} (${title})...`);
-        const durationSecs = await fetchRealYoutubeDuration(videoId);
+        let durationSecs = await fetchRealYoutubeDuration(videoId);
+
+        if (durationSecs === 0) {
+          console.warn(`[Sync] Failed to scrape duration for video ${videoId} (${title}). Likely blocked by YouTube. Applying smart fallback.`);
+          
+          // Check if it's a YouTube Short
+          const isShort = title.toLowerCase().includes("#shorts") || 
+                          title.toLowerCase().includes("#short") ||
+                          (rawDescription && (rawDescription.toLowerCase().includes("#shorts") || rawDescription.toLowerCase().includes("#short"))) ||
+                          entryXml.includes("/shorts/");
+          
+          if (isShort) {
+            console.log(`[Sync] Skipping video because it is classified as a YouTube Short: ${title}`);
+            continue;
+          }
+          
+          // Fallback to 900 seconds (15 minutes) for standard videos to pass the duration filter
+          durationSecs = 900;
+        }
 
         // Apply strict duration filter: > 5 minutes (300 seconds)
         if (durationSecs <= 300) {
@@ -239,29 +257,10 @@ async function handleSync() {
           for (const fv of uniqueNewVideos.values()) {
             const ytId = extractYoutubeId(fv.file_url, fv.id);
             if (ytId && !ytId.startsWith("fed-") && !ytId.startsWith("market-") && !ytId.startsWith("btc-")) {
-              try {
-                console.log(`[Daemon] Pre-transcribiendo automáticamente vídeo real: "${fv.title}" (ID: ${ytId})...`);
-                const result = await transcribeVideoCore({
-                  videoId: ytId,
-                  fileUrl: fv.file_url,
-                  title: fv.title,
-                  duration: fv.metadata.duration,
-                  apiKey: process.env.GEMINI_API_KEY
-                });
-                transcriptionMap[fv.file_url] = {
-                  transcription: result.transcription,
-                  modelUsed: result.modelUsed
-                };
-                console.log(`[Daemon] Pre-transcripción completada con éxito usando ${result.modelUsed} para "${fv.title}"`);
-
-                // Lanzar silenciosamente la captura de imágenes en segundo plano para la tarjeta de charts
-                if (result.transcription) {
-                  console.log(`[Daemon] Iniciando extracción silenciosa de snapshots en segundo plano para: "${fv.title}"`);
-                  extractSnapshotsInBackground(ytId, fv.file_url, result.transcription);
-                }
-              } catch (transcribeErr) {
-                console.error(`[Daemon] Error al pre-transcribir "${fv.title}":`, transcribeErr);
-              }
+              // Real videos: We bypass synchronous transcription during sync to prevent Vercel Gateway timeouts (max 10s on Hobby).
+              // The client-side dashboard will automatically trigger async background transcription via triggerBackgroundTranscription()
+              // for any video missing it, allowing immediate and responsive channel syncing.
+              console.log(`[Daemon] Skipping synchronous pre-transcription during sync for real video to avoid Vercel timeouts: "${fv.title}" (${ytId})`);
             } else {
               console.log(`[Daemon] Sincronizando vídeo mock/simulado "${fv.title}" (${ytId}). Usando transcripción simulada realista.`);
               // For mock/fallback videos, we use a beautifully structured transcription to simulate real AI output
