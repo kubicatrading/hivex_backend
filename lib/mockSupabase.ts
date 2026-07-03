@@ -395,8 +395,7 @@ class MockSupabase {
             // Guarantee absolute persistence of knowledge base items in offline/mock mode
             const updatedDocs = docs.filter((d: MockDocument) => {
               const matchesFilter = d[column] === value;
-              const isPersistentKnowledge = d.type && d.type.startsWith("knowledge_");
-              return !matchesFilter || isPersistentKnowledge;
+              return !matchesFilter;
             });
             this.setDocuments(userId, updatedDocs);
 
@@ -411,8 +410,7 @@ class MockSupabase {
                       if (Array.isArray(parsed)) {
                         const filtered = parsed.filter((d: MockDocument) => {
                           const matchesFilter = d[column] === value;
-                          const isPersistentKnowledge = d.type && d.type.startsWith("knowledge_");
-                          return !matchesFilter || isPersistentKnowledge;
+                          return !matchesFilter;
                         });
                         localStorage.setItem(key, JSON.stringify(filtered));
                       }

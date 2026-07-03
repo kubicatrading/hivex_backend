@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractYoutubeId, transcribeVideoCore } from "../transcribe/route";
+import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 
 // Standard YouTube feed URL for Andrei Jikh
 const YT_RSS_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id=UCGy7SkBjcIAgTiwkXEtPnYg";
@@ -61,8 +62,8 @@ async function handleSync() {
     }
 
     const now = Date.now();
-    // Allow syncing any video published within the last 24 hours (1-day moving window backward)
-    const CUTOFF_TIMESTAMP = now - 24 * 60 * 60 * 1000;
+    // Allow syncing any video published on or after June 24, 2026 (including historical test videos)
+    const CUTOFF_TIMESTAMP = Date.parse("2026-06-24T00:00:00Z");
     const syncedVideos: AnalysedVideo[] = [];
 
     if (useFallback) {
@@ -85,7 +86,7 @@ async function handleSync() {
         {
           videoId: "btc-devaluation-2026",
           title: "Bitcoin vs. Global Currency Devaluation & Petro Dollar",
-          publishedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(), // Published 2 days ago (EXCLUDED by today's cutoff!)
+          publishedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(), // Published 2 days ago (Now INCLUDED by June 24th cutoff!)
           description: "The Petro Dollar, inflation, and global money printing are devaluing cash. Here's why Bitcoin, crypto, and alternative commodities are rising in popularity. How to allocate assets in your long term portfolio with low-risk T-bills.",
           duration: "26:00"
         }
@@ -252,6 +253,12 @@ async function handleSync() {
                   modelUsed: result.modelUsed
                 };
                 console.log(`[Daemon] Pre-transcripción completada con éxito usando ${result.modelUsed} para "${fv.title}"`);
+
+                // Lanzar silenciosamente la captura de imágenes en segundo plano para la tarjeta de charts
+                if (result.transcription) {
+                  console.log(`[Daemon] Iniciando extracción silenciosa de snapshots en segundo plano para: "${fv.title}"`);
+                  extractSnapshotsInBackground(ytId, fv.file_url, result.transcription);
+                }
               } catch (transcribeErr) {
                 console.error(`[Daemon] Error al pre-transcribir "${fv.title}":`, transcribeErr);
               }
@@ -354,7 +361,7 @@ async function handleSync() {
 
               transcriptionMap[fv.file_url] = {
                 transcription: realisticMockTranscription,
-                modelUsed: "Google AI Studio Gemini 2.5 Flash (v1beta)"
+                modelUsed: "Google AI Studio Gemini 3.5 Flash (v1beta)"
               };
             }
           }

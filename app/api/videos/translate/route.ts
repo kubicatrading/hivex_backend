@@ -7,6 +7,140 @@ interface TranslateRequestBody {
   targetLanguage: string;
 }
 
+async function translateSegment(
+  segmentText: string,
+  segmentIndex: number,
+  targetLanguage: string,
+  apiKey: string | null,
+  googleToken: string | null,
+  projectNumber: string
+): Promise<{ translatedText: string; modelUsed: string }> {
+  if (!segmentText.trim()) {
+    return { translatedText: "", modelUsed: "none" };
+  }
+
+  // 1. Build customized segment prompt
+  let partPrompt = "";
+  if (segmentIndex === 0) {
+    partPrompt = `Eres un traductor profesional de élite especializado en finanzas. Traduce la siguiente transcripción literal de un vídeo de inversión manteniendo estrictamente la primera persona del presentador original (Andrei Jikh), su tono fluido y conversacional, y conservando intactas todas las marcas de tiempo (ej. [05:20]) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+  } else if (segmentIndex === 1) {
+    partPrompt = `Eres un traductor profesional de élite especializado en finanzas y economía. Traduce el siguiente resumen ejecutivo detallado de un vídeo de inversión manteniendo estrictamente el formato markdown, las listas de viñetas con guiones (-), las negritas, y conservando intactas todas las marcas de tiempo (ej. [05:20]) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+  } else if (segmentIndex === 2) {
+    partPrompt = `Eres un traductor profesional de élite especializado en análisis de gráficos y visualizaciones técnicas de mercado. Traduce la siguiente lista de gráficos detectados en el vídeo manteniendo estrictamente el formato markdown, las marcas de tiempo de los encabezados (ej. #### [02:30]), las viñetas con guiones (-) y las líneas de leyenda en cursiva (como *Leyenda:* o *Key Takeaway:*) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+  } else if (segmentIndex === 3) {
+    partPrompt = `Eres un traductor profesional de élite especializado en análisis macroeconómico y consultoría de inversiones. Traduce el siguiente informe de análisis de inversión manteniendo estrictamente el formato markdown, los encabezados de nivel tres (###) y todas las listas de viñetas con guiones (-) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+  } else {
+    partPrompt = `Eres un traductor profesional de élite. Traduce el siguiente contenido de análisis financiero al idioma de destino: "${targetLanguage}", manteniendo estrictamente todo el formato markdown, las marcas de tiempo y las listas de viñetas.\n\nContenido:\n${segmentText}`;
+  }
+
+  const SYSTEM_INSTRUCTION_SEGMENT = `Eres un traductor profesional de élite especializado en finanzas, economía y análisis de inversiones. Tu única tarea es traducir el texto suministrado de manera sumamente natural, fluida y con perfecta dicción al idioma solicitado, preservando estructuras, marcas de tiempo y formatos técnicos. No agregues introducciones, explicaciones, ni notas del traductor.`;
+
+  // 2. Resilient model fallback pool (strictly prioritizing Gemini 3.5 Flash)
+  const attempts = [
+    {
+      name: "Google AI Studio Gemini 3.5 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
+    },
+    {
+      name: "Vertex AI Gemini 3.5 Flash",
+      type: "vertex",
+      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-3.5-flash:generateContent`
+    },
+    {
+      name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+    },
+    {
+      name: "Google AI Studio Gemini 2.5 Pro (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`
+    },
+    {
+      name: "Vertex AI Gemini 2.5 Flash",
+      type: "vertex",
+      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent`
+    }
+  ];
+
+  let translatedText = "";
+  let successfulModel = "";
+  const errorDetails: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      let requestUrl = attempt.url;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+
+      if (attempt.type === "google-ai" && apiKey) {
+        requestUrl = `${attempt.url}?key=${apiKey}`;
+      } else if (googleToken) {
+        headers["Authorization"] = `Bearer ${googleToken}`;
+      } else {
+        errorDetails.push(`${attempt.name}: Sin credenciales.`);
+        continue;
+      }
+
+      const payload: Record<string, any> = {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: partPrompt }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 8192 // Incremented maximum number of tokens allowed per request
+        }
+      };
+
+      if (attempt.type === "google-ai") {
+        payload.system_instruction = {
+          parts: [{ text: SYSTEM_INSTRUCTION_SEGMENT }]
+        };
+      } else {
+        payload.systemInstruction = {
+          parts: [{ text: SYSTEM_INSTRUCTION_SEGMENT }]
+        };
+      }
+
+      const response = await fetch(requestUrl, {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const geminiData = await response.json();
+        const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (apiResponse && apiResponse.trim().length > 0) {
+          translatedText = apiResponse.trim();
+          successfulModel = attempt.name;
+          break;
+        } else {
+          errorDetails.push(`${attempt.name}: Respuesta vacía.`);
+        }
+      } else {
+        const errText = await response.text();
+        errorDetails.push(`${attempt.name} (HTTP ${response.status}): ${errText}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errorDetails.push(`${attempt.name} (Excepción): ${msg}`);
+    }
+  }
+
+  if (translatedText && translatedText.length > 0) {
+    return { translatedText, modelUsed: successfulModel };
+  } else {
+    throw new Error(`Error al traducir segmento ${segmentIndex}: \n` + errorDetails.join("\n"));
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body: TranslateRequestBody = await request.json();
@@ -39,146 +173,34 @@ export async function POST(request: Request) {
 
     console.log(`Translate API: Translating content of size ${text.length} characters to "${targetLanguage}"`);
 
-    // 2. Build high-fidelity translation prompt
-    const promptText = `A continuación se muestra el contenido del estudio de un video estructurado en cuatro partes separadas por la línea '---'.
-Tu tarea es traducir absolutamente todo el texto al idioma de destino: "${targetLanguage}", manteniendo la terminología correcta y las reglas especificadas abajo.
-
-Estructura de las cuatro partes:
-- Parte 1: Transcripción literal en primera persona, manteniendo la voz del hablante original (Andrei Jikh).
-- Parte 2: Resumen Detallado y Objetivo del Contenido (con encabezados ### y ####, marcas de tiempo [MM:SS] y listas de viñetas indentadas).
-- Parte 3: Gráficos y Visualizaciones Detectadas (con encabezados ### y ####, marcas de tiempo [MM:SS], descripciones de gráficos, datos relevantes e indicaciones de leyenda en cursiva).
-- Parte 4: Informe de Análisis de Inversión (con secciones macroeconómicas, de activos, geopolíticas y alertas).
-
-REGLAS ABSOLUTAS:
-1. Traduce fielmente todo el texto al idioma solicitado: "${targetLanguage}".
-2. Conserva EXACTAMENTE el formato markdown, los encabezados (#, ##, ###, ####), los guiones de lista (-), negritas (**) y todos los separadores '---'.
-3. Las marcas de tiempo (por ejemplo, [05:20], [10:15]) deben permanecer EXACTAMENTE idénticas y con el mismo formato. No las alteres, no las traduzcas ni las elimines.
-4. Mantén la primera persona de Andrei en la transcripción (ej: si traduces al inglés, usa "I", "my", etc.).
-5. Traduce la terminología de inversión, mercados, criptomonedas y geopolítica con el vocabulario técnico más adecuado y natural en el idioma de destino (ej: en inglés usa "yield curve", en alemán "Renditekurve", en turco "verim eğrisi").
-6. No agregues ninguna nota explicativa, comentario del traductor, introducción ni despedida. Devuelve únicamente el texto traducido.
-
-Contenido a traducir:
-${text}`;
-
-    // 3. Resilient model fallback pool
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "558326121700-ufp44b64pdnb0cisl7nu3c2dqc3vu82k.apps.googleusercontent.com";
     const projectNumber = clientId.split("-")[0] || "558326121700";
 
-    const attempts = [
-      {
-        name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
-        type: "google-ai",
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
-      },
-      {
-        name: "Google AI Studio Gemini 3.5 Flash (v1beta)",
-        type: "google-ai",
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
-      },
-      {
-        name: "Google AI Studio Gemini 2.5 Pro (v1beta)",
-        type: "google-ai",
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`
-      },
-      {
-        name: "Vertex AI Gemini 2.5 Flash",
-        type: "vertex",
-        url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent`
-      },
-      {
-        name: "Vertex AI Gemini 3.5 Flash",
-        type: "vertex",
-        url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-3.5-flash:generateContent`
-      }
-    ];
+    // 2. Split document into its four core segments using robust divider regex
+    // Matches --- dividers cleanly.
+    const regexSplit = /\n\s*(?:---|===|\*\*\*|___|- - -)[^\n]*\n/;
+    const parts = text.split(regexSplit);
 
-    let translatedText = "";
-    let successfulModel = "";
-    const errorDetails: string[] = [];
+    console.log(`Translate API: Split input document into ${parts.length} segments`);
 
-    for (const attempt of attempts) {
-      try {
-        console.log(`Translate API: Attempting translation with ${attempt.name}...`);
-        
-        let requestUrl = attempt.url;
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json"
-        };
+    // 3. Translate segments in parallel
+    const translationPromises = parts.map((part, index) =>
+      translateSegment(part, index, targetLanguage, apiKey || null, googleToken, projectNumber)
+    );
 
-        if (attempt.type === "google-ai" && apiKey) {
-          requestUrl = `${attempt.url}?key=${apiKey}`;
-        } else if (googleToken) {
-          headers["Authorization"] = `Bearer ${googleToken}`;
-        } else {
-          errorDetails.push(`${attempt.name}: Sin credenciales válidas (configura GEMINI_API_KEY o inicia sesión).`);
-          continue;
-        }
+    const results = await Promise.all(translationPromises);
 
-        const payload: Record<string, any> = {
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: promptText }]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.1
-          }
-        };
+    // 4. Re-combine translated parts using the exact hardcoded divider
+    const translatedText = results.map(r => r.translatedText).join("\n\n---\n\n");
 
-        if (attempt.type === "google-ai") {
-          payload.system_instruction = {
-            parts: [{ text: SYSTEM_INSTRUCTION }]
-          };
-        } else {
-          payload.systemInstruction = {
-            parts: [{ text: SYSTEM_INSTRUCTION }]
-          };
-        }
+    const modelsUsed = Array.from(new Set(results.map(r => r.modelUsed).filter(m => m !== "none")));
+    const successfulModel = modelsUsed.join(", ") || "Gemini 3.5 Flash";
 
-        const response = await fetch(requestUrl, {
-          method: "POST",
-          headers: headers,
-          body: JSON.stringify(payload)
-        });
-
-        if (response.ok) {
-          const geminiData = await response.json();
-          const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-          if (apiResponse && apiResponse.trim().length > 0) {
-            translatedText = apiResponse.trim();
-            successfulModel = attempt.name;
-            console.log(`Translate API: Successful translation using ${attempt.name}!`);
-            break;
-          } else {
-            errorDetails.push(`${attempt.name}: Respuesta vacía de la API.`);
-          }
-        } else {
-          const errText = await response.text();
-          errorDetails.push(`${attempt.name} (HTTP ${response.status}): ${errText}`);
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errorDetails.push(`${attempt.name} (Excepción de red): ${msg}`);
-      }
-    }
-
-    if (translatedText && translatedText.length > 0) {
-      return NextResponse.json({
-        success: true,
-        translatedText,
-        modelUsed: successfulModel
-      });
-    } else {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: "No se pudo completar la traducción automática con ningún modelo de Gemini. Detalles de errores:\n" + errorDetails.join("\n")
-        },
-        { status: 500 }
-      );
-    }
+    return NextResponse.json({
+      success: true,
+      translatedText,
+      modelUsed: successfulModel
+    });
 
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Translate API route unexpected error.";

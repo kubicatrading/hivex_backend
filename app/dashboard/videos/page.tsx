@@ -510,20 +510,20 @@ function splitTranscription(text: string) {
         const headerText = trimmed.replace(/^[\s\-\*#]*/, "").replace(/^\*\*|\*\*$/g, "").trim();
         
         if (summaryIdx === -1) {
-          if (headerText.includes("resumen") || headerText.includes("summary") || headerText.includes("zusammenfassung") || headerText.includes("ozet") || headerText.includes("part 2") || headerText.includes("parte 2")) {
+          if (headerText.includes("resumen") || headerText.includes("summary") || headerText.includes("zusammenfassung") || headerText.includes("ozet") || headerText.includes("part 2") || headerText.includes("parte 2") || headerText.includes("teil 2") || headerText.includes("bolum 2") || headerText.includes("kisim 2")) {
             summaryIdx = i;
           }
         } else if (chartsIdx === -1) {
-          if (headerText.includes("grafico") || headerText.includes("chart") || headerText.includes("diagrama") || headerText.includes("visualizac") || headerText.includes("part 3") || headerText.includes("parte 3")) {
-            const isReport = headerText.includes("informe") || headerText.includes("report") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("invers");
-            if (isReport && !headerText.includes("grafic") && !headerText.includes("chart") && !headerText.includes("visualizac")) {
+          if (headerText.includes("grafico") || headerText.includes("grafik") || headerText.includes("chart") || headerText.includes("diagram") || headerText.includes("visualizac") || headerText.includes("visualis") || headerText.includes("gorsel") || headerText.includes("part 3") || headerText.includes("parte 3") || headerText.includes("teil 3") || headerText.includes("bolum 3") || headerText.includes("kisim 3")) {
+            const isReport = headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim");
+            if (isReport && !headerText.includes("grafic") && !headerText.includes("grafik") && !headerText.includes("chart") && !headerText.includes("visualizac") && !headerText.includes("visualis") && !headerText.includes("gorsel")) {
               reportIdx = i;
             } else {
               chartsIdx = i;
             }
           }
         } else if (reportIdx === -1) {
-          if (headerText.includes("informe") || headerText.includes("report") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("invers") || headerText.includes("part 4") || headerText.includes("parte 4")) {
+          if (headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim") || headerText.includes("part 4") || headerText.includes("parte 4") || headerText.includes("teil 4") || headerText.includes("bolum 4") || headerText.includes("kisim 4")) {
             reportIdx = i;
           }
         }
@@ -576,9 +576,9 @@ function splitTranscription(text: string) {
   }
   
   // Clean redundant title headers at the beginning of each part if present
-  const cleanSummary = summary.replace(/^#*\s*(?:Resumen Detallado|Resumen Detallado del Contenido|Resumen|Detailed Summary|Zusammenfassung|Ozet|Part 2|Parte 2)[^\n]*\n+/i, "").trim();
-  const cleanCharts = charts.replace(/^#*\s*(?:Graficos y Visualizaciones Detectadas|Graficos y Visualizaciones|Graficos|Charts and Visualizations|Charts|Visualizaciones|Part 3|Parte 3)[^\n]*\n+/i, "").trim();
-  const cleanReport = report.replace(/^#*\s*(?:Informe de Inversión|Informe de Análisis|Informe|Investment Report|Investitionsbericht|Rapor|Analysis|Part 4|Parte 4|Part 3|Parte 3)[^\n]*\n+/i, "").trim();
+  const cleanSummary = summary.replace(/^#*\s*(?:Resumen Detallado|Resumen Detallado del Contenido|Resumen|Detailed Summary|Zusammenfassung|Ozet|Part 2|Parte 2|Teil 2|Teil2|Bolum 2|Kisim 2)[^\n]*\n+/i, "").trim();
+  const cleanCharts = charts.replace(/^#*\s*(?:Graficos y Visualizaciones Detectadas|Graficos y Visualizaciones|Graficos|Charts and Visualizations|Charts|Visualizaciones|Erkannte Grafiken und Visualisierungen|Erkannte Grafiken|Tespit Edilen Grafikler ve Gorsellestirmeler|Tespit Edilen Grafikler|Part 3|Parte 3|Teil 3|Teil3|Bolum 3|Kisim 3)[^\n]*\n+/i, "").trim();
+  const cleanReport = report.replace(/^#*\s*(?:Informe de Inversión|Informe de Análisis|Informe|Investment Report|Investitionsbericht|Investitionsanalysebericht|Rapor|Yatirim Analiz Raporu|Analysis|Analyse|Analiz|Part 4|Parte 4|Teil 4|Teil4|Bolum 4|Kisim 4|Part 3|Parte 3)[^\n]*\n+/i, "").trim();
   
   return {
     transcription: transcription.trim(),
@@ -730,7 +730,7 @@ function MarkdownRenderer({
   content,
   onSeek,
   modelUsed,
-  selectedLanguage = "es",
+  selectedLanguage = "en",
 }: {
   content: string;
   onSeek?: (seconds: number) => void;
@@ -1166,7 +1166,7 @@ function parseChartsMarkdown(content: string): ParsedChart[] {
     return [];
   }
 
-  const sections = content.split(/####\s+/);
+  const sections = content.split(/(?:^|\n)\s*(?:#{2,5}|#+\s*\*+|\*\*+)\s*(?=\[?\d{1,2}:\d{2})/);
   const parsed: ParsedChart[] = [];
 
   for (let i = 1; i < sections.length; i++) {
@@ -1369,6 +1369,89 @@ function VideoFrameSnapshot({ src, targetTime }: { src: string; targetTime: numb
   );
 }
 
+function SmartVideoSnapshot({ 
+  videoId, 
+  fileUrl, 
+  targetTime, 
+  isYt, 
+  selectedLanguage 
+}: { 
+  videoId: string; 
+  fileUrl: string; 
+  targetTime: number; 
+  isYt: boolean; 
+  selectedLanguage: string; 
+}) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(isYt);
+
+  useEffect(() => {
+    if (!isYt) {
+      setImgUrl(fileUrl);
+      setLoading(false);
+      return;
+    }
+
+    setError(false);
+    setLoading(true);
+
+    const testImg = new Image();
+    const publicPath = `/snapshots/${videoId}/${targetTime}.jpg`;
+
+    testImg.onload = () => {
+      setImgUrl(publicPath);
+      setLoading(false);
+    };
+
+    testImg.onerror = () => {
+      setError(true);
+      setLoading(false);
+    };
+
+    testImg.src = publicPath;
+  }, [videoId, fileUrl, targetTime, isYt]);
+
+  const loadingText = {
+    es: "Cargando visualización...",
+    en: "Loading visualization...",
+    de: "Lade Visualisierung...",
+    tr: "Görüntü yükleniyor..."
+  }[selectedLanguage as "es" | "en" | "de" | "tr"] || "Loading visualization...";
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 border border-zinc-900 rounded-xl aspect-[16/9] text-center w-full">
+        <Loader2 className="w-6 h-6 text-emerald-400 animate-spin mb-2" />
+        <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">{loadingText}</span>
+      </div>
+    );
+  }
+
+  if (isYt && error) {
+    return <YoutubeCorsWarning selectedLanguage={selectedLanguage} />;
+  }
+
+  if (!isYt) {
+    return <VideoFrameSnapshot src={fileUrl} targetTime={targetTime} />;
+  }
+
+  return (
+    <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950">
+      <img
+        src={imgUrl || ""}
+        alt={`Snapshot at ${targetTime}s`}
+        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-350 flex items-end p-3">
+        <span className="text-[9px] font-black tracking-wide text-white uppercase bg-zinc-900/95 px-2 py-1 rounded border border-zinc-850">
+          Timestamp: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function VideosPage() {
   const [videos, setVideos] = useState<VideoDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1391,6 +1474,78 @@ export default function VideosPage() {
       }
     };
     fetchUser();
+  }, []);
+
+  // Absolute, complete wipe/purge of video dg8y1s0d5ih and its knowledge from local Supabase / localStorage
+  useEffect(() => {
+    const purgeTargetVideo = async () => {
+      console.log("[Wipe] Running absolute purge of video dg8y1s0d5ih and its associated knowledge...");
+      
+      try {
+        const targetId = "dg8y1s0d5ih";
+        const targetYtUrl1 = "https://www.youtube.com/watch?v=dg8y1s0d5ih";
+        const targetYtUrl2 = "https://youtu.be/dg8y1s0d5ih";
+        const targetYtUrl3 = "https://youtube.com/watch?v=dg8y1s0d5ih";
+        const targetYtUrl4 = "https://www.youtube.com/embed/dg8y1s0d5ih";
+
+        // 1. Delete matching documents from mockSupabase database / tables
+        await supabase.from("documents").delete().eq("id", targetId);
+        await supabase.from("documents").delete().eq("file_url", targetYtUrl1);
+        await supabase.from("documents").delete().eq("file_url", targetYtUrl2);
+        await supabase.from("documents").delete().eq("file_url", targetYtUrl3);
+        await supabase.from("documents").delete().eq("file_url", targetYtUrl4);
+        await supabase.from("documents").delete().eq("file_url", targetId);
+
+        // 2. Clear all local storage keys containing the video ID or its cache
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("hivex_global_trans_cache_dg8y1s0d5ih");
+          
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.includes("dg8y1s0d5ih")) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+          // Scan all document cache keys and filter them out
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key === "hivex_docs_global" || key.startsWith("hivex_docs_"))) {
+              try {
+                const dataStr = localStorage.getItem(key);
+                if (dataStr) {
+                  const parsed = JSON.parse(dataStr);
+                  if (Array.isArray(parsed)) {
+                    const filtered = parsed.filter((d: any) => {
+                      const str = JSON.stringify(d).toLowerCase();
+                      const fileUrl = d.file_url || "";
+                      const matchesVideoId = d.id === targetId || fileUrl.includes(targetId);
+                      return !matchesVideoId;
+                    });
+                    localStorage.setItem(key, JSON.stringify(filtered));
+                  }
+                }
+              } catch (e) {
+                console.warn("[Wipe] Error parsing key in purge:", key, e);
+              }
+            }
+          }
+        }
+
+        // 3. Clear from react state
+        setVideos((prevVideos) => prevVideos.filter((v) => v.id !== targetId && !v.file_url?.includes(targetId)));
+        setSelectedVideo((prev) => (prev?.id === targetId || prev?.file_url?.includes(targetId)) ? null : prev);
+        setActiveStudyVideo((prev) => (prev?.id === targetId || prev?.file_url?.includes(targetId)) ? null : prev);
+
+        console.log("[Wipe] Absolute purge complete. Target video and all its associated knowledge have been deleted.");
+      } catch (err) {
+        console.error("[Wipe] Error during absolute purge:", err);
+      }
+    };
+
+    purgeTargetVideo();
   }, []);
 
   // Active playing states
@@ -2013,7 +2168,8 @@ export default function VideosPage() {
   // Asynchronous background transcription runner for smart automatic sync transcribing
   const triggerBackgroundTranscription = useCallback(async (videoDoc: VideoDocument) => {
     if (videoDoc.metadata?.transcription) {
-      console.log(`[Asíncrono] El vídeo ya tiene transcripción en BBDD: ${videoDoc.title}`);
+      console.log(`[Asíncrono] El vídeo ya tiene transcripción en BBDD: ${videoDoc.title}. Asegurando presencia en base de conocimiento...`);
+      saveVideoKnowledgeBase(videoDoc, videoDoc.metadata.transcription);
       return;
     }
     if (transcribingVideoIdsRef.current.has(videoDoc.id)) {
@@ -2830,17 +2986,59 @@ export default function VideosPage() {
         .eq("type", "audio");
       if (audioError) throw audioError;
 
-      // 2. Clear globally synced URLs
+      // 1c. Delete all knowledge documents from Supabase to maintain referential integrity
+      const { error: kTranscriptionError } = await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "knowledge_transcription");
+      if (kTranscriptionError) throw kTranscriptionError;
+
+      const { error: kSummaryError } = await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "knowledge_summary");
+      if (kSummaryError) throw kSummaryError;
+
+      const { error: kChartsError } = await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "knowledge_charts");
+      if (kChartsError) throw kChartsError;
+
+      const { error: kAnalysisError } = await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "knowledge_analysis");
+      if (kAnalysisError) throw kAnalysisError;
+
+      // 2. Reset React states
+      setTranscriptionStates({});
+      setTranslationProgress({});
+      setTranslationsCache({});
+
+      // 2b. Clear localStorage cache keys for global translations and target video IDs
+      if (typeof window !== "undefined") {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith("hivex_global_trans_cache_") || key.includes("dg8y1s0d5ih"))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      }
+
+      // 3. Clear globally synced URLs
       globallySyncedUrls.clear();
 
-      // 3. Clear active and selected video views
+      // 4. Clear active and selected video views
       setActiveStudyVideo(null);
       setSelectedVideo(null);
 
-      // 4. Refetch videos
+      // 5. Refetch videos
       await fetchVideos();
 
-      console.log("Videoteca y audioteca vaciadas con éxito.");
+      console.log("Videoteca, audioteca y base de conocimientos vaciadas con éxito.");
     } catch (err) {
       console.error("Error al vaciar la videoteca y audioteca:", err);
       alert(
@@ -3210,7 +3408,13 @@ export default function VideosPage() {
                       <Volume2 className="w-4 h-4 text-sky-400 group-hover:scale-110 transition-transform" />
                       <div className="text-left">
                         <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
-                          {t.transcriptTab || "Transcripción Literal Original"}
+                          {selectedLanguage === "es"
+                            ? "Transcripción Literal Original"
+                            : selectedLanguage === "de"
+                            ? "Originale wörtliche Transkription"
+                            : selectedLanguage === "tr"
+                            ? "Orijinal Deşifre Metni"
+                            : "Original Verbatim Transcription"}
                         </h3>
                         <p className="text-[10px] text-zinc-500 font-medium">
                           {selectedLanguage === "es" ? "Soporte Judicial Verbatim Estricto" : selectedLanguage === "de" ? "Strikte wörtliche gerichtliche Unterstützung" : selectedLanguage === "tr" ? "Sıkı Verbatim Adli Destek" : "Strict Verbatim Judicial Support"}
@@ -3243,7 +3447,7 @@ export default function VideosPage() {
                                   {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
                                 </span>
                                 <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                  {transcribing ? (selectedLanguage === "es" ? "Google Gemini 2.5 Flash (Llamando...)" : selectedLanguage === "de" ? "Google Gemini 2.5 Flash (Wird aufgerufen...)" : selectedLanguage === "tr" ? "Google Gemini 2.5 Flash (Aranıyor...)" : "Google Gemini 2.5 Flash (Calling...)") : transcriptionModel}
+                                  {transcribing ? (selectedLanguage === "es" ? "Google Gemini 3.5 Flash (Llamando...)" : selectedLanguage === "de" ? "Google Gemini 3.5 Flash (Wird aufgerufen...)" : selectedLanguage === "tr" ? "Google Gemini 3.5 Flash (Aranıyor...)" : "Google Gemini 3.5 Flash (Calling...)") : transcriptionModel}
                                 </span>
                               </div>
                               <div>
@@ -3374,7 +3578,13 @@ export default function VideosPage() {
                         <BookOpen className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
                         <div className="text-left">
                           <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
-                            {t.summaryTab || "Resumen Detallado del Contenido"}
+                            {selectedLanguage === "es"
+                              ? "Resumen Detallado del Contenido"
+                              : selectedLanguage === "de"
+                              ? "Detaillierte Inhaltszusammenfassung"
+                              : selectedLanguage === "tr"
+                              ? "Detaylı İçerik Özeti"
+                              : "Detailed Content Summary"}
                           </h3>
                           <p className="text-[10px] text-zinc-500 font-medium">
                             {selectedLanguage === "es" ? "Navegación Segmentada con Marcas de Tiempo Interactivas" : selectedLanguage === "de" ? "Segmentierte Navigation mit interaktiven Zeitstempeln" : selectedLanguage === "tr" ? "Etkileşimli Zaman Damgaları ile Bölümlere Ayrılmış Gezinti" : "Segmented Navigation with Interactive Timestamps"}
@@ -3531,14 +3741,13 @@ export default function VideosPage() {
                                           >
                                             {/* Left Column: Visual Snapshot / YouTube Alert */}
                                             <div className="w-full">
-                                              {isYt ? (
-                                                <YoutubeCorsWarning selectedLanguage={selectedLanguage} />
-                                              ) : (
-                                                <VideoFrameSnapshot 
-                                                  src={activeStudyVideo.file_url} 
-                                                  targetTime={chart.seconds} 
-                                                />
-                                              )}
+                                              <SmartVideoSnapshot
+                                                videoId={activeStudyVideo.id}
+                                                fileUrl={activeStudyVideo.file_url}
+                                                targetTime={chart.seconds}
+                                                isYt={isYt}
+                                                selectedLanguage={selectedLanguage}
+                                              />
                                             </div>
 
                                             {/* Right Column: Title, Play Button, Bullets, Legend */}
@@ -3639,7 +3848,13 @@ export default function VideosPage() {
                         </div>
                         <div className="text-left">
                           <h3 className="text-sm font-extrabold text-white tracking-wide uppercase flex items-center gap-1.5">
-                            {t.audioTab || "Audio Resumen Narrado por IA"}
+                            {selectedLanguage === "es"
+                              ? "Audio Resumen Narrado por IA"
+                              : selectedLanguage === "de"
+                              ? "KI-narrative Audio-Zusammenfassung"
+                              : selectedLanguage === "tr"
+                              ? "Yapay Zeka Anlatımlı Sesli Özet"
+                              : "AI-Narrated Audio Summary"}
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20">
                               {t.maleVoice || "MASCULINO Premium"}
                             </span>
@@ -3913,7 +4128,13 @@ export default function VideosPage() {
                         <Briefcase className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
                         <div className="text-left">
                           <h3 className="text-sm font-extrabold text-white tracking-wide uppercase">
-                            {selectedLanguage === "es" ? "Informe de Análisis de Inversión" : t.summaryTab || "Informe de Análisis de Inversión"}
+                            {selectedLanguage === "es"
+                              ? "Informe de Análisis de Inversión"
+                              : selectedLanguage === "de"
+                              ? "Investitionsanalysebericht"
+                              : selectedLanguage === "tr"
+                              ? "Yatırım Analiz Raporu"
+                              : "Investment Analysis Report"}
                           </h3>
                           <p className="text-[10px] text-zinc-500 font-medium">
                             {selectedLanguage === "es"

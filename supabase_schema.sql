@@ -51,7 +51,7 @@ create table public.documents (
   user_id uuid references public.profiles(id) on delete cascade not null,
   title text not null,
   description text,
-  type text check (type in ('chart', 'audio', 'video')) not null,
+  type text check (type in ('chart', 'audio', 'video', 'knowledge_transcription', 'knowledge_summary', 'knowledge_charts', 'knowledge_analysis')) not null,
   file_url text, -- URL del archivo subido en Storage o enlace externo
   metadata jsonb default '{}'::jsonb, -- Datos para gráficos o duración
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
