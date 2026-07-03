@@ -591,6 +591,12 @@ function splitTranscription(text: string) {
 // Persiste por separado la transcripción literal, el resumen estructurado, los gráficos y el análisis de inversión
 async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: string; metadata?: any }, transcriptionText: string) {
   try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      console.warn("[Base de Conocimiento] No user session found, skipping knowledge base save.");
+      return;
+    }
+
     const splitResult = splitTranscription(transcriptionText);
     const channelTitle = videoDoc.metadata?.channel_title || "Andrei Jikh";
     const dateStr = new Date().toISOString();
@@ -598,6 +604,7 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
 
     // 1. Literal transcription
     const transcriptionDoc = {
+      user_id: user.id,
       title: `[Transcripción] - ${videoDoc.title}`,
       description: `Transcripción completa literal de ${videoDoc.title}`,
       type: "knowledge_transcription",
@@ -612,6 +619,7 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
 
     // 2. Content summary
     const summaryDoc = {
+      user_id: user.id,
       title: `[Resumen] - ${videoDoc.title}`,
       description: `Resumen de contenido completo de ${videoDoc.title}`,
       type: "knowledge_summary",
@@ -626,6 +634,7 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
 
     // 3. Charts and Visualizations
     const chartsDoc = {
+      user_id: user.id,
       title: `[Gráficos] - ${videoDoc.title}`,
       description: `Gráficos y visualizaciones detectadas de ${videoDoc.title}`,
       type: "knowledge_charts",
@@ -640,6 +649,7 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
 
     // 4. Investment analysis report
     const analysisDoc = {
+      user_id: user.id,
       title: `[Análisis] - ${videoDoc.title}`,
       description: `Informe de análisis financiero de ${videoDoc.title}`,
       type: "knowledge_analysis",
@@ -3062,6 +3072,9 @@ export default function VideosPage() {
     setSyncing(true);
     setSyncError(null);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No se encontró una sesión de usuario activa.");
+
       // Start-from-scratch cleanup disabled by user request. We keep existing videos and continue syncing new ones incrementally.
 
       // Fetch existing videos in the DB first to execute a smart sync (skip already synced & transcribed)
@@ -3108,6 +3121,7 @@ export default function VideosPage() {
         globallySyncedUrls.add(fv.file_url);
 
         const newDoc = {
+          user_id: user.id,
           title: fv.title,
           description: fv.description,
           type: "video",
@@ -3223,9 +3237,13 @@ export default function VideosPage() {
     setFormLoading(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No se encontró una sesión de usuario activa.");
+
       const finalThumbnail = thumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80";
 
       const newVideo = {
+        user_id: user.id,
         title,
         description,
         type: "video",

@@ -140,6 +140,9 @@ export default function ChartsPage() {
     setFormLoading(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No se encontró una sesión de usuario activa.");
+
       // Structure the data to match standard seed charts
       const formattedData = formFields.map(f => ({
         name: f.label || "Sin etiqueta",
@@ -148,6 +151,7 @@ export default function ChartsPage() {
       }));
 
       const newChart = {
+        user_id: user.id,
         title,
         description,
         type: "chart",

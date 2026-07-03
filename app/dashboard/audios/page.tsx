@@ -190,7 +190,11 @@ export default function AudiosPage() {
     setFormLoading(true);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No se encontró una sesión de usuario activa.");
+
       const newAudio = {
+        user_id: user.id,
         title,
         description,
         type: "audio",
