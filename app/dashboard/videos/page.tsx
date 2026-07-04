@@ -3133,6 +3133,33 @@ export default function VideosPage() {
     });
   }
 
+  // Refs to track previous channel and favorite filters to detect feed switches
+  const prevFilterChannelRef = useRef<string | null>(null);
+  const prevFilterFavoriteRef = useRef<boolean>(false);
+
+  // Automatically select the first video of the feed when changing channels/favorites, or on initial load
+  useEffect(() => {
+    const channelChanged = prevFilterChannelRef.current !== filterChannel;
+    const favoriteChanged = prevFilterFavoriteRef.current !== filterFavorite;
+
+    if (!loading) {
+      const shouldForceFirstVideo = channelChanged || favoriteChanged || !selectedVideo;
+      
+      if (shouldForceFirstVideo) {
+        setActiveStudyVideo(null);
+        if (filteredVideos && filteredVideos.length > 0) {
+          setSelectedVideo(filteredVideos[0]);
+        } else {
+          setSelectedVideo(null);
+        }
+      }
+      
+      // Update refs to the current values
+      prevFilterChannelRef.current = filterChannel;
+      prevFilterFavoriteRef.current = filterFavorite;
+    }
+  }, [filterChannel, filterFavorite, loading, selectedVideo, filteredVideos.length]);
+
 
   // Form states
   const [title, setTitle] = useState("");
