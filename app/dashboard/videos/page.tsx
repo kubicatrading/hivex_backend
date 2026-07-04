@@ -2178,8 +2178,22 @@ export default function VideosPage() {
   // Asynchronous background transcription runner for smart automatic sync transcribing
   const triggerBackgroundTranscription = useCallback(async (videoDoc: VideoDocument) => {
     if (videoDoc.metadata?.transcription) {
-      console.log(`[Asíncrono] El vídeo ya tiene transcripción en BBDD: ${videoDoc.title}. Asegurando presencia en base de conocimiento...`);
+      console.log(`[Asíncrono] El vídeo ya tiene transcripción en BBDD: ${videoDoc.title}. Asegurando presencia en base de conocimiento y disparando extracción de snapshots...`);
       saveVideoKnowledgeBase(videoDoc, videoDoc.metadata.transcription);
+      
+      // Lanzar petición silenciosa al backend para asegurar la extracción de snapshots
+      fetch("/api/videos/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: videoDoc.id,
+          fileUrl: videoDoc.file_url,
+          title: videoDoc.title,
+          duration: videoDoc.metadata?.duration || "12:00",
+          transcription: videoDoc.metadata.transcription
+        })
+      }).catch(err => console.warn("[Asíncrono] Error al disparar extracción silenciosa de snapshots:", err));
+
       return;
     }
     if (transcribingVideoIdsRef.current.has(videoDoc.id)) {
@@ -2201,6 +2215,19 @@ export default function VideosPage() {
 
             // Asegurar la presencia en la base de conocimiento persistente
             saveVideoKnowledgeBase(videoDoc, transcriptionText);
+
+            // Lanzar petición silenciosa al backend para asegurar la extracción de snapshots
+            fetch("/api/videos/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                videoId: videoDoc.id,
+                fileUrl: videoDoc.file_url,
+                title: videoDoc.title,
+                duration: videoDoc.metadata?.duration || "12:00",
+                transcription: transcriptionText
+              })
+            }).catch(err => console.warn("[Asíncrono] Error al disparar extracción silenciosa de snapshots desde caché:", err));
 
             // Sincronizar de forma silenciosa la base de datos Supabase del usuario actual para asociarlo de forma nativa
             const updatedMetadata = {
@@ -2518,7 +2545,6 @@ export default function VideosPage() {
       const dateVal = Date.parse(v.created_at);
       const cutoffVal = Date.parse("2026-06-24T00:00:00Z");
       const isBeforeCutoff = v.created_at.includes("2026-06-22") || 
-                             v.created_at.includes("22") || 
                              (!isNaN(dateVal) && dateVal < cutoffVal);
       if (isBeforeCutoff) {
         return false;
@@ -2727,7 +2753,6 @@ export default function VideosPage() {
             const dateVal = Date.parse(video.created_at);
             const cutoffVal = Date.parse("2026-06-24T00:00:00Z");
             const isBeforeCutoff = video.created_at.includes("2026-06-22") || 
-                                   video.created_at.includes("22") || 
                                    (!isNaN(dateVal) && dateVal < cutoffVal);
             if (isBeforeCutoff) {
               console.log(`[Pruner] Pruning old Andrei video: ${video.title} (${video.created_at})`);
@@ -3020,6 +3045,20 @@ export default function VideosPage() {
         .delete()
         .eq("type", "knowledge_analysis");
       if (kAnalysisError) throw kAnalysisError;
+
+      // 1d. Delete any other knowledge documents matching knowledge_*
+      const { error: kAnyError } = await supabase
+        .from("documents")
+        .delete()
+        .like("type", "knowledge_%");
+      if (kAnyError) throw kAnyError;
+
+      // 1e. Delete all chart documents of type 'chart'
+      const { error: chartError } = await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "chart");
+      if (chartError) throw chartError;
 
       // 2. Reset React states
       setTranscriptionStates({});

@@ -523,8 +523,23 @@ ${rawTranscriptText}`;
 
 export async function POST(request: Request) {
   try {
-    const body: TranscribeRequestBody = await request.json();
-    const { videoId, fileUrl, title, duration = "12:00" } = body;
+    const body: TranscribeRequestBody & { transcription?: string } = await request.json();
+    const { videoId, fileUrl, title, duration = "12:00", transcription } = body;
+
+    if (transcription) {
+      console.log(`[Transcribe API] Received pre-existing transcription for video ${videoId}. Skipping Gemini call and proceeding to extract snapshots.`);
+      // Fire-and-forget background job to extract charts snapshots via ffmpeg
+      extractSnapshotsInBackground(videoId, fileUrl, transcription);
+      return NextResponse.json({
+        success: true,
+        videoId,
+        title,
+        duration,
+        transcription,
+        modelUsed: "Pre-existing (Skipped Gemini call)",
+        status: "completado"
+      });
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     const authHeader = request.headers.get("Authorization");
