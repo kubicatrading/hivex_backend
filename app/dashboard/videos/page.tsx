@@ -1379,6 +1379,24 @@ function VideoFrameSnapshot({ src, targetTime }: { src: string; targetTime: numb
   );
 }
 
+// Helper function to extract the 11-char YouTube ID from various URL formats
+function getYoutubeId(url: string): string | null {
+  if (!url) return null;
+  const regexes = [
+    /youtube\.com\/embed\/([a-zA-Z0-9_\-]{11})/,
+    /youtube\.com\/watch\?v=([a-zA-Z0-9_\-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_\-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_\-]{11})/
+  ];
+  for (const regex of regexes) {
+    const match = url.match(regex);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
 function SmartVideoSnapshot({ 
   videoId, 
   fileUrl, 
@@ -1438,7 +1456,30 @@ function SmartVideoSnapshot({
     );
   }
 
+  // Graceful interactive fallback for YouTube videos when static file is not available (such as in production)
   if (isYt && error) {
+    const ytId = getYoutubeId(fileUrl);
+    if (ytId) {
+      return (
+        <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950 hover:border-zinc-800 transition-all duration-300">
+          <iframe
+            src={`https://www.youtube.com/embed/${ytId}?start=${targetTime}&autoplay=0&mute=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`}
+            title={`Snapshot at ${targetTime}s`}
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            loading="lazy"
+          />
+          {/* Elegant active live preview badge */}
+          <div className="absolute top-2 left-2 z-10 pointer-events-none">
+            <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-zinc-950/95 border border-emerald-500/20 px-2.5 py-1 rounded-full uppercase shadow-md flex items-center gap-1.5 backdrop-blur-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+              LIVE PREVIEW: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
+            </span>
+          </div>
+        </div>
+      );
+    }
     return <YoutubeCorsWarning selectedLanguage={selectedLanguage} />;
   }
 
