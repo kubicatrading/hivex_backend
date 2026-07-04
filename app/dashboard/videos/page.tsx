@@ -1649,7 +1649,7 @@ function YouTubeSnapshotPlayer({
     }, 500);
 
     return () => clearInterval(interval);
-  }, [ytId, sendListeningPing]);
+  }, [ytId, targetTime, endSeconds, sendListeningPing]);
 
   const originParam = typeof window !== "undefined" ? `&origin=${encodeURIComponent(window.location.origin)}` : "";
   const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${endSeconds ? `&end=${Math.floor(endSeconds)}` : ""}&autoplay=1&mute=1&enablejsapi=1${originParam}&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
@@ -1661,6 +1661,7 @@ function YouTubeSnapshotPlayer({
       <iframe
         ref={iframeRef}
         src={srcUrl}
+        onLoad={sendListeningPing}
         title={`Snapshot at ${targetTime}s`}
         className="w-full h-full border-0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -2035,13 +2036,13 @@ export default function VideosPage() {
   const formatElapsed = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `[${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}]`;
+    return `[${mins.toString().padStart(2, "0")}]:[${secs.toString().padStart(2, "0")}]`;
   };
 
   const formatTotal = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `[${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}]`;
+    return `[${mins.toString().padStart(2, "0")}]:[${secs.toString().padStart(2, "0")}]`;
   };
 
   // Controller for translation to active study video
@@ -2321,11 +2322,14 @@ export default function VideosPage() {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("deutsch"));
           }
         } else if (selectedLanguage === "es") {
-          // Priority 1: Google Neural Cloud Voices (Chrome) - extremely fluid
+          // Priority 1: Apple Siri Voices (extremely natural, human-sounding offline voices)
           bestVoice = voicesToUse.find(v => 
-            v.name.toLowerCase().includes("google") && 
-            (v.name.toLowerCase().includes("espan") || v.name.toLowerCase().includes("españ") || v.name.toLowerCase().includes("spanish"))
+            v.name.toLowerCase().includes("siri") && 
+            (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("españ"))
           );
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri"));
+          }
           
           // Priority 2: Microsoft Natural/Online Voices (Edge, etc.) - extremely fluid
           if (!bestVoice) {
@@ -2340,18 +2344,7 @@ export default function VideosPage() {
             );
           }
           
-          // Priority 3: Apple Siri Voices (high quality, natural)
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("siri") && 
-              (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("españ"))
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri"));
-          }
-          
-          // Priority 4: Apple Premium Local Voices (jorge, juan, julio)
+          // Priority 3: Apple Premium Local Voices (jorge, juan, julio)
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => 
               v.name.toLowerCase().includes("jorge") || 
@@ -2360,12 +2353,18 @@ export default function VideosPage() {
             );
           }
           
-          // Priority 5: Any Google voice as fallback
+          // Priority 4: Google Voices (Chrome fallback, as they sound more robotic/metallic)
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              v.name.toLowerCase().includes("google") && 
+              (v.name.toLowerCase().includes("espan") || v.name.toLowerCase().includes("españ") || v.name.toLowerCase().includes("spanish"))
+            );
+          }
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google"));
           }
 
-          // Priority 6: Any local service voice
+          // Priority 5: Any local service voice
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.localService === true);
           }
@@ -2383,9 +2382,19 @@ export default function VideosPage() {
     };
 
     loadVoices();
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    if (window.speechSynthesis.addEventListener) {
+      window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+    } else if (window.speechSynthesis.onvoiceschanged !== undefined) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
+
+    return () => {
+      if (window.speechSynthesis.removeEventListener) {
+        window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
+      } else if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
+    };
   }, [selectedLanguage]);
 
 
