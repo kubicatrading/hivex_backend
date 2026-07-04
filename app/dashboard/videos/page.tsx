@@ -1445,15 +1445,20 @@ function YouTubeSnapshotPlayer({
   targetTime,
   endSeconds,
   selectedLanguage,
+  isPlaying,
+  onEnded,
 }: {
   ytId: string;
   targetTime: number;
   endSeconds?: number;
   selectedLanguage: string;
+  isPlaying?: boolean;
+  onEnded?: () => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isPausedAtTarget, setIsPausedAtTarget] = useState(false);
   const hasPaused = useRef(false);
+  const hasEnded = useRef(false);
 
   // Send command to the YouTube iframe
   const sendPlayerCommand = useCallback((func: string, args: any[] = []) => {
@@ -1485,14 +1490,32 @@ function YouTubeSnapshotPlayer({
         const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
         if (data && (data.event === "onStateChange" || data.event === "infoDelivery")) {
           const state = data.info?.playerState ?? data.info;
+          
           // State 1 is PLAYING
           if (state === 1 && !hasPaused.current) {
             hasPaused.current = true;
-            // Immediately pause the video on the target frame
+            if (!isPlaying) {
+              // Immediately pause the video on the target frame
+              sendPlayerCommand("pauseVideo");
+              // Unmute so when the user manually plays, it has sound
+              sendPlayerCommand("unMute");
+              setIsPausedAtTarget(true);
+            } else {
+              // If we want it to keep playing, just unmute and mark ready
+              sendPlayerCommand("unMute");
+              setIsPausedAtTarget(true);
+            }
+          }
+
+          // State 0 is ENDED
+          if (state === 0) {
+            hasEnded.current = true;
+            // Seek back to targetTime and pause
+            sendPlayerCommand("seekTo", [targetTime, true]);
             sendPlayerCommand("pauseVideo");
-            // Unmute so when the user manually plays, it has sound
-            sendPlayerCommand("unMute");
-            setIsPausedAtTarget(true);
+            if (onEnded) {
+              onEnded();
+            }
           }
         }
       } catch (e) {
@@ -1504,31 +1527,49 @@ function YouTubeSnapshotPlayer({
     return () => {
       window.removeEventListener("message", handleMessage);
     };
-  }, [sendPlayerCommand]);
+  }, [sendPlayerCommand, targetTime, isPlaying, onEnded]);
 
   // Robust fallback: if playing message is not captured within 3 seconds, force pause and unmute
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!hasPaused.current) {
         hasPaused.current = true;
-        sendPlayerCommand("pauseVideo");
+        if (!isPlaying) {
+          sendPlayerCommand("pauseVideo");
+        }
         sendPlayerCommand("unMute");
         setIsPausedAtTarget(true);
       }
     }, 3000);
 
     return () => clearTimeout(timer);
-  }, [sendPlayerCommand, ytId, targetTime]);
+  }, [sendPlayerCommand, ytId, targetTime, isPlaying]);
+
+  // Respond to isPlaying changes instantly (without waiting for isPausedAtTarget)
+  useEffect(() => {
+    if (isPlaying) {
+      if (hasEnded.current) {
+        sendPlayerCommand("seekTo", [targetTime, true]);
+        hasEnded.current = false;
+      }
+      sendPlayerCommand("playVideo");
+    } else {
+      sendPlayerCommand("pauseVideo");
+    }
+  }, [isPlaying, sendPlayerCommand, targetTime]);
 
   // Reset state if video or target time changes
   useEffect(() => {
     hasPaused.current = false;
     setIsPausedAtTarget(false);
+    hasEnded.current = false;
   }, [ytId, targetTime, endSeconds]);
 
   const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${
     endSeconds ? `&end=${endSeconds}` : ""
   }&autoplay=1&mute=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
+
+  const showLoader = !isPausedAtTarget && !isPlaying;
 
   return (
     <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950 hover:border-zinc-800 transition-all duration-300">
@@ -1541,7 +1582,7 @@ function YouTubeSnapshotPlayer({
         allowFullScreen
       />
       
-      {!isPausedAtTarget && (
+      {showLoader && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 z-20 transition-opacity duration-300 pointer-events-none">
           <Loader2 className="w-6 h-6 text-emerald-400 animate-spin mb-2" />
           <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">
@@ -1568,7 +1609,9 @@ function SmartVideoSnapshot({
   targetTime, 
   endSeconds,
   isYt, 
-  selectedLanguage 
+  selectedLanguage,
+  isPlaying,
+  onEnded,
 }: { 
   videoId: string; 
   fileUrl: string; 
@@ -1576,7 +1619,9 @@ function SmartVideoSnapshot({
   endSeconds?: number;
   isYt: boolean; 
   selectedLanguage: string; 
-  }) {
+  isPlaying?: boolean;
+  onEnded?: () => void;
+}) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(isYt);
@@ -1623,8 +1668,10 @@ function SmartVideoSnapshot({
     );
   }
 
-  // Graceful interactive fallback for YouTube videos when static file is not available (such as in production)
-  if (isYt && error) {
+  // Render YouTubeSnapshotPlayer if it is a YT video and either isPlaying is true or snapshot image errored (e.g. in production)
+  const showPlayer = isYt && (isPlaying || error);
+
+  if (showPlayer) {
     const ytId = getYoutubeId(fileUrl);
     if (ytId) {
       return (
@@ -1633,6 +1680,8 @@ function SmartVideoSnapshot({
           targetTime={targetTime}
           endSeconds={endSeconds}
           selectedLanguage={selectedLanguage}
+          isPlaying={isPlaying}
+          onEnded={onEnded}
         />
       );
     }
@@ -1759,6 +1808,12 @@ export default function VideosPage() {
   const [selectedVideo, setSelectedVideo] = useState<VideoDocument | null>(null);
   const [activeStudyVideo, setActiveStudyVideo] = useState<VideoDocument | null>(null);
   const [playerTime, setPlayerTime] = useState<number | null>(null);
+  const [playingChartIdx, setPlayingChartIdx] = useState<number | null>(null);
+
+  // Reset playing chart index when active video changes
+  useEffect(() => {
+    setPlayingChartIdx(null);
+  }, [activeStudyVideo]);
   const [transcriptionExpanded, setTranscriptionExpanded] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false); // Collapsed by default for a cleaner study desk
   const [chartsExpanded, setChartsExpanded] = useState(false);
@@ -4005,6 +4060,8 @@ export default function VideosPage() {
                                                 endSeconds={chart.endSeconds}
                                                 isYt={isYt}
                                                 selectedLanguage={selectedLanguage}
+                                                isPlaying={isYt && playingChartIdx === idx}
+                                                onEnded={() => setPlayingChartIdx(null)}
                                               />
                                             </div>
 
@@ -4013,7 +4070,7 @@ export default function VideosPage() {
                                               <div className="flex items-start justify-between gap-3">
                                                 <div>
                                                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                                    <span className="text-[10px] font-black tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">
+                                                    <span className="text-[10px] font-black tracking-widest text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full uppercase">
                                                       {chart.timestamp}
                                                     </span>
                                                     <span className="text-[9px] font-black tracking-widest text-zinc-500 bg-zinc-900/80 px-2 py-0.5 rounded-full uppercase">
@@ -4026,16 +4083,43 @@ export default function VideosPage() {
                                                 </div>
                                                 <button
                                                   onClick={() => {
-                                                    setPlayerTime(chart.seconds);
-                                                    if (studyVideoRef.current) {
-                                                      studyVideoRef.current.currentTime = chart.seconds;
-                                                      studyVideoRef.current.play().catch(err => console.log("Autoplay prevented:", err));
+                                                    if (isYt) {
+                                                      if (playingChartIdx === idx) {
+                                                        setPlayingChartIdx(null);
+                                                      } else {
+                                                        setPlayingChartIdx(idx);
+                                                      }
+                                                    } else {
+                                                      // Local html5 video playback control fallback
+                                                      setPlayerTime(chart.seconds);
+                                                      if (studyVideoRef.current) {
+                                                        studyVideoRef.current.currentTime = chart.seconds;
+                                                        studyVideoRef.current.play().catch(err => console.log("Autoplay prevented:", err));
+                                                      }
                                                     }
                                                   }}
-                                                  className="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 hover:text-emerald-300 transition-all shadow-md shrink-0 flex items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider px-3"
+                                                  className={`p-2 rounded-xl transition-all shadow-md shrink-0 flex items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider px-3 ${
+                                                    isYt && playingChartIdx === idx
+                                                      ? "bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 hover:text-amber-300"
+                                                      : "bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 hover:text-emerald-300"
+                                                  }`}
                                                 >
-                                                  <Play className="w-3.5 h-3.5 fill-current" />
-                                                  <span>{selectedLanguage === "es" ? "Ir" : selectedLanguage === "de" ? "Ansehen" : selectedLanguage === "tr" ? "Git" : "Play"}</span>
+                                                  {isYt && playingChartIdx === idx ? (
+                                                    <>
+                                                      <Pause className="w-3.5 h-3.5 fill-current" />
+                                                      <span>{selectedLanguage === "es" ? "Pausar" : selectedLanguage === "de" ? "Pause" : selectedLanguage === "tr" ? "Duraklat" : "Pause"}</span>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <Play className="w-3.5 h-3.5 fill-current" />
+                                                      <span>
+                                                        {isYt
+                                                          ? (selectedLanguage === "es" ? "Play" : selectedLanguage === "de" ? "Abspielen" : selectedLanguage === "tr" ? "Oynat" : "Play")
+                                                          : (selectedLanguage === "es" ? "Ir" : selectedLanguage === "de" ? "Ansehen" : selectedLanguage === "tr" ? "Git" : "Play")
+                                                        }
+                                                      </span>
+                                                    </>
+                                                  )}
                                                 </button>
                                               </div>
 
