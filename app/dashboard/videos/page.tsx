@@ -2556,7 +2556,10 @@ export default function VideosPage() {
     }
     const finalCh = v.metadata?.channel_title || "Andrei Jikh";
     if (!filterChannel) {
-      return finalCh === "Andrei Jikh";
+      return finalCh === "Andrei Jikh" || finalCh === "Andrei Jikh (Mock Feed)";
+    }
+    if (filterChannel === "Andrei Jikh") {
+      return finalCh === "Andrei Jikh" || finalCh === "Andrei Jikh (Mock Feed)";
     }
     return finalCh === filterChannel;
   });
@@ -4291,7 +4294,7 @@ export default function VideosPage() {
 
         <div className="flex flex-col gap-2.5 self-start md:self-auto">
           {/* RESET BUTTON - Only visible to superuser */}
-          {userEmail && (userEmail === "admin@kubicatrading.es" || userEmail.startsWith("admin@kubicatrading")) && (
+          {userEmail && (userEmail === "admin@kubicatrading.es" || userEmail.startsWith("admin@kubicatrading") || userEmail === "semeviene@hotmail.es") && (
             <button
               onClick={handleResetTestingVideos}
               disabled={isResetting || syncing}
