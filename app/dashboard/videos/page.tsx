@@ -4920,10 +4920,10 @@ export default function VideosPage() {
 
           {/* Video Details Card & Financial Reports */}
           {selectedVideo && (
-            <div className="p-6 rounded-2xl border border-zinc-900 bg-zinc-900/10 space-y-5 relative overflow-hidden">
+            <div className="p-6 rounded-2xl border border-zinc-900 bg-zinc-900/10 relative overflow-hidden">
               <div className="absolute top-[-20%] left-[-20%] w-[50%] h-[50%] bg-sky-500/5 blur-[50px] pointer-events-none" />
               
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-900/50 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-bold text-white tracking-tight leading-snug">{selectedVideo.title}</h2>
                   <p className="text-xs text-zinc-500 mt-1">
@@ -4945,46 +4945,6 @@ export default function VideosPage() {
                     {selectedVideo.metadata.resolution}
                   </div>
                 </div>
-              </div>
-
-              <div className="leading-relaxed">
-                <p className="text-zinc-400 font-light text-xs whitespace-pre-line">
-                  {(() => {
-                    const desc = selectedVideo.description || "";
-                    if (!desc) {
-                      return selectedLanguage === "es" ? "Sin descripción proporcionada para este vídeo." : selectedLanguage === "de" ? "Keine Beschreibung für dieses Video bereitgestellt." : selectedLanguage === "tr" ? "Bu video için açıklama sağlanmadı." : "No description provided for this video.";
-                    }
-                    
-                    // Split lines to filter out promotion/affiliate links, social media, and long disclosures
-                    const lines = desc.split("\n");
-                    const cleanedLines = lines.filter(line => {
-                      const lower = line.toLowerCase().trim();
-                      if (line.trim().startsWith("►")) return false;
-                      if (lower.includes("http://") || lower.includes("https://")) return false;
-                      if (lower.startsWith("bundle:") || lower.startsWith("premium:")) return false;
-                      if (lower.includes("disclosure:") || lower.includes("past performance") || lower.includes("you should not treat")) return false;
-                      if (lower.includes("patreon.com") || lower.includes("instagram.com") || lower.includes("twitter.com")) return false;
-                      return true;
-                    }).map(line => line.trim()).filter(Boolean);
-
-                    const joined = cleanedLines.join("\n").trim();
-                    if (!joined) {
-                      return selectedLanguage === "es" 
-                        ? `Vídeo de YouTube de Andrei Jikh: "${selectedVideo.title}".` 
-                        : selectedLanguage === "de" 
-                        ? `YouTube-Video von Andrei Jikh: "${selectedVideo.title}".` 
-                        : selectedLanguage === "tr" 
-                        ? `Andrei Jikh'ten YouTube videosu: "${selectedVideo.title}".` 
-                        : `YouTube video from Andrei Jikh: "${selectedVideo.title}".`;
-                    }
-
-                    // Limit length to prevent layout bloating
-                    if (joined.length > 220) {
-                      return joined.substring(0, 220) + "...";
-                    }
-                    return joined;
-                  })()}
-                </p>
               </div>
             </div>
           )}

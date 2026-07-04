@@ -214,47 +214,30 @@ async function handleSync() {
         const { createClient } = await import("@supabase/supabase-js");
         const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
           auth: { persistSession: false }
-        });
+        });        // 1. Obtener videos existentes de forma global en la videoteca compartida
+        const { data: existingDocs, error: fetchErr } = await supabaseAdmin
+          .from("documents")
+          .select("file_url")
+          .eq("type", "video");
 
-        // 1. Obtener todos los perfiles de usuario registrados
-        const { data: profiles, error: profilesError } = await supabaseAdmin
-          .from("profiles")
-          .select("id");
+        if (fetchErr) {
+          console.error("[Daemon] Error al obtener videos existentes globales:", fetchErr);
+        } else {
+          const existingUrls = new Set((existingDocs || []).map((v) => v.file_url));
+          const uniqueNewVideos: typeof syncedVideos = [];
 
-        if (profilesError) {
-          console.error("[Daemon] Error al obtener perfiles de usuario:", profilesError);
-        } else if (profiles && profiles.length > 0) {
-          console.log(`[Daemon] Sincronizando canal para ${profiles.length} perfiles registrados...`);
-          
-          // 2. Determinar cuáles son los nuevos videos únicos a insertar entre todos los usuarios
-          const uniqueNewVideos = new Map<string, typeof syncedVideos[0]>();
-          for (const profile of profiles) {
-            const userId = profile.id;
-            const { data: existingDocs, error: fetchErr } = await supabaseAdmin
-              .from("documents")
-              .select("file_url")
-              .eq("user_id", userId)
-              .eq("type", "video");
-
-            if (fetchErr) {
-              console.warn(`[Daemon] Error al obtener videos existentes para el usuario ${userId}:`, fetchErr);
-              continue;
-            }
-
-            const existingUrls = new Set((existingDocs || []).map((v) => v.file_url));
-            for (const fv of syncedVideos) {
-              if (!existingUrls.has(fv.file_url)) {
-                uniqueNewVideos.set(fv.file_url, fv);
-              }
+          for (const fv of syncedVideos) {
+            if (!existingUrls.has(fv.file_url)) {
+              uniqueNewVideos.push(fv);
             }
           }
 
-          console.log(`[Daemon] Se detectaron ${uniqueNewVideos.size} vídeos nuevos únicos para sincronizar.`);
+          console.log(`[Daemon] Se detectaron ${uniqueNewVideos.length} vídeos nuevos únicos globales para sincronizar.`);
 
-          // 3. Pre-transcribir de manera automática cada nuevo vídeo usando la API de Gemini
+          // 2. Pre-transcribir de manera automática cada nuevo vídeo usando la API de Gemini
           const transcriptionMap: Record<string, { transcription: string; modelUsed: string }> = {};
 
-          for (const fv of uniqueNewVideos.values()) {
+          for (const fv of uniqueNewVideos) {
             const ytId = extractYoutubeId(fv.file_url, fv.id);
             if (ytId && !ytId.startsWith("fed-") && !ytId.startsWith("market-") && !ytId.startsWith("btc-")) {
               // Real videos: We bypass synchronous transcription during sync to prevent Vercel Gateway timeouts (max 10s on Hobby).
@@ -356,7 +339,7 @@ async function handleSync() {
 ### ⚠️ Risk Alerts & Breaking News
 - **Crisis inmobiliaria comercial**: Los masivos vencimientos de deuda en el sector de oficinas plantean un severo riesgo de refinanciación a partir de 2026.
 - **Vulnerabilidad de la banca regional**: Las entidades con alta exposición a activos inmobiliarios comerciales podrían sufrir tensiones de liquidez y crisis de solvencia localizadas.
-- **Gestión conservadora de liquidez**: Se aconseja mantener una posición holgada de efectivo libre de riesgo para capturar oportunidades ante posibles liquidaciones o ventas forzosas de activos distress.`;
+- **Gestión conservadora de liquidez**: Se aconseja mantener una posición holgada de efectivo libre de riesgo para capturar oportunidades ante posibles liquidaciones o ventas forzosas de activos de distress.`;
 
               transcriptionMap[fv.file_url] = {
                 transcription: realisticMockTranscription,
@@ -365,57 +348,41 @@ async function handleSync() {
             }
           }
 
-          // 4. Insertar los nuevos documentos pre-transcritos para cada perfil de usuario
-          for (const profile of profiles) {
-            const userId = profile.id;
-            const { data: existingDocs } = await supabaseAdmin
+          // 3. Insertar los nuevos documentos de forma unificada bajo el usuario Admin
+          const ADMIN_ID = "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
+          const newDocsToInsert = uniqueNewVideos.map((fv) => {
+            const transData = transcriptionMap[fv.file_url];
+            return {
+              user_id: ADMIN_ID,
+              title: fv.title,
+              description: fv.description,
+              type: "video",
+              file_url: fv.file_url,
+              created_at: fv.created_at,
+              metadata: {
+                duration: fv.metadata.duration,
+                resolution: fv.metadata.resolution,
+                thumbnail: fv.metadata.thumbnail,
+                is_youtube: true,
+                channel_title: fv.metadata.channel_title || "Andrei Jikh",
+                transcription: transData?.transcription,
+                transcription_model: transData?.modelUsed
+              }
+            };
+          });
+
+          if (newDocsToInsert.length > 0) {
+            const { error: insertError } = await supabaseAdmin
               .from("documents")
-              .select("file_url")
-              .eq("user_id", userId)
-              .eq("type", "video");
+              .insert(newDocsToInsert);
 
-            const existingUrls = new Set((existingDocs || []).map((v) => v.file_url));
-            const newDocsToInsert = [];
-
-            for (const fv of syncedVideos) {
-              if (existingUrls.has(fv.file_url)) {
-                continue;
-              }
-
-              const transData = transcriptionMap[fv.file_url];
-
-              newDocsToInsert.push({
-                user_id: userId,
-                title: fv.title,
-                description: fv.description,
-                type: "video",
-                file_url: fv.file_url,
-                created_at: fv.created_at,
-                metadata: {
-                  duration: fv.metadata.duration,
-                  resolution: fv.metadata.resolution,
-                  thumbnail: fv.metadata.thumbnail,
-                  is_youtube: true,
-                  channel_title: fv.metadata.channel_title || "Andrei Jikh",
-                  transcription: transData?.transcription,
-                  transcription_model: transData?.modelUsed
-                }
-              });
-            }
-
-            if (newDocsToInsert.length > 0) {
-              const { error: insertError } = await supabaseAdmin
-                .from("documents")
-                .insert(newDocsToInsert);
-
-              if (insertError) {
-                console.warn(`[Daemon] Error al insertar ${newDocsToInsert.length} nuevos videos para el usuario ${userId}:`, insertError);
-              } else {
-                console.log(`[Daemon] Insertados exitosamente ${newDocsToInsert.length} nuevos videos pre-transcritos para el usuario ${userId}`);
-              }
+            if (insertError) {
+              console.warn(`[Daemon] Error al insertar ${newDocsToInsert.length} nuevos videos para el administrador:`, insertError);
             } else {
-              console.log(`[Daemon] El usuario ${userId} ya está al día. 0 videos insertados.`);
+              console.log(`[Daemon] Sincronizados e insertados exitosamente ${newDocsToInsert.length} nuevos videos bajo el Administrador.`);
             }
+          } else {
+            console.log("[Daemon] La videoteca compartida ya está al día. 0 videos nuevos insertados.");
           }
         }
       } catch (dbErr) {
