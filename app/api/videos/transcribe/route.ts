@@ -306,11 +306,43 @@ export async function transcribeVideoCore(params: {
 
   console.log(`Starting verbatim Gemini transcription for actual YouTube ID: ${actualYtId} (title: ${title})`);
 
-  // Fetch real YouTube transcript using YoutubeTranscript helper
+  // Fetch real YouTube transcript using Supadata API (Primary in production) or local library (Local development fallback)
   let rawTranscriptText = "";
   try {
-    console.log(`Fetching actual YouTube transcript for ID: ${actualYtId}...`);
-    const transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
+    let transcriptLines: { text: string; offset: number; duration: number }[] = [];
+
+    if (process.env.SUPADATA_API_KEY) {
+      console.log(`[Transcript] SUPADATA_API_KEY detected. Attempting high-resiliency fetch from Supadata API for ID: ${actualYtId}...`);
+      try {
+        const url = `https://api.supadata.ai/v1/youtube/transcript?videoId=${actualYtId}&mode=auto`;
+        const res = await fetch(url, {
+          headers: {
+            "x-api-key": process.env.SUPADATA_API_KEY
+          }
+        });
+        if (!res.ok) {
+          throw new Error(`Supadata API returned status code ${res.status}`);
+        }
+        const data = await res.json();
+        if (data && Array.isArray(data.content)) {
+          transcriptLines = data.content.map((item: any) => ({
+            text: String(item.text || ""),
+            offset: Number(item.offset ?? 0),
+            duration: Number(item.duration ?? 0)
+          }));
+          console.log(`[Transcript] Successfully retrieved ${transcriptLines.length} lines from Supadata API.`);
+        } else {
+          throw new Error("Supadata response body does not contain a valid content array.");
+        }
+      } catch (supaErr: unknown) {
+        console.warn(`[Transcript] Supadata API failed: ${supaErr instanceof Error ? supaErr.message : String(supaErr)}. Falling back to local scraper...`);
+        transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
+      }
+    } else {
+      console.log(`[Transcript] SUPADATA_API_KEY not set. Using local youtube-transcript scraper for ID: ${actualYtId}...`);
+      transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
+    }
+
     if (transcriptLines && transcriptLines.length > 0) {
       // Format each line with its starting timestamp [MM:SS] or [HH:MM:SS] so that Gemini gets accurate timing information
       rawTranscriptText = transcriptLines.map(line => {
