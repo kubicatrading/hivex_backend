@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/set-state-in-effect */
 
-import { useState, useEffect, useRef, useCallback, useId } from "react";
+import { useState, useEffect, useRef, useCallback, useId, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { translations } from "@/lib/translations";
@@ -1447,6 +1447,7 @@ function YouTubeSnapshotPlayer({
   selectedLanguage,
   isPlaying,
   onEnded,
+  onPlayingStateChange,
 }: {
   ytId: string;
   targetTime: number;
@@ -1454,6 +1455,7 @@ function YouTubeSnapshotPlayer({
   selectedLanguage: string;
   isPlaying?: boolean;
   onEnded?: () => void;
+  onPlayingStateChange?: (isPlaying: boolean) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isPausedAtTarget, setIsPausedAtTarget] = useState(false);
@@ -1478,6 +1480,15 @@ function YouTubeSnapshotPlayer({
     }
   }, []);
 
+  const triggerEnd = useCallback(() => {
+    hasEnded.current = true;
+    sendPlayerCommand("pauseVideo");
+    sendPlayerCommand("seekTo", [targetTime, true]);
+    if (onEnded) {
+      onEnded();
+    }
+  }, [sendPlayerCommand, targetTime, onEnded]);
+
   // Listen to messages from the YouTube iframe to detect when it starts playing
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -1489,33 +1500,66 @@ function YouTubeSnapshotPlayer({
       try {
         const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
         if (data && (data.event === "onStateChange" || data.event === "infoDelivery")) {
-          const state = data.info?.playerState ?? data.info;
-          
+          const stateVal = data.info?.playerState ?? data.info;
+          const state = typeof stateVal === "number" ? stateVal : undefined;
+          const currentTime = data.info?.currentTime;
+
+          // Check if we reached the end limit based on currentTime
+          if (typeof currentTime === "number" && endSeconds && currentTime >= endSeconds - 0.2) {
+            triggerEnd();
+            return;
+          }
+
+          // Boundary enforcement: if we are somehow way out of bounds, seek back to targetTime
+          if (typeof currentTime === "number") {
+            if (currentTime < targetTime - 1.5) {
+              sendPlayerCommand("seekTo", [targetTime, true]);
+              return;
+            }
+          }
+
           // State 1 is PLAYING
-          if (state === 1 && !hasPaused.current) {
-            hasPaused.current = true;
-            if (!isPlaying) {
-              // Immediately pause the video on the target frame
-              sendPlayerCommand("pauseVideo");
-              // Unmute so when the user manually plays, it has sound
-              sendPlayerCommand("unMute");
-              setIsPausedAtTarget(true);
+          if (state === 1) {
+            if (hasEnded.current) {
+              hasEnded.current = false;
+              sendPlayerCommand("seekTo", [targetTime, true]);
+              if (onPlayingStateChange) {
+                onPlayingStateChange(true);
+              }
+              return;
+            }
+
+            if (!hasPaused.current) {
+              hasPaused.current = true;
+              if (!isPlaying) {
+                // Immediately pause the video on the target frame
+                sendPlayerCommand("pauseVideo");
+                // Unmute so when the user manually plays, it has sound
+                sendPlayerCommand("unMute");
+                setIsPausedAtTarget(true);
+              } else {
+                // If we want it to keep playing, just unmute and mark ready
+                sendPlayerCommand("unMute");
+                setIsPausedAtTarget(true);
+              }
             } else {
-              // If we want it to keep playing, just unmute and mark ready
-              sendPlayerCommand("unMute");
-              setIsPausedAtTarget(true);
+              // Subsequent play events: report to parent to synchronize play state
+              if (!isPlaying && onPlayingStateChange) {
+                onPlayingStateChange(true);
+              }
+            }
+          }
+
+          // State 2 is PAUSED
+          if (state === 2) {
+            if (isPlaying && onPlayingStateChange && hasPaused.current) {
+              onPlayingStateChange(false);
             }
           }
 
           // State 0 is ENDED
           if (state === 0) {
-            hasEnded.current = true;
-            // Seek back to targetTime and pause
-            sendPlayerCommand("seekTo", [targetTime, true]);
-            sendPlayerCommand("pauseVideo");
-            if (onEnded) {
-              onEnded();
-            }
+            triggerEnd();
           }
         }
       } catch (e) {
@@ -1527,7 +1571,7 @@ function YouTubeSnapshotPlayer({
     return () => {
       window.removeEventListener("message", handleMessage);
     };
-  }, [sendPlayerCommand, targetTime, isPlaying, onEnded]);
+  }, [sendPlayerCommand, targetTime, endSeconds, isPlaying, triggerEnd, onPlayingStateChange]);
 
   // Robust fallback: if playing message is not captured within 3 seconds, force pause and unmute
   useEffect(() => {
@@ -1551,8 +1595,14 @@ function YouTubeSnapshotPlayer({
       if (hasEnded.current) {
         sendPlayerCommand("seekTo", [targetTime, true]);
         hasEnded.current = false;
+        // Wait 150ms before playing to avoid race condition of seek & play in YouTube player API
+        const timer = setTimeout(() => {
+          sendPlayerCommand("playVideo");
+        }, 150);
+        return () => clearTimeout(timer);
+      } else {
+        sendPlayerCommand("playVideo");
       }
-      sendPlayerCommand("playVideo");
     } else {
       sendPlayerCommand("pauseVideo");
     }
@@ -1565,9 +1615,7 @@ function YouTubeSnapshotPlayer({
     hasEnded.current = false;
   }, [ytId, targetTime, endSeconds]);
 
-  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${
-    endSeconds ? `&end=${endSeconds}` : ""
-  }&autoplay=1&mute=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
+  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}&autoplay=1&mute=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
 
   const showLoader = !isPausedAtTarget && !isPlaying;
 
@@ -1612,6 +1660,7 @@ function SmartVideoSnapshot({
   selectedLanguage,
   isPlaying,
   onEnded,
+  onPlayingStateChange,
 }: { 
   videoId: string; 
   fileUrl: string; 
@@ -1621,6 +1670,7 @@ function SmartVideoSnapshot({
   selectedLanguage: string; 
   isPlaying?: boolean;
   onEnded?: () => void;
+  onPlayingStateChange?: (isPlaying: boolean) => void;
 }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -1682,6 +1732,7 @@ function SmartVideoSnapshot({
           selectedLanguage={selectedLanguage}
           isPlaying={isPlaying}
           onEnded={onEnded}
+          onPlayingStateChange={onPlayingStateChange}
         />
       );
     }
@@ -1869,6 +1920,66 @@ export default function VideosPage() {
   useEffect(() => {
     selectedVoiceRef.current = selectedVoice;
   }, [selectedVoice]);
+
+  // TTS playback tracking state and estimated duration calculations
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const chunkStarts = useMemo(() => {
+    if (sentenceChunks.length === 0) return [];
+    const starts: number[] = [];
+    let current = 0;
+    sentenceChunks.forEach(chunk => {
+      starts.push(current);
+      const wordCount = chunk.split(/\s+/).filter(Boolean).length;
+      current += Math.max(1.5, wordCount / 2.5);
+    });
+    return starts;
+  }, [sentenceChunks]);
+
+  const totalDuration = useMemo(() => {
+    if (sentenceChunks.length === 0) return 0;
+    let total = 0;
+    sentenceChunks.forEach(chunk => {
+      const wordCount = chunk.split(/\s+/).filter(Boolean).length;
+      total += Math.max(1.5, wordCount / 2.5);
+    });
+    return total;
+  }, [sentenceChunks]);
+
+  useEffect(() => {
+    if (activeSentenceIndex >= 0 && chunkStarts[activeSentenceIndex] !== undefined) {
+      setElapsedSeconds(chunkStarts[activeSentenceIndex]);
+    } else if (activeSentenceIndex === -1) {
+      setElapsedSeconds(0);
+    }
+  }, [activeSentenceIndex, chunkStarts]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isPlayingAudio && !isPausedAudio) {
+      timer = setInterval(() => {
+        setElapsedSeconds(prev => {
+          if (prev < totalDuration) {
+            return prev + 1;
+          }
+          return prev;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [isPlayingAudio, isPausedAudio, totalDuration]);
+
+  const formatElapsed = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatTotal = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
   // Controller for translation to active study video
   const translateContent = async (videoDoc: VideoDocument, langCode: string, originalText: string) => {
@@ -2082,12 +2193,30 @@ export default function VideosPage() {
 
         // Custom search rules per language to ensure premium male quality
         if (selectedLanguage === "en") {
-          // Priority 1: Microsoft Natural English Male voices
+          // Priority 1: Apple Premium Offline Male (Nathan, Evan, Alex) or local service Siri
           bestVoice = voicesToUse.find(v => 
-            v.name.toLowerCase().includes("natural") && 
-            (v.name.toLowerCase().includes("guy") || v.name.toLowerCase().includes("andrew") || v.name.toLowerCase().includes("ryan") || v.name.toLowerCase().includes("brian"))
+            v.localService === true &&
+            (v.name.toLowerCase().includes("nathan") || 
+             v.name.toLowerCase().includes("evan") || 
+             v.name.toLowerCase().includes("alex"))
           );
-          // Priority 2: Apple Premium Male voices (Nathan, Evan, Alex)
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              v.localService === true &&
+              v.name.toLowerCase().includes("siri") && 
+              (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("voice 3"))
+            );
+          }
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.localService === true);
+          }
+          // Fallback to online/any
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              v.name.toLowerCase().includes("natural") && 
+              (v.name.toLowerCase().includes("guy") || v.name.toLowerCase().includes("andrew") || v.name.toLowerCase().includes("ryan") || v.name.toLowerCase().includes("brian"))
+            );
+          }
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => 
               v.name.toLowerCase().includes("nathan") || 
@@ -2095,47 +2224,75 @@ export default function VideosPage() {
               v.name.toLowerCase().includes("alex")
             );
           }
-          // Priority 3: Siri Voice 1/3 (usually male)
           if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("siri") && 
-              (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("voice 3"))
-            );
-          }
-          // Priority 4: Microsoft/Google Male voices
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("david") || 
-              v.name.toLowerCase().includes("mark") || 
-              v.name.toLowerCase().includes("google")
-            );
+            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("david") || v.name.toLowerCase().includes("mark") || v.name.toLowerCase().includes("google"));
           }
         } else if (selectedLanguage === "tr") {
-          // Priority 1: Siri voice 1 / Male
-          bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
-          // Priority 2: Microsoft/Google Male
+          // Priority 1: Siri voice 1 / Male (localService)
+          bestVoice = voicesToUse.find(v => v.localService === true && v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.localService === true);
+          }
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
+          }
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online") || v.name.toLowerCase().includes("google"));
           }
         } else if (selectedLanguage === "de") {
-          // Priority 1: Microsoft Stefan/Conrad Natural Online Male
-          bestVoice = voicesToUse.find(v => 
-            (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")) && 
-            (v.name.toLowerCase().includes("stefan") || v.name.toLowerCase().includes("conrad"))
-          );
-          // Priority 2: Siri Voice 1 / Male
+          // Priority 1: Siri Voice 1 / Male (localService)
+          bestVoice = voicesToUse.find(v => v.localService === true && v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.localService === true);
+          }
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")) && 
+              (v.name.toLowerCase().includes("stefan") || v.name.toLowerCase().includes("conrad"))
+            );
+          }
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
           }
-          // Priority 3: Google German Male
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("deutsch"));
           }
         } else if (selectedLanguage === "es") {
-          // Priority 1: Siri Male / Voice 1
-          bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
+          // Priority 1: Apple Premium Offline Male (jorge, juan, julio) or localService Siri
+          bestVoice = voicesToUse.find(v => 
+            v.localService === true &&
+            v.name.toLowerCase().includes("siri") && 
+            (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male"))
+          );
           
-          // Priority 2: Microsoft Natural Online Male (alvaro, yago, etc.)
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              v.localService === true &&
+              (v.name.toLowerCase().includes("jorge") || 
+               v.name.toLowerCase().includes("juan") || 
+               v.name.toLowerCase().includes("julio"))
+            );
+          }
+          
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.localService === true && v.name.toLowerCase().includes("siri"));
+          }
+
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.localService === true);
+          }
+
+          // Fallbacks for online
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
+          }
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              v.name.toLowerCase().includes("jorge") || 
+              v.name.toLowerCase().includes("juan") || 
+              v.name.toLowerCase().includes("julio")
+            );
+          }
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => 
               v.name.toLowerCase().includes("natural") || 
@@ -2144,20 +2301,6 @@ export default function VideosPage() {
               v.name.toLowerCase().includes("yago")
             );
           }
-          
-          // Priority 3: Apple Premium Offline Male (jorge, juan, julio)
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("jorge") || 
-              v.name.toLowerCase().includes("juan") || 
-              v.name.toLowerCase().includes("julio")
-            );
-          }
-          // Priority 4: Siri generic
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri"));
-          }
-          // Priority 5: Google Spanish/Español
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google"));
           }
@@ -2190,62 +2333,79 @@ export default function VideosPage() {
     };
   }, [activeStudyVideo]);
 
-  const speakChunk = (index: number) => {
+  const queueSpeechSynthesis = (startIndex: number) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    
+
+    // Clear any active queue/speaking
+    window.speechSynthesis.cancel();
+
     const chunks = sentenceChunksRef.current;
-    if (index < 0 || index >= chunks.length) {
-      // Finished speaking all chunks
+    if (startIndex < 0 || startIndex >= chunks.length) {
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
       setActiveSentenceIndex(-1);
+      activeSentenceIndexRef.current = -1;
       return;
     }
 
-    // Cancel current speaking to play immediately
-    window.speechSynthesis.cancel();
+    // Set state
+    setIsPlayingAudio(true);
+    setIsPausedAudio(false);
+    setActiveSentenceIndex(startIndex);
+    activeSentenceIndexRef.current = startIndex;
 
-    const utterance = new SpeechSynthesisUtterance(chunks[index]);
-    
-    if (selectedVoiceRef.current) {
-      utterance.voice = selectedVoiceRef.current;
+    // Queue remaining chunks
+    for (let i = startIndex; i < chunks.length; i++) {
+      const utterance = new SpeechSynthesisUtterance(chunks[i]);
+      
+      if (selectedVoiceRef.current) {
+        utterance.voice = selectedVoiceRef.current;
+      }
+      
+      utterance.rate = playbackRateRef.current;
+      utterance.pitch = 1.0; // Keep perfect natural tone (1.0 preserves the deep-learning neural voice models' excellent diction)
+
+      utterance.onstart = () => {
+        // Only update index if we are still actively playing
+        if (isPlayingAudioRef.current) {
+          setActiveSentenceIndex(i);
+          activeSentenceIndexRef.current = i;
+        }
+      };
+
+      if (i === chunks.length - 1) {
+        utterance.onend = () => {
+          if (isPlayingAudioRef.current) {
+            setIsPlayingAudio(false);
+            setIsPausedAudio(false);
+            setActiveSentenceIndex(-1);
+            activeSentenceIndexRef.current = -1;
+          }
+        };
+      }
+
+      utterance.onerror = (e) => {
+        const actualErrors = [
+          "audio-busy",
+          "audio-hardware",
+          "network",
+          "synthesis-unavailable",
+          "synthesis-failed",
+          "language-unavailable",
+          "voice-unavailable"
+        ];
+
+        if (actualErrors.includes(e.error)) {
+          console.error("SpeechSynthesisUtterance actual error:", e.error, e);
+          setIsPlayingAudio(false);
+          setIsPausedAudio(false);
+        } else {
+          console.log("SpeechSynthesis status event (ignored):", e.error || "no-error-code");
+        }
+      };
+
+      window.speechSynthesis.speak(utterance);
     }
-    
-    utterance.rate = playbackRateRef.current;
-    utterance.pitch = 1.0; // Keep perfect natural tone (1.0 preserves the deep-learning neural voice models' excellent diction and natural prosody)
-
-    utterance.onend = () => {
-      // Advance ONLY if we were playing and not paused
-      if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
-        const nextIdx = index + 1;
-        setActiveSentenceIndex(nextIdx);
-        speakChunk(nextIdx);
-      }
-    };
-
-    utterance.onerror = (e) => {
-      // List of actual failure codes (excluding expected 'interrupted' and 'canceled' from .cancel())
-      const actualErrors = [
-        "audio-busy",
-        "audio-hardware",
-        "network",
-        "synthesis-unavailable",
-        "synthesis-failed",
-        "language-unavailable",
-        "voice-unavailable"
-      ];
-
-      if (actualErrors.includes(e.error)) {
-        console.error("SpeechSynthesisUtterance actual error:", e.error, e);
-        setIsPlayingAudio(false);
-        setIsPausedAudio(false);
-      } else {
-        // Log as normal status info, preventing full-screen React dev error overlays and accidental state reset
-        console.log("SpeechSynthesis status event (ignored):", e.error || "no-error-code");
-      }
-    };
-
-    window.speechSynthesis.speak(utterance);
   };
 
   const startAudioSummary = () => {
@@ -2266,7 +2426,7 @@ export default function VideosPage() {
       : 0;
       
     setActiveSentenceIndex(startIdx);
-    speakChunk(startIdx);
+    queueSpeechSynthesis(startIdx);
   };
 
   const pauseAudio = () => {
@@ -2280,11 +2440,11 @@ export default function VideosPage() {
     
     setIsPausedAudio(false);
     // Best practice fallback for webkit/Chrome:
-    // If we were paused inside Synthesis, resume it, otherwise trigger speakChunk
+    // If we were paused inside Synthesis, resume it, otherwise trigger queueSpeechSynthesis
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     } else {
-      speakChunk(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
     }
   };
 
@@ -2294,6 +2454,7 @@ export default function VideosPage() {
     setIsPlayingAudio(false);
     setIsPausedAudio(false);
     setActiveSentenceIndex(-1);
+    activeSentenceIndexRef.current = -1;
   };
 
   const handleSeek = (index: number) => {
@@ -2306,7 +2467,7 @@ export default function VideosPage() {
 
     // If already playing and not paused, speak the selected chunk instantly
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
-      speakChunk(targetIdx);
+      queueSpeechSynthesis(targetIdx);
     }
   };
 
@@ -2316,7 +2477,7 @@ export default function VideosPage() {
     
     if (immediateRestart && isPlayingAudioRef.current && !isPausedAudioRef.current) {
       // Restart current sentence chunk at the new rate instantly
-      speakChunk(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
     }
   };
 
@@ -2326,7 +2487,7 @@ export default function VideosPage() {
     
     if (isPlayingAudio && !isPausedAudio) {
       // Restart current sentence chunk with the new voice instantly
-      speakChunk(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
     }
   };
 
@@ -4062,6 +4223,15 @@ export default function VideosPage() {
                                                 selectedLanguage={selectedLanguage}
                                                 isPlaying={isYt && playingChartIdx === idx}
                                                 onEnded={() => setPlayingChartIdx(null)}
+                                                onPlayingStateChange={(playing) => {
+                                                  if (playing) {
+                                                    setPlayingChartIdx(idx);
+                                                  } else {
+                                                    if (playingChartIdx === idx) {
+                                                      setPlayingChartIdx(null);
+                                                    }
+                                                  }
+                                                }}
                                               />
                                             </div>
 
@@ -4350,13 +4520,13 @@ export default function VideosPage() {
                                   </button>
                                 </div>
 
-                                {/* Sentence indices / markers */}
-                                <div className="flex items-center gap-1 text-xs shrink-0 font-mono font-bold text-zinc-400">
+                                {/* Estimated Playback Timer */}
+                                <div className="flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
                                   <span className="text-violet-400">
-                                    {activeSentenceIndex >= 0 ? String(activeSentenceIndex + 1).padStart(2, '0') : "00"}
+                                    {formatElapsed(elapsedSeconds)}sg
                                   </span>
                                   <span className="text-zinc-600">/</span>
-                                  <span>{String(totalSentences).padStart(2, '0')}</span>
+                                  <span>{formatTotal(totalDuration)}m</span>
                                 </div>
                               </div>
 
