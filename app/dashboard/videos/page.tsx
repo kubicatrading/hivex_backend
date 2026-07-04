@@ -1166,6 +1166,7 @@ function ShimmerSkeleton() {
 interface ParsedChart {
   timestamp: string;
   seconds: number;
+  endSeconds?: number;
   title: string;
   bullets: string[];
   legend: string;
@@ -1179,6 +1180,9 @@ function parseChartsMarkdown(content: string): ParsedChart[] {
   const sections = content.split(/(?:^|\n)\s*(?:#{2,5}|#+\s*\*+|\*\*+)\s*(?=\[?\d{1,2}:\d{2})/);
   const parsed: ParsedChart[] = [];
 
+  const timestampRangeRegex = /\[?(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*\]?\s*(?:[\-–—]|to)\s*\[?\s*|\s*(?:[\-–—]|to)\s*)(\d{1,2}:\d{2}(?::\d{2})?)\]?/;
+  const timestampSingleRegex = /\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?/;
+
   for (let i = 1; i < sections.length; i++) {
     const section = sections[i].trim();
     if (!section) continue;
@@ -1186,21 +1190,42 @@ function parseChartsMarkdown(content: string): ParsedChart[] {
     const lines = section.split("\n");
     const headerLine = lines[0].trim();
 
-    const timestampRegex = /\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?/;
-    const match = headerLine.match(timestampRegex);
-    if (!match) continue;
-
-    const timestamp = match[1];
-    const parts = timestamp.split(":").map(Number);
+    const rangeMatch = headerLine.match(timestampRangeRegex);
+    let timestamp = "";
     let seconds = 0;
-    if (parts.length === 3) {
-      seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-    } else if (parts.length === 2) {
-      seconds = parts[0] * 60 + parts[1];
+    let endSeconds: number | undefined = undefined;
+
+    if (rangeMatch) {
+      timestamp = `${rangeMatch[1]} - ${rangeMatch[2]}`;
+      const partsStart = rangeMatch[1].split(":").map(Number);
+      if (partsStart.length === 3) {
+        seconds = partsStart[0] * 3600 + partsStart[1] * 60 + partsStart[2];
+      } else if (partsStart.length === 2) {
+        seconds = partsStart[0] * 60 + partsStart[1];
+      }
+
+      const partsEnd = rangeMatch[2].split(":").map(Number);
+      if (partsEnd.length === 3) {
+        endSeconds = partsEnd[0] * 3600 + partsEnd[1] * 60 + partsEnd[2];
+      } else if (partsEnd.length === 2) {
+        endSeconds = partsEnd[0] * 60 + partsEnd[1];
+      }
+    } else {
+      const singleMatch = headerLine.match(timestampSingleRegex);
+      if (!singleMatch) continue;
+
+      timestamp = singleMatch[1];
+      const parts = timestamp.split(":").map(Number);
+      if (parts.length === 3) {
+        seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        seconds = parts[0] * 60 + parts[1];
+      }
     }
 
+    const matchedText = rangeMatch ? rangeMatch[0] : (headerLine.match(timestampSingleRegex)?.[0] || "");
     const title = headerLine
-      .replace(timestampRegex, "")
+      .replace(matchedText, "")
       .replace(/[\[\]\*#\-\:]/g, "")
       .trim();
 
@@ -1231,10 +1256,28 @@ function parseChartsMarkdown(content: string): ParsedChart[] {
     parsed.push({
       timestamp,
       seconds,
+      endSeconds,
       title: title || `Visualización @ ${timestamp}`,
       bullets,
       legend
     });
+  }
+
+  // Backfill endSeconds sequentially if not parsed explicitly
+  for (let k = 0; k < parsed.length; k++) {
+    if (parsed[k].endSeconds === undefined) {
+      if (k < parsed.length - 1) {
+        const nextStart = parsed[k + 1].seconds;
+        if (nextStart > parsed[k].seconds) {
+          const diff = nextStart - parsed[k].seconds;
+          parsed[k].endSeconds = diff <= 120 ? nextStart : parsed[k].seconds + 45;
+        } else {
+          parsed[k].endSeconds = parsed[k].seconds + 45;
+        }
+      } else {
+        parsed[k].endSeconds = parsed[k].seconds + 45;
+      }
+    }
   }
 
   return parsed;
@@ -1401,12 +1444,14 @@ function SmartVideoSnapshot({
   videoId, 
   fileUrl, 
   targetTime, 
+  endSeconds,
   isYt, 
   selectedLanguage 
 }: { 
   videoId: string; 
   fileUrl: string; 
   targetTime: number; 
+  endSeconds?: number;
   isYt: boolean; 
   selectedLanguage: string; 
 }) {
@@ -1460,10 +1505,11 @@ function SmartVideoSnapshot({
   if (isYt && error) {
     const ytId = getYoutubeId(fileUrl);
     if (ytId) {
+      const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${endSeconds ? `&end=${endSeconds}` : ""}&autoplay=0&mute=0&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
       return (
         <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950 hover:border-zinc-800 transition-all duration-300">
           <iframe
-            src={`https://www.youtube.com/embed/${ytId}?start=${targetTime}&autoplay=0&mute=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`}
+            src={srcUrl}
             title={`Snapshot at ${targetTime}s`}
             className="w-full h-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -1475,6 +1521,7 @@ function SmartVideoSnapshot({
             <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-zinc-950/95 border border-emerald-500/20 px-2.5 py-1 rounded-full uppercase shadow-md flex items-center gap-1.5 backdrop-blur-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
               LIVE PREVIEW: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
+              {endSeconds && ` - ${Math.floor(endSeconds / 60)}:${(endSeconds % 60).toString().padStart(2, "0")}`}
             </span>
           </div>
         </div>
@@ -3846,6 +3893,7 @@ export default function VideosPage() {
                                                 videoId={activeStudyVideo.id}
                                                 fileUrl={activeStudyVideo.file_url}
                                                 targetTime={chart.seconds}
+                                                endSeconds={chart.endSeconds}
                                                 isYt={isYt}
                                                 selectedLanguage={selectedLanguage}
                                               />
