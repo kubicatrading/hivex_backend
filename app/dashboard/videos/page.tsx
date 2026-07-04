@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/set-state-in-effect */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useId } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { translations } from "@/lib/translations";
@@ -1440,6 +1440,141 @@ function getYoutubeId(url: string): string | null {
   return null;
 }
 
+function YouTubeSnapshotPlayer({
+  ytId,
+  targetTime,
+  endSeconds,
+  selectedLanguage,
+}: {
+  ytId: string;
+  targetTime: number;
+  endSeconds?: number;
+  selectedLanguage: string;
+}) {
+  const containerId = useId().replace(/:/g, "-");
+  const playerRef = useRef<any>(null);
+  const [apiReady, setApiReady] = useState(false);
+  const [isPausedAtTarget, setIsPausedAtTarget] = useState(false);
+  const hasInitialized = useRef(false);
+
+  // Reset state when props change
+  useEffect(() => {
+    hasInitialized.current = false;
+    setIsPausedAtTarget(false);
+  }, [ytId, targetTime, endSeconds]);
+
+  // Load YouTube IFrame Player API
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if ((window as any).YT && (window as any).YT.Player) {
+      setApiReady(true);
+      return;
+    }
+
+    const previousCallback = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => {
+      if (previousCallback) previousCallback();
+      setApiReady(true);
+    };
+
+    if (!document.getElementById("youtube-iframe-api")) {
+      const tag = document.createElement("script");
+      tag.id = "youtube-iframe-api";
+      tag.src = "https://www.youtube.com/iframe_api";
+      const firstScriptTag = document.getElementsByTagName("script")[0];
+      if (firstScriptTag && firstScriptTag.parentNode) {
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      } else {
+        document.head.appendChild(tag);
+      }
+    }
+
+    const checkInterval = setInterval(() => {
+      if ((window as any).YT && (window as any).YT.Player) {
+        setApiReady(true);
+        clearInterval(checkInterval);
+      }
+    }, 100);
+
+    return () => {
+      clearInterval(checkInterval);
+    };
+  }, []);
+
+  // Initialize player once API is ready
+  useEffect(() => {
+    if (!apiReady || hasInitialized.current || !containerId) return;
+    hasInitialized.current = true;
+
+    try {
+      playerRef.current = new (window as any).YT.Player(containerId, {
+        videoId: ytId,
+        height: "100%",
+        width: "100%",
+        playerVars: {
+          start: targetTime,
+          end: endSeconds || undefined,
+          autoplay: 1,
+          mute: 1,
+          controls: 1,
+          modestbranding: 1,
+          rel: 0,
+          showinfo: 0,
+          iv_load_policy: 3,
+        },
+        events: {
+          onStateChange: (event: any) => {
+            if (event.data === 1 && !isPausedAtTarget) {
+              event.target.pauseVideo();
+              event.target.unMute();
+              setIsPausedAtTarget(true);
+            }
+          },
+        },
+      });
+    } catch (e) {
+      console.error("Error creating YouTube player:", e);
+    }
+
+    return () => {
+      if (playerRef.current && typeof playerRef.current.destroy === "function") {
+        try {
+          playerRef.current.destroy();
+        } catch (err) {
+          console.error("Error destroying YouTube player:", err);
+        }
+      }
+    };
+  }, [apiReady, containerId, ytId, targetTime, endSeconds, isPausedAtTarget]);
+
+  return (
+    <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950 hover:border-zinc-800 transition-all duration-300">
+      <div className="w-full h-full">
+        <div id={containerId} className="w-full h-full border-0" />
+      </div>
+      
+      {!isPausedAtTarget && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 z-20 transition-opacity duration-300 pointer-events-none">
+          <Loader2 className="w-6 h-6 text-emerald-400 animate-spin mb-2" />
+          <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">
+            {selectedLanguage === "es" ? "Capturando fotograma..." : "Capturing frame..."}
+          </span>
+        </div>
+      )}
+
+      {/* Elegant active live preview badge */}
+      <div className="absolute top-2 left-2 z-10 pointer-events-none">
+        <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-zinc-950/95 border border-emerald-500/20 px-2.5 py-1 rounded-full uppercase shadow-md flex items-center gap-1.5 backdrop-blur-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+          LIVE PREVIEW: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
+          {endSeconds && ` - ${Math.floor(endSeconds / 60)}:${(endSeconds % 60).toString().padStart(2, "0")}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function SmartVideoSnapshot({ 
   videoId, 
   fileUrl, 
@@ -1454,7 +1589,7 @@ function SmartVideoSnapshot({
   endSeconds?: number;
   isYt: boolean; 
   selectedLanguage: string; 
-}) {
+  }) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(isYt);
@@ -1505,26 +1640,13 @@ function SmartVideoSnapshot({
   if (isYt && error) {
     const ytId = getYoutubeId(fileUrl);
     if (ytId) {
-      const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${endSeconds ? `&end=${endSeconds}` : ""}&autoplay=0&mute=0&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
       return (
-        <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950 hover:border-zinc-800 transition-all duration-300">
-          <iframe
-            src={srcUrl}
-            title={`Snapshot at ${targetTime}s`}
-            className="w-full h-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            loading="lazy"
-          />
-          {/* Elegant active live preview badge */}
-          <div className="absolute top-2 left-2 z-10 pointer-events-none">
-            <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-zinc-950/95 border border-emerald-500/20 px-2.5 py-1 rounded-full uppercase shadow-md flex items-center gap-1.5 backdrop-blur-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-              LIVE PREVIEW: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
-              {endSeconds && ` - ${Math.floor(endSeconds / 60)}:${(endSeconds % 60).toString().padStart(2, "0")}`}
-            </span>
-          </div>
-        </div>
+        <YouTubeSnapshotPlayer
+          ytId={ytId}
+          targetTime={targetTime}
+          endSeconds={endSeconds}
+          selectedLanguage={selectedLanguage}
+        />
       );
     }
     return <YoutubeCorsWarning selectedLanguage={selectedLanguage} />;
