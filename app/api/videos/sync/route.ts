@@ -2,8 +2,17 @@ import { NextResponse } from "next/server";
 import { extractYoutubeId, transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 
-// Standard YouTube feed URL for Andrei Jikh
-const YT_RSS_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id=UCGy7SkBjcIAgTiwkXEtPnYg";
+// Standard YouTube feeds map
+const YT_CHANNELS = {
+  "Andrei Jikh": "UCGy7SkBjcIAgTiwkXEtPnYg",
+  "Judging Freedom": "UCDkEYb-TXJVWLvOokshtlsw"
+};
+
+function isFreedomChannel(channelName: string | null | undefined): boolean {
+  if (!channelName) return false;
+  const name = channelName.toLowerCase();
+  return name.includes("freedom") || name.includes("judging") || name.includes("napolitano");
+}
 
 interface AnalysedVideo {
   id: string;
@@ -28,22 +37,34 @@ function extractTagContent(xml: string, tag: string): string {
 }
 
 
-export async function GET() {
-  return handleSync();
+export async function GET(request: Request) {
+  return handleSync(request);
 }
 
-export async function POST() {
-  return handleSync();
+export async function POST(request: Request) {
+  return handleSync(request);
 }
 
-async function handleSync() {
+async function handleSync(request: Request) {
   try {
+    let channelParam = "Andrei Jikh";
+    try {
+      const { searchParams } = new URL(request.url);
+      channelParam = searchParams.get("channel") || "Andrei Jikh";
+    } catch (urlErr) {
+      console.warn("Failed to parse query params from request, defaulting to Andrei Jikh:", urlErr);
+    }
+
+    const channelTitle = channelParam && isFreedomChannel(channelParam) ? "Judging Freedom" : "Andrei Jikh";
+    const channelId = YT_CHANNELS[channelTitle];
+    const ytRssFeed = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+
     let xmlText = "";
     let useFallback = false;
 
     try {
       // 1. Fetch RSS XML Feed from YouTube
-      const response = await fetch(YT_RSS_FEED, {
+      const response = await fetch(ytRssFeed, {
         next: { revalidate: 3600 }, // Cache feed for 1 hour
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -51,13 +72,13 @@ async function handleSync() {
       });
 
       if (!response.ok) {
-        console.warn(`YouTube feed fetch returned status ${response.status}. Using high-quality offline fallbacks.`);
+        console.warn(`YouTube feed fetch returned status ${response.status}.`);
         useFallback = true;
       } else {
         xmlText = await response.text();
       }
     } catch (fetchErr) {
-      console.warn("Failed to reach YouTube RSS endpoint, enabling intelligent fallback mode:", fetchErr);
+      console.warn("Failed to reach YouTube RSS endpoint:", fetchErr);
       useFallback = true;
     }
 
@@ -67,6 +88,10 @@ async function handleSync() {
     const syncedVideos: AnalysedVideo[] = [];
 
     if (useFallback) {
+      if (channelTitle === "Judging Freedom") {
+        throw new Error("No se pudo obtener el feed real de Judging Freedom de YouTube. El modo de simulación está prohibido para este canal.");
+      }
+
       // Create hyper-realistic mock videos inside the active 24-hour window
       const fallbackData = [
         {
@@ -117,7 +142,7 @@ async function handleSync() {
             resolution: "4K UHD",
             thumbnail: `https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=800&q=80`,
             is_youtube: true,
-            channel_title: "Andrei Jikh (Mock Feed)",
+            channel_title: `${channelTitle} (Mock Feed)`,
             published_at: item.publishedAt,
           }
         });
@@ -193,7 +218,7 @@ async function handleSync() {
             resolution: "4K UHD",
             thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
             is_youtube: true,
-            channel_title: "Andrei Jikh",
+            channel_title: channelTitle,
             published_at: publishedAtStr,
           },
         };
@@ -364,7 +389,7 @@ async function handleSync() {
                 resolution: fv.metadata.resolution,
                 thumbnail: fv.metadata.thumbnail,
                 is_youtube: true,
-                channel_title: fv.metadata.channel_title || "Andrei Jikh",
+                channel_title: fv.metadata.channel_title || channelTitle,
                 transcription: transData?.transcription,
                 transcription_model: transData?.modelUsed
               }

@@ -11,6 +11,12 @@ import {
   Languages, Heart, TrendingUp, AlertTriangle, Loader2, EyeOff
 } from "lucide-react";
 
+function isFreedomChannel(channelName: string | null | undefined): boolean {
+  if (!channelName) return false;
+  const name = channelName.toLowerCase();
+  return name.includes("freedom") || name.includes("judging") || name.includes("napolitano");
+}
+
 // Chart Snapper and Legends helper
 function getChartMetadata(title: string) {
   const t = title.toLowerCase();
@@ -3040,14 +3046,48 @@ export default function VideosPage() {
   }, [searchParams]);
 
   const filteredVideos = videos.filter((v: VideoDocument) => {
-    // Safety check: Filter out Andrei Jikh older videos (before 2026-06-24) to be absolutely safe
     const ch = v.metadata?.channel_title || "";
     const title = v.title || "";
-    const isAndrei = ch === "" || 
+    const description = v.description || "";
+
+    // Strictly exclude contaminated Judging Freedom videos that are actually Andrei Jikh videos
+    const isLabeledAsFreedom = isFreedomChannel(ch);
+    const hasAndreiContent = title.toLowerCase().includes("andrei") || 
+                             title.toLowerCase().includes("jikh") ||
+                             title.toLowerCase().includes("dividend") ||
+                             title.toLowerCase().includes("gold system") ||
+                             title.toLowerCase().includes("webull") ||
+                             title.toLowerCase().includes("interest rate") ||
+                             title.toLowerCase().includes("hysa") ||
+                             title.toLowerCase().includes("portfolio") ||
+                             title.toLowerCase().includes("the fed") ||
+                             title.toLowerCase().includes("stock market") ||
+                             description.toLowerCase().includes("andrei") ||
+                             description.toLowerCase().includes("jikh") ||
+                             description.toLowerCase().includes("funvest") ||
+                             description.toLowerCase().includes("webull") ||
+                             description.toLowerCase().includes("hysa") ||
+                             description.toLowerCase().includes("seekingalpha") ||
+                             description.toLowerCase().includes("seeking alpha") ||
+                             description.toLowerCase().includes("dividend") ||
+                             description.toLowerCase().includes("portfolio") ||
+                             description.toLowerCase().includes("savings account") ||
+                             v.id.startsWith("yt-video-fed-") ||
+                             v.id.startsWith("yt-video-market-") ||
+                             v.id.startsWith("yt-video-btc-");
+    
+    if (isLabeledAsFreedom && hasAndreiContent) {
+      return false;
+    }
+
+    // Safety check: Filter out Andrei Jikh older videos (before 2026-06-24) to be absolutely safe
+    const isAndrei = (ch === "" || 
                      ch === "Andrei Jikh" || 
                      ch.toLowerCase().includes("andrei") || 
                      title.toLowerCase().includes("andrei") || 
-                     v.id.startsWith("yt-video-");
+                     v.id.startsWith("yt-video-")) &&
+                     !isFreedomChannel(ch) &&
+                     !isFreedomChannel(title);
     
     if (isAndrei) {
       const dateVal = Date.parse(v.created_at);
@@ -3062,12 +3102,19 @@ export default function VideosPage() {
     if (filterFavorite) {
       return Boolean(v.metadata?.is_favorite);
     }
+
     const finalCh = v.metadata?.channel_title || "Andrei Jikh";
+    const isFilterFreedom = filterChannel && isFreedomChannel(filterChannel);
+    const isVideoFreedom = isFreedomChannel(finalCh);
+
     if (!filterChannel) {
-      return finalCh === "Andrei Jikh" || finalCh === "Andrei Jikh (Mock Feed)";
+      return !isVideoFreedom;
     }
     if (filterChannel === "Andrei Jikh") {
-      return finalCh === "Andrei Jikh" || finalCh === "Andrei Jikh (Mock Feed)";
+      return !isVideoFreedom;
+    }
+    if (isFilterFreedom) {
+      return isVideoFreedom;
     }
     return finalCh === filterChannel;
   });
@@ -3225,7 +3272,7 @@ export default function VideosPage() {
           cleanedDesc = cleanedDesc.trim();
           if (!cleanedDesc) {
             cleanedDesc = doc.id.startsWith("yt-") || doc.id.includes("youtube") || doc.file_url?.includes("youtube")
-              ? `YouTube video from Andrei Jikh: "${doc.title}".`
+              ? `YouTube video from ${doc.metadata?.channel_title || "Andrei Jikh"}: "${doc.title}".`
               : doc.description || "";
           }
 
@@ -3251,14 +3298,55 @@ export default function VideosPage() {
         });
 
         // Dynamic Date Pruner for Andrei Jikh's older videos (pre-June 24, 2026)
+        // AND Contamination Pruner for Judging Freedom videos that are actually Andrei Jikh videos
         const prunedData = typedData.filter((video) => {
           const ch = video.metadata?.channel_title || "";
           const title = video.title || "";
-          const isAndrei = ch === "" || 
+          const description = video.description || "";
+          
+          // 1. Contamination check for Judging Freedom
+          const isLabeledAsFreedom = isFreedomChannel(ch);
+          const hasAndreiContent = title.toLowerCase().includes("andrei") || 
+                                   title.toLowerCase().includes("jikh") ||
+                                   title.toLowerCase().includes("dividend") ||
+                                   title.toLowerCase().includes("gold system") ||
+                                   title.toLowerCase().includes("webull") ||
+                                   title.toLowerCase().includes("interest rate") ||
+                                   title.toLowerCase().includes("hysa") ||
+                                   title.toLowerCase().includes("portfolio") ||
+                                   title.toLowerCase().includes("the fed") ||
+                                   title.toLowerCase().includes("stock market") ||
+                                   description.toLowerCase().includes("andrei") ||
+                                   description.toLowerCase().includes("jikh") ||
+                                   description.toLowerCase().includes("funvest") ||
+                                   description.toLowerCase().includes("webull") ||
+                                   description.toLowerCase().includes("hysa") ||
+                                   description.toLowerCase().includes("seekingalpha") ||
+                                   description.toLowerCase().includes("seeking alpha") ||
+                                   description.toLowerCase().includes("dividend") ||
+                                   description.toLowerCase().includes("portfolio") ||
+                                   description.toLowerCase().includes("savings account") ||
+                                   video.id.startsWith("yt-video-fed-") ||
+                                   video.id.startsWith("yt-video-market-") ||
+                                   video.id.startsWith("yt-video-btc-");
+          
+          if (isLabeledAsFreedom && hasAndreiContent) {
+            console.log(`[Pruner] Pruning contaminated Judging Freedom video (actually Andrei Jikh): ${video.title}`);
+            // Delete permanently in background from Supabase / mockSupabase
+            supabase.from("documents").delete().eq("id", video.id).then(({ error }) => {
+              if (error) console.error(`[Pruner] Error deleting contaminated record ${video.id}:`, error);
+            });
+            return false;
+          }
+
+          // 2. Original Andrei date cutoff check
+          const isAndrei = (ch === "" || 
                            ch === "Andrei Jikh" || 
                            ch.toLowerCase().includes("andrei") || 
                            title.toLowerCase().includes("andrei") || 
-                           video.id.startsWith("yt-video-");
+                           video.id.startsWith("yt-video-")) &&
+                           !isFreedomChannel(ch) &&
+                           !isFreedomChannel(title);
           
           if (isAndrei) {
             const dateVal = Date.parse(video.created_at);
@@ -3625,6 +3713,8 @@ export default function VideosPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No se encontró una sesión de usuario activa.");
 
+      const targetChannel = filterChannel && isFreedomChannel(filterChannel) ? "Judging Freedom" : "Andrei Jikh";
+
       // Start-from-scratch cleanup disabled by user request. We keep existing videos and continue syncing new ones incrementally.
 
       // Fetch existing videos in the DB first to execute a smart sync (skip already synced & transcribed)
@@ -3638,7 +3728,7 @@ export default function VideosPage() {
       existingUrls.forEach(url => globallySyncedUrls.add(url));
 
       // 2. Call our API Route
-      const res = await fetch("/api/videos/sync", { method: "POST" });
+      const res = await fetch(`/api/videos/sync?channel=${encodeURIComponent(targetChannel)}`, { method: "POST" });
       if (!res.ok) {
         throw new Error("No se pudo obtener el feed del canal de inversión.");
       }
@@ -3682,7 +3772,7 @@ export default function VideosPage() {
             resolution: fv.metadata.resolution,
             thumbnail: fv.metadata.thumbnail,
             is_youtube: true,
-            channel_title: "Andrei Jikh"
+            channel_title: fv.metadata?.channel_title || targetChannel
           }
         };
 
@@ -3708,7 +3798,7 @@ export default function VideosPage() {
               resolution: String(insertedData[0].metadata?.resolution || "4K UHD"),
               thumbnail: String(insertedData[0].metadata?.thumbnail || ""),
               is_youtube: true,
-              channel_title: "Andrei Jikh"
+              channel_title: insertedData[0].metadata?.channel_title || targetChannel
             }
           };
           newlyAddedVideos.push(typedInserted);
@@ -5027,7 +5117,7 @@ export default function VideosPage() {
                         </div>
 
                         <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 font-bold">
-                          <span className="text-[9px] uppercase">{isYt ? "Andrei Jikh" : v.metadata.resolution}</span>
+                          <span className="text-[9px] uppercase">{isYt ? (v.metadata?.channel_title || "Andrei Jikh") : v.metadata?.resolution}</span>
                           <div className="flex items-center gap-1.5">
                             {isYt && (
                               <button

@@ -400,9 +400,15 @@ class MockSupabase {
             this.setDocuments(userId, updatedDocs);
 
             if (typeof window !== "undefined") {
+              const keys: string[] = [];
               for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (key && key.startsWith("hivex_docs_") && key !== "hivex_docs_global") {
+                if (key) {
+                  keys.push(key);
+                }
+              }
+              for (const key of keys) {
+                if (key.startsWith("hivex_docs_") && key !== "hivex_docs_global") {
                   try {
                     const dataStr = localStorage.getItem(key);
                     if (dataStr) {

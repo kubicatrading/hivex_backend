@@ -57,7 +57,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   
   // Canales hierarchy state
   const [canalesOpen, setCanalesOpen] = useState(true);
-  const [channels, setChannels] = useState<string[]>(["Andrei Jikh"]);
+  const [channels, setChannels] = useState<string[]>(["Andrei Jikh", "Judging Freedom"]);
 
   // Fetch unique channels dynamically from saved videos
   useEffect(() => {
@@ -71,6 +71,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         if (data) {
           const uniqueChannels = new Set<string>();
           uniqueChannels.add("Andrei Jikh"); // Default channel always listed
+          uniqueChannels.add("Judging Freedom"); // Judging Freedom always listed next
           
           data.forEach((doc: { metadata?: { channel_title?: string } }) => {
             if (doc.metadata && doc.metadata.channel_title) {
