@@ -1480,6 +1480,24 @@ function YouTubeSnapshotPlayer({
     }
   }, []);
 
+  // Send a listening ping to the YouTube iframe so it starts broadcasting events (essential for postMessage API)
+  const sendListeningPing = useCallback(() => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      try {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({
+            event: "listening",
+            id: 1,
+            channel: "widget"
+          }),
+          "*"
+        );
+      } catch (e) {
+        console.error("Error sending listening ping to YouTube iframe:", e);
+      }
+    }
+  }, []);
+
   const triggerEnd = useCallback(() => {
     hasEnded.current = true;
     sendPlayerCommand("pauseVideo");
@@ -1615,7 +1633,26 @@ function YouTubeSnapshotPlayer({
     hasEnded.current = false;
   }, [ytId, targetTime, endSeconds]);
 
-  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}&autoplay=1&mute=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
+  // Ping the "listening" event to the iframe so it starts broadcasting playback info
+  useEffect(() => {
+    let pings = 0;
+    // Send standard handshake ping immediately
+    sendListeningPing();
+    
+    // Repeat periodic pings to cover iframe load latency
+    const interval = setInterval(() => {
+      sendListeningPing();
+      pings++;
+      if (pings >= 10) {
+        clearInterval(interval);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [ytId, sendListeningPing]);
+
+  const originParam = typeof window !== "undefined" ? `&origin=${encodeURIComponent(window.location.origin)}` : "";
+  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${endSeconds ? `&end=${Math.floor(endSeconds)}` : ""}&autoplay=1&mute=1&enablejsapi=1${originParam}&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
 
   const showLoader = !isPausedAtTarget && !isPlaying;
 
@@ -1675,6 +1712,19 @@ function SmartVideoSnapshot({
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(isYt);
+  const [hasBeenPlayed, setHasBeenPlayed] = useState(false);
+
+  // Reset persistent player state if target frame or video ID changes
+  useEffect(() => {
+    setHasBeenPlayed(false);
+  }, [videoId, targetTime]);
+
+  // Activate player once the user starts playback
+  useEffect(() => {
+    if (isPlaying) {
+      setHasBeenPlayed(true);
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     if (!isYt) {
@@ -1718,8 +1768,8 @@ function SmartVideoSnapshot({
     );
   }
 
-  // Render YouTubeSnapshotPlayer if it is a YT video and either isPlaying is true or snapshot image errored (e.g. in production)
-  const showPlayer = isYt && (isPlaying || error);
+  // Render YouTubeSnapshotPlayer if it is a YT video and either isPlaying is true, hasBeenPlayed is true, or snapshot image errored (e.g. in production)
+  const showPlayer = isYt && (isPlaying || hasBeenPlayed || error);
 
   if (showPlayer) {
     const ytId = getYoutubeId(fileUrl);
@@ -1744,12 +1794,25 @@ function SmartVideoSnapshot({
   }
 
   return (
-    <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950">
+    <div 
+      onClick={() => {
+        if (onPlayingStateChange) {
+          onPlayingStateChange(true);
+        }
+      }}
+      className="relative group rounded-xl overflow-hidden border border-zinc-900 hover:border-zinc-800 shadow-lg aspect-[16/9] w-full bg-zinc-950 cursor-pointer transition-all duration-300"
+    >
       <img
         src={imgUrl || ""}
         alt={`Snapshot at ${targetTime}s`}
-        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
       />
+      {/* Premium glassmorphic play overlay */}
+      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+        <div className="p-4 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 backdrop-blur-md transform scale-90 group-hover:scale-100 transition-all duration-300 shadow-lg">
+          <Play className="w-6 h-6 fill-current" />
+        </div>
+      </div>
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-350 flex items-end p-3">
         <span className="text-[9px] font-black tracking-wide text-white uppercase bg-zinc-900/95 px-2 py-1 rounded border border-zinc-850">
           Timestamp: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
@@ -1972,13 +2035,13 @@ export default function VideosPage() {
   const formatElapsed = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return `[${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}]`;
   };
 
   const formatTotal = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
+    return `[${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}]`;
   };
 
   // Controller for translation to active study video
@@ -2258,34 +2321,37 @@ export default function VideosPage() {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("deutsch"));
           }
         } else if (selectedLanguage === "es") {
-          // Priority 1: Apple Premium Offline Male (jorge, juan, julio) or localService Siri
+          // Priority 1: Google Neural Cloud Voices (Chrome) - extremely fluid
           bestVoice = voicesToUse.find(v => 
-            v.localService === true &&
-            v.name.toLowerCase().includes("siri") && 
-            (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male"))
+            v.name.toLowerCase().includes("google") && 
+            (v.name.toLowerCase().includes("espan") || v.name.toLowerCase().includes("españ") || v.name.toLowerCase().includes("spanish"))
           );
           
+          // Priority 2: Microsoft Natural/Online Voices (Edge, etc.) - extremely fluid
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => 
-              v.localService === true &&
-              (v.name.toLowerCase().includes("jorge") || 
-               v.name.toLowerCase().includes("juan") || 
-               v.name.toLowerCase().includes("julio"))
+              (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")) && 
+              (v.name.toLowerCase().includes("alvaro") || v.name.toLowerCase().includes("yago"))
+            );
+          }
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => 
+              v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")
             );
           }
           
+          // Priority 3: Apple Siri Voices (high quality, natural)
           if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.localService === true && v.name.toLowerCase().includes("siri"));
+            bestVoice = voicesToUse.find(v => 
+              v.name.toLowerCase().includes("siri") && 
+              (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("españ"))
+            );
           }
-
           if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.localService === true);
+            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri"));
           }
-
-          // Fallbacks for online
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
-          }
+          
+          // Priority 4: Apple Premium Local Voices (jorge, juan, julio)
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => 
               v.name.toLowerCase().includes("jorge") || 
@@ -2293,16 +2359,15 @@ export default function VideosPage() {
               v.name.toLowerCase().includes("julio")
             );
           }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("natural") || 
-              v.name.toLowerCase().includes("online") ||
-              v.name.toLowerCase().includes("alvaro") || 
-              v.name.toLowerCase().includes("yago")
-            );
-          }
+          
+          // Priority 5: Any Google voice as fallback
           if (!bestVoice) {
             bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google"));
+          }
+
+          // Priority 6: Any local service voice
+          if (!bestVoice) {
+            bestVoice = voicesToUse.find(v => v.localService === true);
           }
         }
 
@@ -2354,9 +2419,11 @@ export default function VideosPage() {
     setActiveSentenceIndex(startIndex);
     activeSentenceIndexRef.current = startIndex;
 
-    // Queue remaining chunks
-    for (let i = startIndex; i < chunks.length; i++) {
-      const utterance = new SpeechSynthesisUtterance(chunks[i]);
+    // Maintain a local pointer to track what we have already sent to the browser
+    let nextIndexToQueue = startIndex;
+
+    const createUtterance = (index: number): SpeechSynthesisUtterance => {
+      const utterance = new SpeechSynthesisUtterance(chunks[index]);
       
       if (selectedVoiceRef.current) {
         utterance.voice = selectedVoiceRef.current;
@@ -2368,21 +2435,29 @@ export default function VideosPage() {
       utterance.onstart = () => {
         // Only update index if we are still actively playing
         if (isPlayingAudioRef.current) {
-          setActiveSentenceIndex(i);
-          activeSentenceIndexRef.current = i;
+          setActiveSentenceIndex(index);
+          activeSentenceIndexRef.current = index;
+
+          // As soon as this utterance starts, pre-buffer the next one in the queue (Double-Buffering)
+          // to maintain gapless playback while ensuring Chrome never loses the high-quality voice select
+          if (nextIndexToQueue === index && index + 1 < chunks.length) {
+            nextIndexToQueue = index + 1;
+            const nextUtterance = createUtterance(nextIndexToQueue);
+            window.speechSynthesis.speak(nextUtterance);
+          }
         }
       };
 
-      if (i === chunks.length - 1) {
-        utterance.onend = () => {
+      utterance.onend = () => {
+        if (index === chunks.length - 1) {
           if (isPlayingAudioRef.current) {
             setIsPlayingAudio(false);
             setIsPausedAudio(false);
             setActiveSentenceIndex(-1);
             activeSentenceIndexRef.current = -1;
           }
-        };
-      }
+        }
+      };
 
       utterance.onerror = (e) => {
         const actualErrors = [
@@ -2404,7 +2479,18 @@ export default function VideosPage() {
         }
       };
 
-      window.speechSynthesis.speak(utterance);
+      return utterance;
+    };
+
+    // Speak the current starting chunk
+    const firstUtterance = createUtterance(startIndex);
+    window.speechSynthesis.speak(firstUtterance);
+
+    // Immediately pre-queue the next chunk as a buffer so there's always one ready
+    if (startIndex + 1 < chunks.length) {
+      nextIndexToQueue = startIndex + 1;
+      const secondUtterance = createUtterance(nextIndexToQueue);
+      window.speechSynthesis.speak(secondUtterance);
     }
   };
 
@@ -4523,10 +4609,10 @@ export default function VideosPage() {
                                 {/* Estimated Playback Timer */}
                                 <div className="flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
                                   <span className="text-violet-400">
-                                    {formatElapsed(elapsedSeconds)}sg
+                                    {formatElapsed(elapsedSeconds)}
                                   </span>
                                   <span className="text-zinc-600">/</span>
-                                  <span>{formatTotal(totalDuration)}m</span>
+                                  <span>{formatTotal(totalDuration)}</span>
                                 </div>
                               </div>
 
