@@ -1451,108 +1451,95 @@ function YouTubeSnapshotPlayer({
   endSeconds?: number;
   selectedLanguage: string;
 }) {
-  const containerId = useId().replace(/:/g, "-");
-  const playerRef = useRef<any>(null);
-  const [apiReady, setApiReady] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isPausedAtTarget, setIsPausedAtTarget] = useState(false);
-  const hasInitialized = useRef(false);
+  const hasPaused = useRef(false);
 
-  // Reset state when props change
+  // Send command to the YouTube iframe
+  const sendPlayerCommand = useCallback((func: string, args: any[] = []) => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      try {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({
+            event: "command",
+            func: func,
+            args: args,
+          }),
+          "*"
+        );
+      } catch (e) {
+        console.error("Error sending postMessage to YouTube iframe:", e);
+      }
+    }
+  }, []);
+
+  // Listen to messages from the YouTube iframe to detect when it starts playing
   useEffect(() => {
-    hasInitialized.current = false;
+    const handleMessage = (event: MessageEvent) => {
+      // Ensure the message is from YouTube
+      if (!event.origin.includes("youtube.com")) return;
+      if (!iframeRef.current || !iframeRef.current.contentWindow) return;
+      if (event.source !== iframeRef.current.contentWindow) return;
+
+      try {
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (data && (data.event === "onStateChange" || data.event === "infoDelivery")) {
+          const state = data.info?.playerState ?? data.info;
+          // State 1 is PLAYING
+          if (state === 1 && !hasPaused.current) {
+            hasPaused.current = true;
+            // Immediately pause the video on the target frame
+            sendPlayerCommand("pauseVideo");
+            // Unmute so when the user manually plays, it has sound
+            sendPlayerCommand("unMute");
+            setIsPausedAtTarget(true);
+          }
+        }
+      } catch (e) {
+        // Safe catch for non-JSON or unrelated messages
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [sendPlayerCommand]);
+
+  // Robust fallback: if playing message is not captured within 3 seconds, force pause and unmute
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!hasPaused.current) {
+        hasPaused.current = true;
+        sendPlayerCommand("pauseVideo");
+        sendPlayerCommand("unMute");
+        setIsPausedAtTarget(true);
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [sendPlayerCommand, ytId, targetTime]);
+
+  // Reset state if video or target time changes
+  useEffect(() => {
+    hasPaused.current = false;
     setIsPausedAtTarget(false);
   }, [ytId, targetTime, endSeconds]);
 
-  // Load YouTube IFrame Player API
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    if ((window as any).YT && (window as any).YT.Player) {
-      setApiReady(true);
-      return;
-    }
-
-    const previousCallback = (window as any).onYouTubeIframeAPIReady;
-    (window as any).onYouTubeIframeAPIReady = () => {
-      if (previousCallback) previousCallback();
-      setApiReady(true);
-    };
-
-    if (!document.getElementById("youtube-iframe-api")) {
-      const tag = document.createElement("script");
-      tag.id = "youtube-iframe-api";
-      tag.src = "https://www.youtube.com/iframe_api";
-      const firstScriptTag = document.getElementsByTagName("script")[0];
-      if (firstScriptTag && firstScriptTag.parentNode) {
-        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-      } else {
-        document.head.appendChild(tag);
-      }
-    }
-
-    const checkInterval = setInterval(() => {
-      if ((window as any).YT && (window as any).YT.Player) {
-        setApiReady(true);
-        clearInterval(checkInterval);
-      }
-    }, 100);
-
-    return () => {
-      clearInterval(checkInterval);
-    };
-  }, []);
-
-  // Initialize player once API is ready
-  useEffect(() => {
-    if (!apiReady || hasInitialized.current || !containerId) return;
-    hasInitialized.current = true;
-
-    try {
-      playerRef.current = new (window as any).YT.Player(containerId, {
-        videoId: ytId,
-        height: "100%",
-        width: "100%",
-        playerVars: {
-          start: targetTime,
-          end: endSeconds || undefined,
-          autoplay: 1,
-          mute: 1,
-          controls: 1,
-          modestbranding: 1,
-          rel: 0,
-          showinfo: 0,
-          iv_load_policy: 3,
-        },
-        events: {
-          onStateChange: (event: any) => {
-            if (event.data === 1 && !isPausedAtTarget) {
-              event.target.pauseVideo();
-              event.target.unMute();
-              setIsPausedAtTarget(true);
-            }
-          },
-        },
-      });
-    } catch (e) {
-      console.error("Error creating YouTube player:", e);
-    }
-
-    return () => {
-      if (playerRef.current && typeof playerRef.current.destroy === "function") {
-        try {
-          playerRef.current.destroy();
-        } catch (err) {
-          console.error("Error destroying YouTube player:", err);
-        }
-      }
-    };
-  }, [apiReady, containerId, ytId, targetTime, endSeconds, isPausedAtTarget]);
+  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${
+    endSeconds ? `&end=${endSeconds}` : ""
+  }&autoplay=1&mute=1&enablejsapi=1&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
 
   return (
     <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950 hover:border-zinc-800 transition-all duration-300">
-      <div className="w-full h-full">
-        <div id={containerId} className="w-full h-full border-0" />
-      </div>
+      <iframe
+        ref={iframeRef}
+        src={srcUrl}
+        title={`Snapshot at ${targetTime}s`}
+        className="w-full h-full border-0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      />
       
       {!isPausedAtTarget && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 z-20 transition-opacity duration-300 pointer-events-none">
