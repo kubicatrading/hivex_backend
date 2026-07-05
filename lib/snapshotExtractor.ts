@@ -1,6 +1,15 @@
 import { exec } from "child_process";
 import fs from "fs";
 import path from "path";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const supabaseAdmin = supabaseUrl && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null;
+
 
 interface ChartTimestamp {
   timestamp: string;
@@ -114,22 +123,46 @@ export async function extractSnapshotsInBackground(
 
       for (const chart of charts) {
         const outputPath = path.join(snapshotsDir, `${chart.seconds}.jpg`);
+        let extracted = false;
 
         // Skip if snapshot already exists to be highly resource-efficient
         if (fs.existsSync(outputPath)) {
-          console.log(`[Snapshot Extractor] Snapshot at ${chart.timestamp} (${chart.seconds}s) already exists, skipping.`);
-          continue;
+          console.log(`[Snapshot Extractor] Snapshot at ${chart.timestamp} (${chart.seconds}s) already exists, skipping extraction.`);
+          extracted = true;
+        } else {
+          console.log(`[Snapshot Extractor] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s) to: ${outputPath}`);
+
+          try {
+            // Input seeking (-ss before -i) is incredibly fast and avoids downloading the whole stream
+            const ffmpegCmd = `ffmpeg -y -ss ${chart.seconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+            await runCmd(ffmpegCmd);
+            console.log(`[Snapshot Extractor] Successfully saved snapshot: ${chart.seconds}.jpg`);
+            extracted = true;
+          } catch (ffmpegErr) {
+            console.error(`[Snapshot Extractor] Failed to extract snapshot at ${chart.seconds}s via ffmpeg:`, ffmpegErr);
+          }
         }
 
-        console.log(`[Snapshot Extractor] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s) to: ${outputPath}`);
-
-        try {
-          // Input seeking (-ss before -i) is incredibly fast and avoids downloading the whole stream
-          const ffmpegCmd = `ffmpeg -y -ss ${chart.seconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
-          await runCmd(ffmpegCmd);
-          console.log(`[Snapshot Extractor] Successfully saved snapshot: ${chart.seconds}.jpg`);
-        } catch (ffmpegErr) {
-          console.error(`[Snapshot Extractor] Failed to extract snapshot at ${chart.seconds}s via ffmpeg:`, ffmpegErr);
+        // Upload to Supabase Storage if extracted or existing, and admin client is available
+        if (extracted && supabaseAdmin && fs.existsSync(outputPath)) {
+          try {
+            const fileBuffer = fs.readFileSync(outputPath);
+            const uploadPath = `${videoId}/${chart.seconds}.jpg`;
+            console.log(`[Snapshot Extractor] Uploading to Supabase Storage bucket snapshots/${uploadPath}...`);
+            const { error: uploadError } = await supabaseAdmin.storage
+              .from("snapshots")
+              .upload(uploadPath, fileBuffer, {
+                contentType: "image/jpeg",
+                upsert: true
+              });
+            if (uploadError) {
+              console.error(`[Snapshot Extractor] Failed to upload snapshot "${uploadPath}" to Supabase:`, uploadError.message);
+            } else {
+              console.log(`[Snapshot Extractor] Snapshot successfully uploaded to Supabase Storage: ${uploadPath}`);
+            }
+          } catch (uploadErr) {
+            console.error(`[Snapshot Extractor] Error during Supabase upload for ${chart.seconds}s:`, uploadErr);
+          }
         }
       }
 
