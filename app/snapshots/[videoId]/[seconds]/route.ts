@@ -4,6 +4,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
 import path from "path";
+import { isImageAChart } from "@/lib/snapshotExtractor";
 
 const execAsync = promisify(exec);
 
@@ -205,6 +206,16 @@ export async function GET(
 
       if (!fs.existsSync(tempOut)) {
         return new NextResponse(`Image not found in storage. Dynamic generation failed: output file not found`, { status: 404 });
+      }
+
+      // Verify if the extracted frame is a chart/graph/table using AI Snapshot Guard
+      const isChart = await isImageAChart(tempOut);
+      if (!isChart) {
+        console.log(`[Snapshots Route] AI Guard: Discarding non-chart dynamic snapshot at ${secondsInt}s. Deleting local temp file.`);
+        try {
+          fs.unlinkSync(tempOut);
+        } catch (_) {}
+        return new NextResponse("Discarded: Image is not a data visualization (chart, graph, or spreadsheet table).", { status: 404 });
       }
 
       const fileBuffer = fs.readFileSync(tempOut);

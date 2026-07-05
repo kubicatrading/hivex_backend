@@ -41,10 +41,13 @@ export function markdownToTelegramHtml(markdown: string): string {
   });
 
   // 4. Convert relative panel links (e.g. [/dashboard/videos?id=UUID]) to absolute Vercel production links for Telegram
-  html = html.replace(/\[([^\]]+)\]\((\/dashboard\/[^\s)]+)\)/g, '<a href="https://hivex-backend.vercel.app$2">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\((\/dashboard\/[^\s)]+)\)/g, (_, text, path) => {
+    const separator = path.includes('?') ? '&' : '?';
+    return `<a href="https://hivex-backend.vercel.app${path}${separator}from=telegram">${text}</a>`;
+  });
 
   // Convert flat UUID citations (e.g. [035ab5e6-330a-4b53-847e-8e11e9ec7382]) to clickable absolute HTML links in Telegram
-  html = html.replace(/\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi, '<a href="https://hivex-backend.vercel.app/dashboard/videos?id=$1">Ver Análisis</a>');
+  html = html.replace(/\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi, '<a href="https://hivex-backend.vercel.app/dashboard/videos?id=$1&from=telegram">Ver Análisis</a>');
 
   // 4b. Convert standard absolute links: [text](url) -> <a href="url">text</a>
   html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
@@ -127,9 +130,9 @@ export function formatVideoNotification({
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
   const targetId = videoId || youtubeId;
   if (targetId) {
-    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}">Acceder a la Cabina de Estudio en HIVEX</a>`;
+    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">Acceder a la Cabina de Estudio en HIVEX</a>`;
   } else {
-    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos">Abrir Plataforma HIVEX</a>`;
+    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?from=telegram">Abrir Plataforma HIVEX</a>`;
   }
 
   return message;
@@ -290,7 +293,7 @@ export async function sendTelegramPhoto(
   const videoIdMatch = photoUrl.match(/\/snapshots\/([a-zA-Z0-9\-]+)/);
   const videoId = videoIdMatch ? videoIdMatch[1] : null;
   const cabinLink = videoId 
-    ? `\n🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}">Acceder a la Cabina de Estudio en HIVEX</a>` 
+    ? `\n🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram">Acceder a la Cabina de Estudio en HIVEX</a>` 
     : "";
 
   if (!botToken || !chatId) {

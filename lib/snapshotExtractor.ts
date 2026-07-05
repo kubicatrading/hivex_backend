@@ -97,6 +97,80 @@ function extractYoutubeIdHelper(fileUrl: string, videoId?: string): string | nul
 }
 
 /**
+ * Gemini AI-powered classifier to verify if a video frame is a valid data visualization chart.
+ */
+export async function isImageAChart(filePath: string): Promise<boolean> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("[AI Snapshot Guard] GEMINI_API_KEY is not configured. Keeping snapshot by default.");
+    return true;
+  }
+
+  try {
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[AI Snapshot Guard] File not found for analysis: ${filePath}`);
+      return false;
+    }
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64Data = fileBuffer.toString("base64");
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+    
+    const payload = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: base64Data
+              }
+            },
+            {
+              text: "Analyze this video frame screenshot. Determine if this image displays a data representation, such as a bar chart, line chart, pie chart, stock market candles, financial graph, market trends, spreadsheet / Excel table, numeric dashboard, scatter plot, or any mathematical/statistical representation of numbers. Respond with 'YES' if it is a graph/chart/table of data. Respond with 'NO' if it shows a person/narrator, scenery, generic slide of text without numbers/charts, movie scene, or any other non-data visual. Your response must be exactly 'YES' or 'NO'."
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 10
+      }
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.warn(`[AI Snapshot Guard] Gemini API request failed with status ${response.status}. Keeping snapshot by default.`);
+      return true;
+    }
+
+    const json = await response.json();
+    const answer = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase();
+    console.log(`[AI Snapshot Guard] Gemini model output for image "${path.basename(filePath)}": "${answer}"`);
+
+    if (answer && answer.includes("YES")) {
+      return true;
+    } else if (answer && answer.includes("NO")) {
+      return false;
+    }
+
+    // Default to true if response is unexpected
+    return true;
+  } catch (error) {
+    console.error("[AI Snapshot Guard] Error during image classification:", error);
+    return true;
+  }
+}
+
+/**
  * Asynchronously extracts frame snapshots for the detected chart timestamps in the background.
  */
 export async function extractSnapshotsInBackground(
@@ -183,8 +257,22 @@ export async function extractSnapshotsInBackground(
           }
         }
 
-        // Upload to Supabase Storage if extracted or existing, and admin client is available
-        if (extracted && supabaseAdmin && fs.existsSync(outputPath)) {
+        // Verify with AI Snapshot Guard
+        let isChart = true;
+        if (extracted && fs.existsSync(outputPath)) {
+          isChart = await isImageAChart(outputPath);
+          if (!isChart) {
+            console.log(`[Snapshot Extractor] AI Guard: Discarding non-chart frame at ${chart.timestamp} (${chart.seconds}s). Deleting local file.`);
+            try {
+              fs.unlinkSync(outputPath);
+            } catch (err) {
+              console.error("[Snapshot Extractor] Error deleting non-chart snapshot:", err);
+            }
+          }
+        }
+
+        // Upload to Supabase Storage if extracted, classified as a chart, and admin client is available
+        if (extracted && isChart && supabaseAdmin && fs.existsSync(outputPath)) {
           try {
             const fileBuffer = fs.readFileSync(outputPath);
             const uploadPath = `${resolvedVideoId}/${chart.seconds}.jpg`;

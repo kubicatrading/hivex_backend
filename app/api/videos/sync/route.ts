@@ -426,14 +426,7 @@ async function handleSync(request: Request) {
             if (insertError) {
               console.warn(`[Daemon] Error al insertar ${newDocsToInsert.length} nuevos videos para el administrador:`, insertError);
             } else if (insertedDocs && insertedDocs.length > 0) {
-              console.log(`[Daemon] Sincronizados e insertados exitosamente ${insertedDocs.length} nuevos videos bajo el Administrador.`);
-              
-              // Trigger Telegram alert with Gemini investment report
-              try {
-                await sendTelegramAlertForSync(insertedDocs);
-              } catch (alertErr) {
-                console.error("[Daemon] Error al enviar la alerta de Telegram:", alertErr);
-              }
+              console.log(`[Daemon] Sincronizados e insertados exitosamente ${insertedDocs.length} nuevos videos bajo el Administrador (Alerta de Telegram desactivada por solicitud del usuario).`);
             }
           } else {
             console.log("[Daemon] La videoteca compartida ya está al día. 0 videos nuevos insertados.");

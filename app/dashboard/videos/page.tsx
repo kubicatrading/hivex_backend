@@ -1888,6 +1888,7 @@ export default function VideosPage() {
 
   // Concurrency lock for sync process
   const isSyncingRef = useRef(false);
+  const hasInitializedRef = useRef(false);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -3916,14 +3917,33 @@ export default function VideosPage() {
 
   // Initial mount load: execute the synchronization automatically (Limpieza y Sincronización incondicional al cargar)
   useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
     const initLoad = async () => {
       // Defer state update to next event loop tick to satisfy strict ESLint rules
       await Promise.resolve();
+      
+      const rawParams = typeof window !== 'undefined' 
+        ? new URLSearchParams(window.location.search) 
+        : null;
+      
+      const rawFrom = rawParams ? rawParams.get("from") : null;
+      const rawId = rawParams ? (rawParams.get("id") || rawParams.get("video")) : null;
+
+      const isFromTelegram = rawFrom === "telegram" || searchParams.get("from") === "telegram";
+      const hasSpecificVideo = rawId || searchParams.get("id") || searchParams.get("video");
+
+      if (isFromTelegram || hasSpecificVideo) {
+        console.log("[Cabinet] Skipping channel sync to load pre-existing videos instantly. Origin/Specific video detected.");
+        await fetchVideos();
+        return;
+      }
       await handleSyncChannel(true);
     };
 
     initLoad();
-  }, [handleSyncChannel]);
+  }, [handleSyncChannel, searchParams, fetchVideos]);
 
   useEffect(() => {
     // Stop local video player if track changes
