@@ -11,6 +11,69 @@ export function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * Converts standard Markdown syntax into Telegram-compatible HTML tags.
+ * Employs placeholders to ensure content within inline code and code blocks is not formatted.
+ */
+export function markdownToTelegramHtml(markdown: string): string {
+  if (!markdown) return "";
+
+  // 1. First escape raw HTML special characters to prevent Telegram parse errors
+  let html = markdown
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // 2. Convert code blocks: ```lang\ncode\n``` -> <pre>code</pre>
+  const codeBlocks: string[] = [];
+  html = html.replace(/```([\s\S]*?)```/g, (_, code) => {
+    const placeholder = `CODEBLOCKPLACEHOLDER${codeBlocks.length}`;
+    codeBlocks.push(code.trim());
+    return placeholder;
+  });
+
+  // 3. Convert inline code: `code` -> <code>code</code>
+  const inlineCodes: string[] = [];
+  html = html.replace(/`([^`]+)`/g, (_, code) => {
+    const placeholder = `INLINECODEPLACEHOLDER${inlineCodes.length}`;
+    inlineCodes.push(code.trim());
+    return placeholder;
+  });
+
+  // 4. Convert links: [text](url) -> <a href="url">text</a>
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
+
+  // 5. Convert lists (- item, * item, + item -> • item) BEFORE headings/bold/italic
+  // This is critical to prevent bullet asterisks from being matched as italic markers.
+  html = html.replace(/^\s*[-*+]\s+(.*)$/gm, "• $1");
+
+  // 6. Convert Headings (e.g., ### Title -> <b>Title</b>)
+  html = html.replace(/^#+\s+(.*)$/gm, "<b>$1</b>");
+
+  // 7. Convert bold (**text** or __text__) without matching across newlines
+  html = html.replace(/\*\*([^\*\n]+?)\*\*/g, "<b>$1</b>");
+  html = html.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
+
+  // 8. Convert italic (*text* or _text_) without matching across newlines
+  html = html.replace(/\*([^\*\n]+?)\*/g, "<i>$1</i>");
+  html = html.replace(/_([^_\n]+?)_/g, "<i>$1</i>");
+
+  // 9. Convert Blockquotes: > text -> <blockquote>text</blockquote>
+  html = html.replace(/^\s*>\s+(.*)$/gm, "<blockquote>$1</blockquote>");
+
+  // 10. Restore code blocks and inline code
+  codeBlocks.forEach((code, index) => {
+    html = html.replace(`CODEBLOCKPLACEHOLDER${index}`, `<pre>${code}</pre>`);
+  });
+
+  inlineCodes.forEach((code, index) => {
+    html = html.replace(`INLINECODEPLACEHOLDER${index}`, `<code>${code}</code>`);
+  });
+
+  return html;
+}
+
+
 export interface VideoAnalysisPayload {
   videoTitle: string;
   channelName: string;

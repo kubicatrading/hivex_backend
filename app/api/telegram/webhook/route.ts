@@ -1,44 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
-
-/**
- * Basic markdown-to-Telegram-HTML conversion utility to ensure
- * formatted text is robustly parsed by Telegram's strict HTML parser.
- */
-function markdownToTelegramHtml(markdown: string): string {
-  if (!markdown) return "";
-
-  // 1. First escape raw HTML tags
-  let html = markdown
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  // 2. Convert Headings (e.g., ### Title -> <b>Title</b>)
-  html = html.replace(/^###?\s+(.*)$/gm, "<b>$1</b>");
-  html = html.replace(/^##\s+(.*)$/gm, "<b>$1</b>");
-  html = html.replace(/^#\s+(.*)$/gm, "<b>$1</b>");
-
-  // 3. Convert bold (**text** or __text__)
-  html = html.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
-  html = html.replace(/__(.*?)__/g, "<b>$1</b>");
-
-  // 4. Convert italic (*text* or _text_)
-  html = html.replace(/\*(.*?)\*/g, "<i>$1</i>");
-  html = html.replace(/_([^_]+)_/g, "<i>$1</i>");
-
-  // 5. Convert inline code (`code`)
-  html = html.replace(/`(.*?)`/g, "<code>$1</code>");
-
-  // 6. Convert markdown links: [text](url) -> <a href="url">text</a>
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
-
-  // 7. Convert lists (- item or * item -> • item)
-  html = html.replace(/^\s*[-*+]\s+(.*)$/gm, "• $1");
-
-  return html;
-}
+import { markdownToTelegramHtml } from "@/lib/telegram";
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,20 +25,22 @@ export async function POST(request: NextRequest) {
 
     // 1. Handle Slash Commands (/start or /help)
     if (userText === "/start" || userText === "/help") {
-      const welcomeText = `<b>🤖 ASISTENTE BURSÁTIL HIVEX</b>
+      const welcomeMarkdown = `**🤖 ASISTENTE BURSÁTIL HIVEX**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-¡Bienvenido al canal interactivo de <b>HIVEX</b>!
+¡Bienvenido al canal interactivo de **HIVEX**!
 
-Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de videos de análisis macroeconómico sincronizados (<i>Andrei Jikh</i> y <i>Judging Freedom</i>) y dispongo de conexión a internet por satélite para tendencias de hoy.
+Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de videos de análisis macroeconómico sincronizados (*Andrei Jikh* y *Judging Freedom*) y dispongo de conexión a internet por satélite para tendencias de hoy.
 
-<b>¿Cómo puedo ayudarte hoy?</b>
-• Hazme preguntas sobre geopolítica o macroeconomía (ej: <i>"¿Cuál es el diferencial del precio del oro en Shanghái?"</i>).
-• Pregúntame qué vídeos tienes sincronizados (ej: <i>"¿Cuántos vídeos tengo en Supabase?"</i>).
-• Pídeme resúmenes de tus canales o análisis específicos de un ponente.
+**¿Cómo puedo ayudarte hoy?**
+- Hazme preguntas sobre geopolítica o macroeconomía (ej: *“¿Cuál es el diferencial del precio del oro en Shanghái?”*).
+- Pregúntame qué vídeos tienes sincronizados (ej: *“¿Cuántos vídeos tengo en Supabase?”*).
+- Pídeme resúmenes de tus canales o análisis específicos de un ponente.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-<i>Temperatura de IA configurada en 0.2 (Análisis Factual de Alta Rigurosidad)</i>`;
+*Temperatura de IA configurada en 0.2 (Análisis Factual de Alta Rigurosidad)*`;
+
+      const welcomeText = markdownToTelegramHtml(welcomeMarkdown);
 
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: "POST",
@@ -190,17 +155,17 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
 - **Lógica de Respuestas**:
   - Si el usuario te pregunta sobre temas cubiertos en la base de conocimiento local (los vídeos sincronizados), debes responder fundamentándote en ella y citar el vídeo correspondiente (indicando su título y canal).
   - Si el usuario te pregunta sobre tendencias de hoy, cotizaciones en tiempo real o temas bursátiles generales que NO están cubiertos en los vídeos de HIVEX, DEBES realizar de forma inmediata una búsqueda en Google (Search Grounding) para proporcionar una respuesta de mercado rigurosa y de hoy. No inventes datos ni devuelvas fallbacks textuales de falta de información; en Telegram debes solventar la consulta del inversor al instante buscando en la web.
-- **Formato HTML de Telegram**: 
-  - IMPORTANTE: Tus respuestas se envían directamente a Telegram y serán interpretadas por su parseador de HTML con parse_mode='HTML'.
-  - Debes estructurar tu respuesta de forma estética usando EXCLUSIVAMENTE las siguientes etiquetas HTML permitidas por Telegram:
-    - <b>negrita</b>
-    - <i>cursiva</i>
-    - <code>código en línea</code>
-    - <pre>bloque de código</pre>
-    - <blockquote>bloque de cita</blockquote>
-    - <a href="url">enlace</a>
-  - EVITA CUALQUIER OTRA ETIQUETA (como <h1>, <h2>, <ul>, <li>, <p>, etc.) ya que romperían el parseador de Telegram y el mensaje no se entregaría. Para las listas, utiliza el carácter viñeta física como "• " al inicio de la línea y saltos de línea normales.
-- **Formato de Enlaces**: Usa enlaces HTML estándar: <a href="https://...">Texto</a>.
+- **Formato de Respuesta (Markdown Estándar)**: 
+  - IMPORTANTE: Tus respuestas se envían a un procesador intermedio. Debes redactar tus respuestas exclusivamente en **Markdown estándar**.
+  - **PROHIBIDO EL USO DE ETIQUETAS HTML**: Bajo ninguna circunstancia uses etiquetas HTML como <b>, <i>, <a>, <code>, <blockquote>, etc. El procesador intermedio se encarga de convertir tu Markdown a HTML para Telegram. Si escribes etiquetas HTML directamente, el usuario las verá literalmente en su pantalla de Telegram como texto no procesado.
+  - Estructura tu respuesta de forma estética usando los siguientes elementos Markdown:
+    - **texto en negrita** para resaltar términos, conceptos clave o títulos de secciones.
+    - *texto en cursiva* para énfasis o citas cortas.
+    - \`código en línea\` para datos numéricos específicos, porcentajes, o variables.
+    - > bloque de cita para fragmentos destacados de análisis o resúmenes de vídeos.
+    - [texto del enlace](url) para enlaces a páginas web o videos de Youtube.
+  - Para listas, utiliza viñetas estándar de Markdown (por ejemplo, "- elemento") o listas numeradas ("1. elemento").
+
 `;
 
     // 5. Query Gemini with search grounding enabled
@@ -209,6 +174,9 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
       console.warn("[Telegram Webhook] Missing GEMINI_API_KEY environment variable.");
       return NextResponse.json({ ok: true });
     }
+
+    console.log(`[Telegram Webhook] Successfully parsed payload. Chat ID: ${chatId}, User Text: "${userText}".`);
+    console.log(`[Telegram Webhook] Total videos in context: ${totalVideos}. DB docs count: ${allDocs.length}.`);
 
     const attempts = [
       {
@@ -233,6 +201,7 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
 
     for (const attempt of attempts) {
       try {
+        console.log(`[Telegram Webhook] Querying Gemini model: ${attempt.name}...`);
         const requestUrl = `${attempt.url}?key=${apiKey}`;
         const payload: Record<string, any> = {
           contents: contentsPayload,
@@ -263,8 +232,14 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
           if (part && part.text) {
             geminiResponseText = part.text;
             successfulModel = attempt.name;
+            console.log(`[Telegram Webhook] Gemini response obtained from ${attempt.name}. Text length: ${geminiResponseText.length} chars.`);
             break;
+          } else {
+            console.warn(`[Telegram Webhook] ${attempt.name} returned empty text parts:`, JSON.stringify(resData));
           }
+        } else {
+          const errorText = await res.text();
+          console.error(`[Telegram Webhook] ${attempt.name} returned HTTP ${res.status}:`, errorText);
         }
       } catch (err) {
         console.error(`[Telegram Webhook] Gemini attempt with ${attempt.name} failed:`, err);
@@ -272,14 +247,17 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
     }
 
     if (!geminiResponseText) {
+      console.warn("[Telegram Webhook] All Gemini attempts failed. Using fallback response.");
       geminiResponseText = "Disculpa, en este momento el analista de HIVEX no puede procesar tu consulta. Inténtalo de nuevo en unos instantes.";
     }
 
     // 6. Convert Gemini's markdown response to Telegram-compatible HTML
     const telegramHtml = markdownToTelegramHtml(geminiResponseText);
+    console.log(`[Telegram Webhook] Final formatted Telegram HTML (length: ${telegramHtml.length} chars):\n`, telegramHtml);
 
     // 7. Send the reply back to the Telegram chat
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    console.log(`[Telegram Webhook] Sending reply to Telegram chat ${chatId}...`);
+    const telRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -289,6 +267,13 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
         disable_web_page_preview: false,
       }),
     });
+
+    const telData = await telRes.json();
+    if (!telRes.ok || !telData.ok) {
+      console.error("[Telegram Webhook] Failed to send message to Telegram API:", telData.description || `HTTP ${telRes.status}`);
+    } else {
+      console.log("[Telegram Webhook] Message sent successfully to Telegram API! Message ID:", telData.result?.message_id);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
