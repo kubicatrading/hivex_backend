@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessageWithPhotos } from "@/lib/telegram";
 
 export async function POST(request: Request) {
   try {
@@ -303,7 +303,7 @@ ${useInternet ? `
       if (!messageArg) {
         geminiResponseText = "No se proporcionó el mensaje para la notificación de Telegram.";
       } else {
-        const result = await sendTelegramMessage(messageArg);
+        const result = await sendTelegramMessageWithPhotos(messageArg);
         if (result.success) {
           return NextResponse.json({
             success: true,
@@ -355,6 +355,26 @@ ${useInternet ? `
         });
       }
     }
+
+    // Replace flat UUID citations [UUID] with interactive Markdown links and register them as local sources
+    geminiResponseText = geminiResponseText.replace(
+      /\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi,
+      (_, uuid) => {
+        const video = videos.find(v => v.id === uuid);
+        const title = video ? video.title : "Vídeo de Estudio";
+        const url = `/dashboard/videos?id=${uuid}`;
+        
+        if (!sources.some(s => s.url === url)) {
+          sources.push({
+            title: `Ver Análisis: ${title}`,
+            url,
+            type: "local"
+          });
+        }
+        
+        return `[Ver Análisis: ${title}](${url})`;
+      }
+    );
 
     // Remove duplicate sources by URL
     const uniqueSources = Array.from(new Map(sources.map(s => [s.url, s])).values());

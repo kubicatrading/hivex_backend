@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { translations } from "@/lib/translations";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 
 interface ChatMessage {
   id: string;
@@ -376,8 +377,8 @@ export default function AssistantPage() {
 
   // Helper to parse bold (**), inline code (`), and markdown links ([label](url))
   const parseInlineMarkup = (text: string) => {
-    // 1. Parse markdown links [Label](url)
-    const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    // 1. Parse markdown links [Label](url) - supporting both absolute and relative paths
+    const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\)/g;
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
     let match;
@@ -392,17 +393,28 @@ export default function AssistantPage() {
 
       const label = match[1];
       const url = match[2];
+      const isLocal = url.startsWith("/");
       
       parts.push(
-        <a 
-          key={matchIndex} 
-          href={url} 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="text-violet-400 hover:text-violet-300 underline font-medium transition-colors"
-        >
-          {label}
-        </a>
+        isLocal ? (
+          <Link 
+            key={matchIndex} 
+            href={url} 
+            className="text-violet-400 hover:text-violet-300 underline font-medium transition-colors cursor-pointer"
+          >
+            {label}
+          </Link>
+        ) : (
+          <a 
+            key={matchIndex} 
+            href={url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-violet-400 hover:text-violet-300 underline font-medium transition-colors cursor-pointer"
+          >
+            {label}
+          </a>
+        )
       );
       
       lastIndex = linkRegex.lastIndex;

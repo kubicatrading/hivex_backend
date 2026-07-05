@@ -1,25 +1,142 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
-import { markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
+import { markdownToTelegramHtml, splitMarkdown, sendTelegramMessageWithPhotos, escapeHtml } from "@/lib/telegram";
 
 export async function POST(request: NextRequest) {
   try {
     const payload = await request.json();
     console.log("[Telegram Webhook] Received update payload:", JSON.stringify(payload));
 
-    // Telegram sends message details inside payload.message
     const message = payload.message;
-    if (!message || !message.text) {
+    if (!message) {
       return NextResponse.json({ ok: true });
     }
 
     const chatId = message.chat.id;
-    const userText = message.text.trim();
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const apiKey = process.env.GEMINI_API_KEY;
 
     if (!botToken) {
       console.warn("[Telegram Webhook] Missing TELEGRAM_BOT_TOKEN environment variable.");
+      return NextResponse.json({ ok: true });
+    }
+
+    let userText = "";
+    let isAudio = false;
+
+    try {
+      const voice = message.voice;
+      const audio = message.audio;
+      const audioObj = voice || audio;
+
+      if (audioObj) {
+        isAudio = true;
+        const fileId = audioObj.file_id;
+        const mimeType = audioObj.mime_type || "audio/ogg";
+
+        if (!apiKey) {
+          throw new Error("Missing GEMINI_API_KEY environment variable. Cannot transcribe audio.");
+        }
+
+        console.log(`[Telegram Webhook] Audio/Voice received. File ID: ${fileId}, Mime Type: ${mimeType}. Fetching file path...`);
+        const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+        if (!getFileRes.ok) {
+          throw new Error(`Failed to get file info from Telegram. Status: ${getFileRes.status}`);
+        }
+        const getFileData = await getFileRes.json();
+        if (!getFileData.ok || !getFileData.result?.file_path) {
+          throw new Error(`Telegram getFile returned error or empty path: ${JSON.stringify(getFileData)}`);
+        }
+
+        const filePath = getFileData.result.file_path;
+        console.log(`[Telegram Webhook] File path resolved: ${filePath}. Downloading binary...`);
+
+        const downloadRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`);
+        if (!downloadRes.ok) {
+          throw new Error(`Failed to download audio file from Telegram. Status: ${downloadRes.status}`);
+        }
+
+        const arrayBuffer = await downloadRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const base64Audio = buffer.toString("base64");
+        console.log(`[Telegram Webhook] Audio downloaded and encoded to Base64. Size: ${buffer.byteLength} bytes.`);
+
+        console.log("[Telegram Webhook] Invoking Gemini for audio transcription...");
+        const transcriptionInstruction = "Por favor, transcribe exactamente lo que dice este mensaje de voz en español, palabra por palabra. Tu respuesta debe ser ÚNICAMENTE la transcripción literal sin comentarios, explicaciones, saludos ni notas.";
+
+        const attemptTranscriptionUrls = [
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        ];
+
+        let transcribedText = "";
+        for (const url of attemptTranscriptionUrls) {
+          try {
+            console.log(`[Telegram Webhook] Trying transcription with Gemini API endpoint: ${url}...`);
+            const res = await fetch(`${url}?key=${apiKey}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    parts: [
+                      {
+                        inlineData: {
+                          mimeType: mimeType,
+                          data: base64Audio
+                        }
+                      },
+                      {
+                        text: transcriptionInstruction
+                      }
+                    ]
+                  }
+                ]
+              })
+            });
+
+            if (res.ok) {
+              const resData = await res.json();
+              const textPart = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (textPart) {
+                transcribedText = textPart.trim();
+                console.log(`[Telegram Webhook] Successfully transcribed. Result: "${transcribedText}"`);
+                break;
+              }
+            } else {
+              const errorText = await res.text();
+              console.error(`[Telegram Webhook] Transcription API error (${url}):`, errorText);
+            }
+          } catch (transErr) {
+            console.error(`[Telegram Webhook] Transcription attempt crashed for ${url}:`, transErr);
+          }
+        }
+
+        if (!transcribedText) {
+          throw new Error("Could not transcribe audio message with any available Gemini Flash models.");
+        }
+
+        userText = transcribedText;
+      } else if (message.text) {
+        userText = message.text.trim();
+      } else {
+        // Return ok if it is not text and not audio (e.g. photos, stickers)
+        return NextResponse.json({ ok: true });
+      }
+    } catch (audioErr: any) {
+      console.error("[Telegram Webhook] Audio processing/transcription crashed:", audioErr);
+      const errorHtml = `🎙️ <b>Error de Mensaje de Voz</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nNo pudimos procesar o transcribir tu nota de voz de forma adecuada en este momento.\n\n<i>Detalle: ${escapeHtml(audioErr?.message || "Error de red o decodificación")}</i>\n\nPor favor, intenta grabar con mayor claridad o escribe tu consulta en formato de texto plano.`;
+
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: errorHtml,
+          parse_mode: "HTML",
+        }),
+      });
       return NextResponse.json({ ok: true });
     }
 
@@ -156,6 +273,17 @@ Tienes dos propósitos de servicio principales:
 NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
 - **Temperatura de IA**: Tu razonamiento se limita a una temperatura de 0.2 (preciso, estricto, factual).
 
+- **ENVÍO DE GRÁFICOS E IMÁGENES (CAPACIDAD MULTIMEDIA)**:
+  - Tienes la capacidad de enviar gráficos, diagramas o imágenes relevantes en tus respuestas de Telegram de forma interactiva.
+  - **Gráficos Locales (HIVEX Snapshots)**: Cuando el usuario te pida ver un gráfico, pregunte por detalles visuales de un vídeo, o cuando consideres de alto valor ilustrar tu análisis financiero con un gráfico de la base de datos de HIVEX, DEBES insertar la imagen usando el formato Markdown estándar:
+    \`![Título del Gráfico](https://hivex-backend.vercel.app/snapshots/{youtubeId}/{seconds}.jpg)\`
+    - Reemplaza \`{youtubeId}\` por el ID de 11 caracteres del vídeo de YouTube real obtenido de tu contexto (el campo \`fileUrl\` o similar mapeado por tu conocimiento).
+    - Reemplaza \`{seconds}\` por la marca de tiempo exacta del gráfico convertida a segundos enteros. Por ejemplo:
+      - Si el gráfico está registrado en la marca de tiempo **04:15** (4 minutos y 15 segundos), calcula: \`4 * 60 + 15 = 255\` segundos. La URL de la imagen será \`https://hivex-backend.vercel.app/snapshots/{youtubeId}/255.jpg\`.
+      - Si el gráfico está en **10:00**, calcula: \`10 * 60 = 600\` segundos. La URL será \`https://hivex-backend.vercel.app/snapshots/{youtubeId}/600.jpg\`.
+  - **Gráficos de Internet**: Si realizas una búsqueda en internet mediante Google Search Grounding para obtener tendencias o datos de hoy, y encuentras enlaces directos a imágenes de gráficos financieros estables y públicos, puedes inyectarlos con la misma sintaxis: \`![Título descriptivo del gráfico](url_imagen_real)\`.
+  - Intenta siempre incluir gráficos cuando se te pida análisis visual o cuando expliques datos densos de un ponente que cuente con sección de gráficos.
+
 - **4 REGLAS INQUEBRANTABLES**:
   1. **REGLA 1 (CIRCUNSCRIPCIÓN EXCLUSIVA A HIVEX)**: Tus respuestas se deben circunscribir de forma prioritaria y estricta a la base de conocimiento almacenada en HIVEX (los vídeos y estudios sincronizados). Solo si la información solicitada NO existe en absoluto en HIVEX, estarás autorizado a buscar la respuesta en Internet (Google Search Grounding).
   2. **REGLA 2 (CITAR TODAS LAS FUENTES CON ENLACES CLICABLES)**: Todas, absolutamente todas las respuestas deben citar de manera clara y explícita la fuente de donde se extrae la información mediante un link clicable en formato Markdown ([Texto](URL)) al que se pueda navegar para ampliar información.
@@ -163,7 +291,7 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
      - Si la fuente procede de internet, debes incluir obligatoriamente los hipervínculos reales de las páginas o artículos web de donde proviene la información utilizando los URLs provistos por los resultados del buscador de Google Search Grounding.
      - Está terminantemente prohibido omitir el enlace clicable directo; cada afirmación relevante debe tener su hipervínculo clicable de respaldo.
   3. **REGLA 3 (PROHIBICIÓN ABSOLUTA DE RESPUESTAS SIMULADAS)**: Están estrictamente prohibidas las respuestas simuladas, ficticias, hipotéticas o inventadas. Todos los datos, cifras, precios, fechas y análisis deben basarse rigurosamente en fuentes verídicas de conocimiento real (la base de datos de HIVEX o la búsqueda web en tiempo real del Google Search Grounding actual de hoy, ${currentDateTimeStr}).
-  4. **REGLA 4 (PRIORIZACIÓN CRONOLÓGICA EXTREMA / NOTICIAS RECIENTES)**: Para el inversor, el valor del conocimiento decae rápidamente con el tiempo. Las informaciones, noticias y análisis recientes tienen prioridad absoluta sobre los antiguos. Debes priorizar con fuerza y dar máximo protagonismo visual y de análisis a aquellas noticias, informaciones o vídeos que no tengan más de un par de días de antigüedad (últimas 48 horas) frente a todo el resto de la base de conocimiento, destacando estas novedades en primer lugar para darle el máximo valor posible al inversor. Prioricemos aquellas noticias que no tengan más de un par de días de antigüedad frente al resto, para darle más valor a estas primeras que a todas las demás.
+  4. **REGLA 4 (PRIORIZACIÓN CRONOLÓGICA EXTREMA / NOTICIAS RECIENTES)**: Para el inversor, el valor del conocimiento decae rápidamente con el tiempo. Las informaciones, noticias y análisis recientes tienen prioridad absoluta sobre los antiguos. Debes priorizar con fuerza y dar máximo protagonismo visual y de análisis a aquellas noticias, informaciones o vídeos que no tengan más de un par de días de antigüedad (últimas 48 horas) frente a todo el resto de la base de conocimiento, destacando estas novedades en primer lugar para darle el máximo valor posible al inversor.
 
 - **Prohibición Estricta de Enlaces de YouTube**:
   - BAJO NINGUNA CIRCUNSTANCIA devuelvas enlaces directos de YouTube (como youtube.com/watch, youtube.com/embed, etc.), salvo que el usuario te lo pida explícitamente diciendo literalmente algo como: "Dame el enlace directo de YouTube" o "Pásame el link de YouTube".
@@ -179,11 +307,11 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
     - \`código en línea\` para datos numéricos específicos, porcentajes, o variables.
     - > bloque de cita para fragmentos destacados de análisis o resúmenes de vídeos.
     - [texto del enlace](url) para enlaces a la cabina de estudio de HIVEX u otros sitios.
+    - ![título](url_imagen) para incluir gráficos y diagramas.
   - Para listas, utiliza viñetas estándar de Markdown (por ejemplo, "- elemento") o listas numeradas ("1. elemento").
 `;
 
     // 5. Query Gemini with search grounding enabled
-    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.warn("[Telegram Webhook] Missing GEMINI_API_KEY environment variable.");
       return NextResponse.json({ ok: true });
@@ -265,34 +393,24 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
       geminiResponseText = "Disculpa, en este momento el analista de HIVEX no puede procesar tu consulta. Inténtalo de nuevo en unos instantes.";
     }
 
-    // 6. Split Gemini's markdown response into chunks under 3000 chars to avoid Telegram's 4096 char limit
-    const markdownChunks = splitMarkdown(geminiResponseText, 3000);
-    console.log(`[Telegram Webhook] Gemini response text split into ${markdownChunks.length} chunks.`);
-
-    for (let i = 0; i < markdownChunks.length; i++) {
-      const chunk = markdownChunks[i];
-      const telegramHtml = markdownToTelegramHtml(chunk);
-      console.log(`[Telegram Webhook] Sending chunk ${i + 1}/${markdownChunks.length} (length: ${telegramHtml.length} chars) to Telegram chat ${chatId}...`);
-
-      // 7. Send the reply chunk back to the Telegram chat
-      const telRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: telegramHtml,
-          parse_mode: "HTML",
-          disable_web_page_preview: i !== 0, // Enable web page preview only for the first chunk if relevant
-        }),
-      });
-
-      const telData = await telRes.json();
-      if (!telRes.ok || !telData.ok) {
-        console.error(`[Telegram Webhook] Failed to send chunk ${i + 1}/${markdownChunks.length} to Telegram API:`, telData.description || `HTTP ${telRes.status}`);
-      } else {
-        console.log(`[Telegram Webhook] Chunk ${i + 1}/${markdownChunks.length} sent successfully! Message ID:`, telData.result?.message_id);
+    // Replace flat UUID citations [UUID] with interactive Markdown links
+    geminiResponseText = geminiResponseText.replace(
+      /\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi,
+      (_, uuid) => {
+        const video = videos.find(v => v.id === uuid);
+        const title = video ? video.title : "Vídeo de Estudio";
+        return `[Ver Análisis: ${title}](/dashboard/videos?id=${uuid})`;
       }
+    );
+
+    // Prepend audio/voice notes transcription feedback prefix if applicable
+    if (isAudio) {
+      geminiResponseText = `🎙️ *Mensaje de voz transcrito:* "${userText}"\n\n${geminiResponseText}`;
     }
+
+    // 6. Send response via sendTelegramMessageWithPhotos to support interactive image sending
+    console.log(`[Telegram Webhook] Sending Gemini response via sendTelegramMessageWithPhotos to chat ${chatId}...`);
+    await sendTelegramMessageWithPhotos(geminiResponseText, chatId);
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
