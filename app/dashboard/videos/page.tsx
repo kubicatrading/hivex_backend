@@ -675,6 +675,8 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
       { doc: analysisDoc, type: "knowledge_analysis" }
     ];
 
+    let newlyAnalyzed = false;
+
     for (const item of docsToInsert) {
       // Query to avoid duplicate rows for the same file_url and type
       const { data: existing, error: checkErr } = await supabase
@@ -695,10 +697,57 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
           console.warn(`[Base de Conocimiento] Error al insertar ${item.type} para ${videoDoc.title}:`, insertErr);
         } else {
           console.log(`[Base de Conocimiento] Persistido con éxito ${item.type} para: ${videoDoc.title}`);
+          if (item.type === "knowledge_analysis") {
+            newlyAnalyzed = true;
+          }
         }
       } else {
         console.log(`[Base de Conocimiento] Documento de tipo ${item.type} ya existe para: ${videoDoc.title}. No se duplica.`);
       }
+    }
+
+    if (newlyAnalyzed) {
+      // Extract youtubeId from fileUrl
+      let ytId = "";
+      const regexes = [
+        /youtube\.com\/embed\/([a-zA-Z0-9_\-]{11})/,
+        /youtube\.com\/watch\?v=([a-zA-Z0-9_\-]{11})/,
+        /youtu\.be\/([a-zA-Z0-9_\-]{11})/,
+        /youtube\.com\/shorts\/([a-zA-Z0-9_\-]{11})/
+      ];
+      for (const regex of regexes) {
+        const match = fileUrl.match(regex);
+        if (match && match[1]) {
+          ytId = match[1];
+          break;
+        }
+      }
+
+      console.log(`[Base de Conocimiento] Triggering automatic Telegram notification for newly analyzed video: ${videoDoc.title}`);
+      fetch("/api/telegram/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "video_analysis",
+          videoTitle: videoDoc.title,
+          channelName: channelTitle,
+          analysisSummary: splitResult.summary || splitResult.report || "Análisis bursátil guardado con éxito.",
+          youtubeId: ytId || undefined,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            console.log(`[Base de Conocimiento] Telegram notification triggered successfully! ${data.simulated ? "(Simulated)" : ""}`);
+          } else {
+            console.warn(`[Base de Conocimiento] Telegram notification failed:`, data.error);
+          }
+        })
+        .catch((err) => {
+          console.error(`[Base de Conocimiento] Failed to call Telegram notify API:`, err);
+        });
     }
   } catch (err) {
     console.error("[Base de Conocimiento] Error al procesar guardado persistente:", err);

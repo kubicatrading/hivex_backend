@@ -278,6 +278,11 @@ class MockSupabase {
       return { data: { user: session?.user || null }, error: null };
     },
 
+    getSession: async () => {
+      const session = this.getSession();
+      return { data: { session }, error: null };
+    },
+
     onAuthStateChange: (callback: (event: string, session: { access_token: string; user: MockUser } | null) => void) => {
       const session = this.getSession();
       callback(session ? "SIGNED_IN" : "SIGNED_OUT", session);

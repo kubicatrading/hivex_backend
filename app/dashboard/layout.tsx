@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { translations } from "@/lib/translations";
 import { Logo } from "@/components/Logo";
+import { AssistantBotWidget } from "@/components/AssistantBotWidget";
 
 
 interface UserProfile {
@@ -375,6 +376,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <AssistantBotWidget />
     </div>
   );
 }
