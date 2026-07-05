@@ -65,6 +65,38 @@ function runCmd(cmd: string): Promise<string> {
 }
 
 /**
+ * Helper to extract YouTube video ID (11 chars) from a URL or raw ID.
+ */
+function extractYoutubeIdHelper(fileUrl: string, videoId?: string): string | null {
+  if (fileUrl) {
+    const regexes = [
+      /youtube\.com\/embed\/([a-zA-Z0-9_\-]{11})/,
+      /youtube\.com\/watch\?v=([a-zA-Z0-9_\-]{11})/,
+      /youtu\.be\/([a-zA-Z0-9_\-]{11})/,
+      /youtube\.com\/shorts\/([a-zA-Z0-9_\-]{11})/
+    ];
+
+    for (const regex of regexes) {
+      const match = fileUrl.match(regex);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+  }
+
+  if (videoId) {
+    if (videoId.startsWith("yt-video-")) {
+      return videoId.substring("yt-video-".length);
+    }
+    if (videoId.length === 11) {
+      return videoId;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Asynchronously extracts frame snapshots for the detected chart timestamps in the background.
  */
 export async function extractSnapshotsInBackground(
@@ -84,7 +116,15 @@ export async function extractSnapshotsInBackground(
 
       console.log(`[Snapshot Extractor] Found ${charts.length} chart timestamps to extract:`, charts.map(c => c.timestamp));
 
-      const snapshotsDir = path.join(process.cwd(), "public", "snapshots", videoId);
+      // Resolve the clean, case-sensitive YouTube ID if possible
+      let resolvedVideoId = videoId;
+      const ytId = extractYoutubeIdHelper(fileUrl, videoId);
+      if (ytId) {
+        resolvedVideoId = ytId;
+        console.log(`[Snapshot Extractor] Resolved video ID from ${videoId} to YouTube ID: ${resolvedVideoId}`);
+      }
+
+      const snapshotsDir = path.join(process.cwd(), "public", "snapshots", resolvedVideoId);
       if (!fs.existsSync(snapshotsDir)) {
         fs.mkdirSync(snapshotsDir, { recursive: true });
         console.log(`[Snapshot Extractor] Created folder: ${snapshotsDir}`);
@@ -147,7 +187,7 @@ export async function extractSnapshotsInBackground(
         if (extracted && supabaseAdmin && fs.existsSync(outputPath)) {
           try {
             const fileBuffer = fs.readFileSync(outputPath);
-            const uploadPath = `${videoId}/${chart.seconds}.jpg`;
+            const uploadPath = `${resolvedVideoId}/${chart.seconds}.jpg`;
             console.log(`[Snapshot Extractor] Uploading to Supabase Storage bucket snapshots/${uploadPath}...`);
             const { error: uploadError } = await supabaseAdmin.storage
               .from("snapshots")
@@ -166,7 +206,7 @@ export async function extractSnapshotsInBackground(
         }
       }
 
-      console.log(`[Snapshot Extractor] Background snapshot extraction job completed for video ID: ${videoId}`);
+      console.log(`[Snapshot Extractor] Background snapshot extraction job completed for video ID: ${resolvedVideoId}`);
     } catch (err) {
       console.error(`[Snapshot Extractor] Unhandled background error:`, err);
     }
