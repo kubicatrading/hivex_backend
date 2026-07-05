@@ -79,6 +79,7 @@ export interface VideoAnalysisPayload {
   channelName: string;
   analysisSummary: string;
   youtubeId?: string;
+  videoId?: string;
 }
 
 /**
@@ -89,6 +90,7 @@ export function formatVideoNotification({
   channelName,
   analysisSummary,
   youtubeId,
+  videoId,
 }: VideoAnalysisPayload): string {
   const dateStr = new Date().toLocaleDateString("es-ES", {
     day: "numeric",
@@ -111,16 +113,18 @@ export function formatVideoNotification({
   let message = `<b>🎬 NUEVO VÍDEO SINCRONIZADO EN HIVEX</b>\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
   message += `<b>📡 Canal:</b> <code>${escapedChannel}</code>\n`;
-  message += `<b>title Título:</b> <i>${escapedTitle}</i>\n`;
+  message += `<b>🎬 Título:</b> <i>${escapedTitle}</i>\n`;
   message += `<b>📅 Fecha de Análisis:</b> <code>${dateStr}</code>\n\n`;
   message += `<b>📊 Resumen del Análisis Bursátil:</b>\n`;
   message += `<blockquote>${escapedSummary}</blockquote>\n\n`;
   
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  if (youtubeId) {
-    message += `🔗 <a href="https://www.youtube.com/watch?v=${youtubeId}">Ver en YouTube</a> | `;
+  const targetId = videoId || youtubeId;
+  if (targetId) {
+    message += `🔗 <a href="https://hivex.app/dashboard/videos?id=${targetId}">Acceder a la Cabina de Estudio en HIVEX</a>`;
+  } else {
+    message += `🔗 <a href="https://hivex.app/dashboard/videos">Abrir Plataforma HIVEX</a>`;
   }
-  message += `<a href="https://hivex.app">Abrir Plataforma HIVEX</a>`;
 
   return message;
 }

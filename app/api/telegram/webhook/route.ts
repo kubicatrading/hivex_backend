@@ -123,6 +123,7 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
         totalVideosSincronizados: totalVideos,
         videosPorCanal: channelsCount,
         listaVideos: videos.map(v => ({
+          id: v.id,
           titulo: v.title,
           canal: v.metadata?.channel_title || "Andrei Jikh",
           fechaSincronizacion: v.created_at,
@@ -152,8 +153,13 @@ Tienes dos propósitos de servicio principales:
 NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
 - **Temperatura de IA**: Tu razonamiento se limita a una temperatura de 0.2 (preciso, estricto, factual).
 - **Búsqueda en Internet Autorizada (Google Search Grounding)**: Tienes acceso directo a internet de forma ilimitada para dar respuestas en tiempo real de hoy (${new Date().toLocaleDateString("es-ES")}).
+- **Prohibición Estricta de Enlaces de YouTube**:
+  - BAJO NINGUNA CIRCUNSTANCIA devuelvas enlaces de YouTube (como youtube.com/watch, youtube.com/embed, etc.), salvo que el usuario te lo pida explícitamente diciendo literalmente algo como: "Dame el enlace directo de YouTube" o "Pásame el link de YouTube".
+  - En su lugar, debes proporcionar SIEMPRE el enlace de acceso a la cabina de estudio del vídeo dentro de la plataforma de producción de HIVEX.
+  - Para enlazar un vídeo o su cabina de estudio, utiliza el formato Markdown obligatorio: \`[Título del Vídeo o Texto descriptivo](https://hivex.app/dashboard/videos?id=VIDEO_ID)\`, donde debes reemplazar \`VIDEO_ID\` por el \`id\` (UUID) real del vídeo presente en la base de datos de conocimiento de Supabase.
+  - Explica brevemente al usuario (si es relevante) que al pulsar el enlace interactuará directamente con la plataforma de producción de HIVEX y le permitirá la navegación segura dentro de ella, pidiéndole su usuario y contraseña si no se ha logado previamente.
 - **Lógica de Respuestas**:
-  - Si el usuario te pregunta sobre temas cubiertos en la base de conocimiento local (los vídeos sincronizados), debes responder fundamentándote en ella y citar el vídeo correspondiente (indicando su título y canal).
+  - Si el usuario te pregunta sobre temas cubiertos en la base de conocimiento local (los vídeos sincronizados), debes responder fundamentándote en ella y citar el vídeo correspondiente (indicando su título y canal) con su enlace de cabina de estudio en HIVEX.
   - Si el usuario te pregunta sobre tendencias de hoy, cotizaciones en tiempo real o temas bursátiles generales que NO están cubiertos en los vídeos de HIVEX, DEBES realizar de forma inmediata una búsqueda en Google (Search Grounding) para proporcionar una respuesta de mercado rigurosa y de hoy. No inventes datos ni devuelvas fallbacks textuales de falta de información; en Telegram debes solventar la consulta del inversor al instante buscando en la web.
 - **Formato de Respuesta (Markdown Estándar)**: 
   - IMPORTANTE: Tus respuestas se envían a un procesador intermedio. Debes redactar tus respuestas exclusivamente en **Markdown estándar**.
@@ -163,7 +169,7 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
     - *texto en cursiva* para énfasis o citas cortas.
     - \`código en línea\` para datos numéricos específicos, porcentajes, o variables.
     - > bloque de cita para fragmentos destacados de análisis o resúmenes de vídeos.
-    - [texto del enlace](url) para enlaces a páginas web o videos de Youtube.
+    - [texto del enlace](url) para enlaces a la cabina de estudio de HIVEX u otros sitios.
   - Para listas, utiliza viñetas estándar de Markdown (por ejemplo, "- elemento") o listas numeradas ("1. elemento").
 
 `;

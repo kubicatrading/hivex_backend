@@ -4,7 +4,7 @@ import { sendTelegramMessage, formatVideoNotification, escapeHtml, markdownToTel
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, message, videoTitle, channelName, analysisSummary, youtubeId } = body;
+    const { type, message, videoTitle, channelName, analysisSummary, youtubeId, videoId } = body;
 
     let textToSend = "";
 
@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
         channelName,
         analysisSummary,
         youtubeId,
+        videoId,
       });
     } else {
       // Manual broadcast or general message

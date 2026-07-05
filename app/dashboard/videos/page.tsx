@@ -595,7 +595,7 @@ function splitTranscription(text: string) {
 }
 
 // Persiste por separado la transcripción literal, el resumen estructurado, los gráficos y el análisis de inversión
-async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: string; metadata?: any }, transcriptionText: string) {
+async function saveVideoKnowledgeBase(videoDoc: { id?: string; title: string; file_url?: string; metadata?: any }, transcriptionText: string) {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -735,6 +735,7 @@ async function saveVideoKnowledgeBase(videoDoc: { title: string; file_url?: stri
           channelName: channelTitle,
           analysisSummary: splitResult.summary || splitResult.report || "Análisis bursátil guardado con éxito.",
           youtubeId: ytId || undefined,
+          videoId: videoDoc.id,
         }),
       })
         .then((res) => res.json())
@@ -3088,11 +3089,29 @@ export default function VideosPage() {
   const searchParams = useSearchParams();
   const filterChannel = searchParams.get("channel");
   const filterFavorite = searchParams.get("favorite") === "true";
+  const videoIdParam = searchParams.get("id") || searchParams.get("video");
 
-  // Reset active study video when navigation or query parameters change
+  // Handle URL deep-linking for specific video inside study cabin
   useEffect(() => {
-    setActiveStudyVideo(null);
-  }, [searchParams]);
+    if (videoIdParam) {
+      if (videos.length > 0) {
+        const matched = videos.find(
+          (v) =>
+            v.id === videoIdParam ||
+            v.file_url?.includes(videoIdParam)
+        );
+        if (matched) {
+          console.log(`[Deep Link] Direct URL deep-link matched video: ${matched.title}. Setting as active study video.`);
+          setActiveStudyVideo(matched);
+        } else {
+          console.warn(`[Deep Link] Video with ID/URL-snippet "${videoIdParam}" not found in videos list.`);
+          setActiveStudyVideo(null);
+        }
+      }
+    } else {
+      setActiveStudyVideo(null);
+    }
+  }, [searchParams, videos, videoIdParam]);
 
   const filteredVideos = videos.filter((v: VideoDocument) => {
     const ch = v.metadata?.channel_title || "";
