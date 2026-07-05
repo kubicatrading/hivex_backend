@@ -118,6 +118,7 @@ export async function POST(request: Request) {
         totalVideosSincronizados: totalVideos,
         videosPorCanal: channelsCount,
         listaVideos: videos.map(v => ({
+          id: v.id,
           titulo: v.title,
           canal: v.metadata?.channel_title || "Andrei Jikh",
           fechaSincronizacion: v.created_at,
@@ -146,9 +147,12 @@ Tienes dos propósitos de servicio principales:
 
 NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
 - **Temperatura de IA**: Tu razonamiento se limita a una temperatura de 0.2 (preciso, estricto, factual).
-- **Enlace de Fuentes**: Cualquier respuesta debe detallar e incluir la fuente en la que se basa para dar esa información.
-  - Cuando respondas sobre mercados utilizando la base de conocimiento local de vídeos, DEBES incluir el enlace markdown al vídeo en el formato: \`[Título del Video](fileUrl)\` (usa el campo fileUrl correspondiente de la base de conocimiento). Si mencionas el canal, añade un enlace interno como \`[Canal](/dashboard/videos?channel=NombreCanal)\`.
-  - Ejemplo: *Fuente: Vídeo [The Fed Just Made A Major Decision](https://www.youtube.com/embed/...) en el canal [Andrei Jikh](/dashboard/videos?channel=Andrei%20Jikh)*.
+- **Prohibición Estricta de Enlaces de YouTube (Enlace de Fuentes)**:
+  - BAJO NINGUNA CIRCUNSTANCIA devuelvas enlaces directos de YouTube (como youtube.com/watch, youtube.com/embed, etc.), salvo que el usuario te lo pida explícitamente diciendo literalmente algo como: "Dame el enlace directo de YouTube" o "Pásame el link de YouTube".
+  - En su lugar, cuando respondas sobre mercados utilizando la base de conocimiento local de vídeos, DEBES proporcionar SIEMPRE el enlace de acceso a la cabina de estudio del vídeo dentro del panel de HIVEX utilizando el formato Markdown obligatorio: \`[Título del Vídeo](/dashboard/videos?id=VIDEO_ID)\`, donde debes reemplazar \`VIDEO_ID\` por el \`id\` (UUID) real del vídeo presente en la base de datos de conocimiento de Supabase.
+  - Si mencionas el canal, añade un enlace interno como \`[Canal](/dashboard/videos?channel=NombreCanal)\`.
+  - Ejemplo de cita de fuente: *Fuente: Vídeo [The Fed Just Made A Major Decision](/dashboard/videos?id=VIDEO_ID) en el canal [Andrei Jikh](/dashboard/videos?channel=Andrei%20Jikh)*.
+  - El campo \`enlaceYoutube\` y \`fileUrl\` solo están provistos para tu referencia técnica. No los expongas en tus respuestas bajo ningún concepto.
 - **Falta de Conocimiento (Regra de Fallback Crítica)**: Si lo que se te pregunta no se encuentra dentro de esta base de conocimiento local, tu deber ineludible es informar al usuario y contestar utilizando EXACTAMENTE la siguiente frase:
   "actualmente, mi base de conocimiento no dispone de esa información. Pero si quieres puedo consultar en internet y darte una respuesta de mercado actualizada a día de hoy."
   IMPORTANTE: No uses conocimiento general de entrenamiento si no está en la base de conocimiento local provista. Di la frase exacta de fallback para que el sistema del frontend le permita al usuario hacer una consulta con búsqueda web en internet.
