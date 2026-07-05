@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractYoutubeId, transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
+import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
 
 // Standard YouTube feeds map
 const YT_CHANNELS: Record<string, string> = {
@@ -417,14 +418,22 @@ async function handleSync(request: Request) {
           });
 
           if (newDocsToInsert.length > 0) {
-            const { error: insertError } = await supabaseAdmin
+            const { data: insertedDocs, error: insertError } = await supabaseAdmin
               .from("documents")
-              .insert(newDocsToInsert);
+              .insert(newDocsToInsert)
+              .select("id, title, file_url, metadata");
 
             if (insertError) {
               console.warn(`[Daemon] Error al insertar ${newDocsToInsert.length} nuevos videos para el administrador:`, insertError);
-            } else {
-              console.log(`[Daemon] Sincronizados e insertados exitosamente ${newDocsToInsert.length} nuevos videos bajo el Administrador.`);
+            } else if (insertedDocs && insertedDocs.length > 0) {
+              console.log(`[Daemon] Sincronizados e insertados exitosamente ${insertedDocs.length} nuevos videos bajo el Administrador.`);
+              
+              // Trigger Telegram alert with Gemini investment report
+              try {
+                await sendTelegramAlertForSync(insertedDocs);
+              } catch (alertErr) {
+                console.error("[Daemon] Error al enviar la alerta de Telegram:", alertErr);
+              }
             }
           } else {
             console.log("[Daemon] La videoteca compartida ya está al día. 0 videos nuevos insertados.");
@@ -451,6 +460,175 @@ async function handleSync(request: Request) {
       { success: false, error: errMsg },
       { status: 500 }
     );
+  }
+}
+
+async function generateGlobalInvestmentReport(insertedDocs: any[]): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Falta la clave GEMINI_API_KEY en el entorno para generar el informe global.");
+  }
+
+  // Build metadata summary of newly synced videos
+  const videosText = insertedDocs.map((doc, idx) => {
+    const channel = doc.metadata?.channel_title || "Canal";
+    const title = doc.title || "Título";
+    const desc = doc.description || "Sin descripción.";
+    const transcriptionText = doc.metadata?.transcription ? "\nTranscripción resumen:\n" + doc.metadata.transcription.slice(0, 1000) + "..." : "";
+    return `[Vídeo ${idx + 1}]
+- Canal: ${channel}
+- Título: ${title}
+- Descripción: ${desc}${transcriptionText}
+`;
+  }).join("\n---\n\n");
+
+  const systemInstruction = `You are an elite investment analyst. Synthesize a professional, high-fidelity global investment report in Spanish based on the provided video metadata. Output only standard Markdown. Do NOT include HTML tags.`;
+
+  const promptText = `Eres un analista de inversiones de élite. Se han sincronizado nuevos vídeos de análisis financiero en la plataforma HIVEX. Tu tarea es generar un **Informe Global de Análisis de Inversión** unificado basándote en los títulos, canales y descripciones de los nuevos vídeos detallados a continuación.
+
+Debes analizar y correlacionar las señales de mercado, las tendencias macroeconómicas y las implicaciones geopolíticas planteadas en todos estos vídeos.
+
+Vídeos recién sincronizados:
+${videosText}
+
+REGLAS DE GENERACIÓN DEL INFORME:
+1. Escribe el informe enteramente en **español**.
+2. Adopta el tono de un inversor profesional de élite y analista financiero experimentado.
+3. El informe debe estar estructurado en secciones con títulos limpios en Markdown (usando ### y ####) y viñetas detalladas con negritas para destacar los conceptos clave.
+4. **IMPORTANTE**: No utilices etiquetas HTML en tu respuesta. Genera únicamente Markdown estándar. No agregues bloques de código Markdown alrededor (como \`\`\`markdown o \`\`\`json). El resultado final se convertirá automáticamente a HTML de Telegram, por lo que tu respuesta debe ser texto plano en Markdown.
+5. Mantén la concisión y la precisión analítica para que quepa en un mensaje de Telegram. No inventes datos que no se mencionen o sugieran en los vídeos provistos.
+`;
+
+  const attempts = [
+    {
+      name: "Google AI Studio Gemini 3.5 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`
+    },
+    {
+      name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+    },
+    {
+      name: "Google AI Studio Gemini 2.5 Pro (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${apiKey}`
+    }
+  ];
+
+  let reportContent = "";
+  const errorDetails: string[] = [];
+
+  for (const attempt of attempts) {
+    try {
+      console.log(`[Report Generator] Intentando generar informe usando ${attempt.name}...`);
+      
+      const payload = {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: promptText }]
+          }
+        ],
+        system_instruction: {
+          parts: [{ text: systemInstruction }]
+        },
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 2048
+        }
+      };
+
+      const response = await fetch(attempt.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const geminiData = await response.json();
+        const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (apiResponse && apiResponse.trim().length > 0) {
+          let cleaned = apiResponse.trim();
+          if (cleaned.startsWith("```")) {
+            const match = cleaned.match(/^```(?:markdown)?\s*([\s\S]*?)\s*```$/i);
+            if (match) {
+              cleaned = match[1].trim();
+            }
+          }
+          reportContent = cleaned;
+          console.log(`[Report Generator] Informe generado exitosamente con ${attempt.name}.`);
+          break;
+        } else {
+          errorDetails.push(`${attempt.name}: Respuesta vacía de la API.`);
+        }
+      } else {
+        const errText = await response.text();
+        errorDetails.push(`${attempt.name} (HTTP ${response.status}): ${errText}`);
+      }
+    } catch (err: any) {
+      errorDetails.push(`${attempt.name} (Error de red/sistema): ${err?.message || String(err)}`);
+    }
+  }
+
+  if (reportContent) {
+    return reportContent;
+  } else {
+    throw new Error(
+      `No se pudo generar el informe de inversión global con ninguno de los modelos de Gemini intentados. Detalles:\n` +
+      errorDetails.map(d => `- ${d}`).join("\n")
+    );
+  }
+}
+
+async function sendTelegramAlertForSync(insertedDocs: any[]) {
+  console.log(`[Telegram Alert] Preparando notificación para ${insertedDocs.length} nuevos vídeos...`);
+  
+  const formattedDate = new Date().toLocaleDateString("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Europe/Madrid"
+  });
+
+  // Construct structured video cards with spacing and standard "---" horizontal rule
+  let messageMarkdown = `HIVEX Update - ${formattedDate}\n\n`;
+  
+  for (const doc of insertedDocs) {
+    const channelName = doc.metadata?.channel_title || "Canal Desconocido";
+    const videoTitle = doc.title || "Vídeo sin título";
+    const videoLink = `https://hivex-backend.vercel.app/dashboard/videos?id=${doc.id}`;
+    
+    messageMarkdown += `---\n\n`;
+    messageMarkdown += `${channelName}\n`;
+    messageMarkdown += `${videoTitle}\n`;
+    messageMarkdown += `${videoLink}\n\n`;
+  }
+  messageMarkdown += `---\n\n`;
+
+  let globalReportText = "";
+  try {
+    globalReportText = await generateGlobalInvestmentReport(insertedDocs);
+  } catch (reportErr) {
+    console.error("[Telegram Alert] Error al generar el informe global con Gemini:", reportErr);
+    globalReportText = `### 💼 Informe de Inversión Global\n_No se pudo generar el informe consolidado debido a un error de comunicación con la IA. Consulta los vídeos individualmente en HIVEX._`;
+  }
+
+  messageMarkdown += globalReportText;
+
+  const telegramHtml = markdownToTelegramHtml(messageMarkdown);
+
+  // Send message, split into chunks if long
+  if (telegramHtml.length > 3500) {
+    console.log(`[Telegram Alert] Mensaje largo detectado (${telegramHtml.length} caracteres). Dividiendo en partes.`);
+    const chunks = splitMarkdown(messageMarkdown, 3000);
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkHtml = markdownToTelegramHtml(chunks[i]);
+      await sendTelegramMessage(chunkHtml);
+    }
+  } else {
+    await sendTelegramMessage(telegramHtml);
   }
 }
 
