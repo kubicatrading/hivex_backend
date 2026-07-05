@@ -121,9 +121,9 @@ export function formatVideoNotification({
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
   const targetId = videoId || youtubeId;
   if (targetId) {
-    message += `🔗 <a href="https://hivex.app/dashboard/videos?id=${targetId}">Acceder a la Cabina de Estudio en HIVEX</a>`;
+    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}">Acceder a la Cabina de Estudio en HIVEX</a>`;
   } else {
-    message += `🔗 <a href="https://hivex.app/dashboard/videos">Abrir Plataforma HIVEX</a>`;
+    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos">Abrir Plataforma HIVEX</a>`;
   }
 
   return message;
