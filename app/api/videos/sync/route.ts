@@ -469,34 +469,119 @@ async function generateGlobalInvestmentReport(insertedDocs: any[]): Promise<stri
     throw new Error("Falta la clave GEMINI_API_KEY en el entorno para generar el informe global.");
   }
 
-  // Build metadata summary of newly synced videos
-  const videosText = insertedDocs.map((doc, idx) => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+
+  let supabaseAdmin: any = null;
+  if (supabaseUrl && serviceRoleKey) {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false }
+      });
+    } catch (importErr) {
+      console.error("[Report Generator] Error al importar supabase-js:", importErr);
+    }
+  }
+
+  // Build metadata and content summary of newly synced videos
+  const videosTextParts: string[] = [];
+
+  for (let idx = 0; idx < insertedDocs.length; idx++) {
+    const doc = insertedDocs[idx];
     const channel = doc.metadata?.channel_title || "Canal";
     const title = doc.title || "Título";
     const desc = doc.description || "Sin descripción.";
-    const transcriptionText = doc.metadata?.transcription ? "\nTranscripción resumen:\n" + doc.metadata.transcription.slice(0, 1000) + "..." : "";
-    return `[Vídeo ${idx + 1}]
+
+    let contentToUse = "";
+    let contentTypeUsed = "Descripción del Vídeo";
+
+    if (supabaseAdmin) {
+      try {
+        console.log(`[Report Generator] Buscando 'knowledge_analysis' para el vídeo "${title}" (${doc.file_url})...`);
+        // First try to fetch knowledge_analysis
+        const { data: analysisDocs, error: analysisErr } = await supabaseAdmin
+          .from("documents")
+          .select("metadata")
+          .eq("type", "knowledge_analysis")
+          .eq("file_url", doc.file_url)
+          .limit(1);
+
+        if (!analysisErr && analysisDocs && analysisDocs.length > 0) {
+          const reportText = analysisDocs[0].metadata?.informe_completo;
+          if (reportText && reportText.trim().length > 0) {
+            contentToUse = reportText;
+            contentTypeUsed = "Informe de Análisis Financiero";
+            console.log(`[Report Generator] ¡Encontrado informe de análisis financiero para "${title}"!`);
+          }
+        }
+
+        // Fallback to knowledge_summary
+        if (!contentToUse) {
+          console.log(`[Report Generator] No se encontró análisis. Buscando 'knowledge_summary' para "${title}"...`);
+          const { data: summaryDocs, error: summaryErr } = await supabaseAdmin
+            .from("documents")
+            .select("metadata")
+            .eq("type", "knowledge_summary")
+            .eq("file_url", doc.file_url)
+            .limit(1);
+
+          if (!summaryErr && summaryDocs && summaryDocs.length > 0) {
+            const summaryText = summaryDocs[0].metadata?.resumen_markdown;
+            if (summaryText && summaryText.trim().length > 0) {
+              contentToUse = summaryText;
+              contentTypeUsed = "Resumen de Contenido";
+              console.log(`[Report Generator] ¡Encontrado resumen de contenido para "${title}"!`);
+            }
+          }
+        }
+      } catch (dbErr) {
+        console.warn(`[Report Generator] Error al consultar base de datos para ${title}:`, dbErr);
+      }
+    }
+
+    // Default fallbacks if database fetch yielded nothing or is disabled
+    if (!contentToUse) {
+      if (doc.metadata?.transcription) {
+        contentToUse = doc.metadata.transcription;
+        contentTypeUsed = "Transcripción Resumen (Metadatos)";
+      } else {
+        contentToUse = desc;
+        contentTypeUsed = "Descripción del Vídeo";
+      }
+      console.log(`[Report Generator] Usando fallback (${contentTypeUsed}) para "${title}".`);
+    }
+
+    // Slice content to prevent token limits
+    const slicedContent = contentToUse.length > 4000 ? contentToUse.slice(0, 4000) + "\n...[Contenido Truncado por Límite de Tamaño]..." : contentToUse;
+
+    videosTextParts.push(`[Vídeo ${idx + 1}]
 - Canal: ${channel}
 - Título: ${title}
-- Descripción: ${desc}${transcriptionText}
-`;
-  }).join("\n---\n\n");
+- Tipo de Datos Provistos: ${contentTypeUsed}
+- Contenido del Vídeo:
+${slicedContent}
+`);
+  }
 
-  const systemInstruction = `You are an elite investment analyst. Synthesize a professional, high-fidelity global investment report in Spanish based on the provided video metadata. Output only standard Markdown. Do NOT include HTML tags.`;
+  const videosText = videosTextParts.join("\n---\n\n");
 
-  const promptText = `Eres un analista de inversiones de élite. Se han sincronizado nuevos vídeos de análisis financiero en la plataforma HIVEX. Tu tarea es generar un **Informe Global de Análisis de Inversión** unificado basándote en los títulos, canales y descripciones de los nuevos vídeos detallados a continuación.
+  const systemInstruction = `You are an elite investment analyst. Synthesize a professional, high-fidelity global financial analysis report in Spanish based on the provided video analysis data, summaries, or metadata. Output only standard Markdown. Do NOT include HTML tags.`;
 
-Debes analizar y correlacionar las señales de mercado, las tendencias macroeconómicas y las implicaciones geopolíticas planteadas en todos estos vídeos.
+  const promptText = `Eres un analista de inversiones de élite. Se han sincronizado nuevos vídeos de análisis financiero en la plataforma HIVEX. Tu tarea es generar un **Informe de Análisis Financiero Global** unificado basándote en el contenido detallado (que puede incluir informes de análisis financiero individuales, resúmenes o descripciones) de los nuevos vídeos provistos a continuación.
 
-Vídeos recién sincronizados:
+Debes analizar, relacionar y correlacionar las señales de mercado, las tendencias macroeconómicas, estrategias de asignación y las implicaciones geopolíticas planteadas en todo este contenido.
+
+Vídeos recién sincronizados y su material de análisis base:
 ${videosText}
 
 REGLAS DE GENERACIÓN DEL INFORME:
 1. Escribe el informe enteramente en **español**.
 2. Adopta el tono de un inversor profesional de élite y analista financiero experimentado.
-3. El informe debe estar estructurado en secciones con títulos limpios en Markdown (usando ### y ####) y viñetas detalladas con negritas para destacar los conceptos clave.
-4. **IMPORTANTE**: No utilices etiquetas HTML en tu respuesta. Genera únicamente Markdown estándar. No agregues bloques de código Markdown alrededor (como \`\`\`markdown o \`\`\`json). El resultado final se convertirá automáticamente a HTML de Telegram, por lo que tu respuesta debe ser texto plano en Markdown.
-5. Mantén la concisión y la precisión analítica para que quepa en un mensaje de Telegram. No inventes datos que no se mencionen o sugieran en los vídeos provistos.
+3. El informe debe ser un **Informe de Análisis Financiero Global** consolidado, cruzando los puntos de vista del canal para dar una visión de conjunto coherente y de gran valor para un inversor.
+4. El informe debe estar estructurado en secciones con títulos limpios en Markdown (usando ### y ####) y viñetas detalladas con negritas para destacar los conceptos clave.
+5. **IMPORTANTE**: No utilices etiquetas HTML en tu respuesta. Genera únicamente Markdown estándar. No agregues bloques de código Markdown alrededor (como \`\`\`markdown o \`\`\`json). El resultado final se convertirá automáticamente a HTML de Telegram, por lo que tu respuesta debe ser texto plano en Markdown.
+6. Mantén la concisión y la precisión analítica para que quepa en un mensaje de Telegram. No inventes datos que no se mencionen o sugieran en los vídeos o documentos provistos.
 `;
 
   const attempts = [
@@ -585,50 +670,56 @@ REGLAS DE GENERACIÓN DEL INFORME:
 async function sendTelegramAlertForSync(insertedDocs: any[]) {
   console.log(`[Telegram Alert] Preparando notificación para ${insertedDocs.length} nuevos vídeos...`);
   
-  const formattedDate = new Date().toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "Europe/Madrid"
-  });
-
-  // Construct structured video cards with spacing and standard "---" horizontal rule
-  let messageMarkdown = `HIVEX Update - ${formattedDate}\n\n`;
-  
+  // Group insertedDocs by channel name
+  const channelGroups: Record<string, any[]> = {};
   for (const doc of insertedDocs) {
     const channelName = doc.metadata?.channel_title || "Canal Desconocido";
-    const videoTitle = doc.title || "Vídeo sin título";
-    const videoLink = `https://hivex-backend.vercel.app/dashboard/videos?id=${doc.id}`;
-    
-    messageMarkdown += `---\n\n`;
-    messageMarkdown += `${channelName}\n`;
-    messageMarkdown += `${videoTitle}\n`;
-    messageMarkdown += `${videoLink}\n\n`;
-  }
-  messageMarkdown += `---\n\n`;
-
-  let globalReportText = "";
-  try {
-    globalReportText = await generateGlobalInvestmentReport(insertedDocs);
-  } catch (reportErr) {
-    console.error("[Telegram Alert] Error al generar el informe global con Gemini:", reportErr);
-    globalReportText = `### 💼 Informe de Inversión Global\n_No se pudo generar el informe consolidado debido a un error de comunicación con la IA. Consulta los vídeos individualmente en HIVEX._`;
-  }
-
-  messageMarkdown += globalReportText;
-
-  const telegramHtml = markdownToTelegramHtml(messageMarkdown);
-
-  // Send message, split into chunks if long
-  if (telegramHtml.length > 3500) {
-    console.log(`[Telegram Alert] Mensaje largo detectado (${telegramHtml.length} caracteres). Dividiendo en partes.`);
-    const chunks = splitMarkdown(messageMarkdown, 3000);
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkHtml = markdownToTelegramHtml(chunks[i]);
-      await sendTelegramMessage(chunkHtml);
+    if (!channelGroups[channelName]) {
+      channelGroups[channelName] = [];
     }
-  } else {
-    await sendTelegramMessage(telegramHtml);
+    channelGroups[channelName].push(doc);
+  }
+
+  // Iterate over each channel group and send a separate message
+  for (const [channelName, videos] of Object.entries(channelGroups)) {
+    console.log(`[Telegram Alert] Generando notificación agrupada para el canal "${channelName}" con ${videos.length} vídeos...`);
+
+    let messageMarkdown = `HIVEX UPDATE ${channelName}\n\n`;
+
+    for (const doc of videos) {
+      const videoTitle = doc.title || "Vídeo sin título";
+      const videoLink = `https://hivex-backend.vercel.app/dashboard/videos?id=${doc.id}`;
+      
+      messageMarkdown += `---\n\n`;
+      messageMarkdown += `${channelName}\n`;
+      messageMarkdown += `${videoTitle}\n`;
+      messageMarkdown += `${videoLink}\n\n`;
+    }
+    messageMarkdown += `---\n\n`;
+
+    let globalReportText = "";
+    try {
+      globalReportText = await generateGlobalInvestmentReport(videos);
+    } catch (reportErr) {
+      console.error(`[Telegram Alert] Error al generar el informe global para ${channelName} con Gemini:`, reportErr);
+      globalReportText = `### 💼 Informe de Análisis Financiero Global\n_No se pudo generar el informe consolidado debido a un error de comunicación con la IA. Consulta los vídeos individualmente en HIVEX._`;
+    }
+
+    messageMarkdown += globalReportText;
+
+    const telegramHtml = markdownToTelegramHtml(messageMarkdown);
+
+    // Send message, split into chunks if long
+    if (telegramHtml.length > 3500) {
+      console.log(`[Telegram Alert] Mensaje largo detectado para ${channelName} (${telegramHtml.length} caracteres). Dividiendo en partes.`);
+      const chunks = splitMarkdown(messageMarkdown, 3000);
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkHtml = markdownToTelegramHtml(chunks[i]);
+        await sendTelegramMessage(chunkHtml);
+      }
+    } else {
+      await sendTelegramMessage(telegramHtml);
+    }
   }
 }
 
