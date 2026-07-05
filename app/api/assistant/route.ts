@@ -96,7 +96,7 @@ export async function POST(request: Request) {
         channel: video.metadata?.channel_title || "Andrei Jikh",
         publishedAt: video.metadata?.published_at || video.created_at,
         fileUrl: videoUrl,
-        transcription: transcriptionDoc?.metadata?.texto_transcripcion || transcriptionDoc?.metadata?.transcription || "",
+        transcription: "[La transcripción literal de este vídeo está disponible en la plataforma HIVEX. Usa el resumen, gráficos e informe de análisis para responder de forma precisa]",
         summary: summaryDoc?.metadata?.resumen_markdown || summaryDoc?.metadata?.summary || "",
         charts: chartsDoc?.metadata?.graficos_markdown || chartsDoc?.metadata?.charts || "",
         analysis: analysisDoc?.metadata?.informe_completo || analysisDoc?.metadata?.report || ""
@@ -142,7 +142,7 @@ Tienes dos propósitos de servicio principales:
 
 2. **ASISTENTE BURSÁTIL PREMIUM**:
    - Responde preguntas relacionadas con mercados, tendencias, riesgo bursátil, consejos y tomas de decisiones financieras en cada momento.
-   - Tu base de conocimiento es precisamente toda la información de estudio derivada de los vídeos sincronizados (transcripción literal completa, resúmenes estructurados, gráficos/charts detectados e informe de análisis). Aquí está tu base de conocimiento actual de vídeos:
+   - Tu base de conocimiento es precisamente toda la información de estudio derivada de los vídeos sincronizados (resúmenes estructurados, gráficos/charts detectados e informe de análisis de la cabina de estudio; la transcripción literal completa está en la plataforma). Aquí está tu base de conocimiento actual de vídeos:
      ${JSON.stringify(consolidatedKnowledge, null, 2)}
 
 NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
