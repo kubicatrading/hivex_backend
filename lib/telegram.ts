@@ -275,10 +275,12 @@ export function getYoutubeId(url: string): string | null {
 export async function sendTelegramPhoto(
   photoUrl: string,
   caption?: string,
-  customChatId?: string
+  customChatId?: string,
+  fallbackText?: string
 ): Promise<{
   success: boolean;
   simulated: boolean;
+  photoSent: boolean;
   error?: string;
 }> {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -288,8 +290,12 @@ export async function sendTelegramPhoto(
     console.log("================ TELEGRAM PHOTO SIMULATION MODE ================");
     console.log(`URL: ${photoUrl}`);
     console.log(`Caption: ${caption || "[Ninguno]"}`);
+    if (fallbackText) {
+      console.log(`Fallback Text (would be used if sendPhoto failed):`);
+      console.log(fallbackText);
+    }
     console.log("=========================================================");
-    return { success: true, simulated: true };
+    return { success: true, simulated: true, photoSent: true };
   }
 
   try {
@@ -312,32 +318,62 @@ export async function sendTelegramPhoto(
       const errorMsg = data.description || `HTTP status ${response.status}`;
       console.warn("[Telegram Service] Failed to send photo, falling back to message text. Error:", errorMsg);
       
-      // Fallback: send as normal text message so the info is never lost
-      const fallbackText = caption 
-        ? `${caption}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`
-        : `<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      // Determine what text to send as fallback
+      let finalFallbackText = "";
+      if (fallbackText) {
+        // Safe truncation of markdown before HTML conversion to avoid broken HTML tags
+        let truncatedMarkdown = fallbackText;
+        if (truncatedMarkdown.length > 3500) {
+          truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
+        }
+        const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
+        finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      } else if (caption) {
+        finalFallbackText = `${caption}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+        if (finalFallbackText.length > 4000) {
+          finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
+        }
+      } else {
+        finalFallbackText = `<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      }
+
+      console.log("[Telegram Fallback Debug] finalFallbackText constructed (API fail):", finalFallbackText);
       
-      const msgResult = await sendTelegramMessage(fallbackText, chatId);
+      const msgResult = await sendTelegramMessage(finalFallbackText, chatId);
       return { 
         success: msgResult.success, 
         simulated: msgResult.simulated, 
+        photoSent: false,
         error: `Photo failed (${errorMsg}), fallback success: ${msgResult.success}` 
       };
     }
 
     console.log("[Telegram Service] Photo dispatched successfully to chat:", chatId);
-    return { success: true, simulated: false };
+    return { success: true, simulated: false, photoSent: true };
   } catch (error: any) {
     console.error("[Telegram Service] Photo fetch error:", error);
-    // Fallback on network/fetch crash
-    const fallbackText = caption 
-      ? `${caption}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`
-      : `<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+    let finalFallbackText = "";
+    if (fallbackText) {
+      let truncatedMarkdown = fallbackText;
+      if (truncatedMarkdown.length > 3500) {
+        truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
+      }
+      const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
+      finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+    } else if (caption) {
+      finalFallbackText = `${caption}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      if (finalFallbackText.length > 4000) {
+        finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
+      }
+    } else {
+      finalFallbackText = `<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+    }
     
-    const msgResult = await sendTelegramMessage(fallbackText, chatId);
+    const msgResult = await sendTelegramMessage(finalFallbackText, chatId);
     return { 
       success: msgResult.success, 
       simulated: msgResult.simulated, 
+      photoSent: false,
       error: `Photo crashed (${error?.message}), fallback success: ${msgResult.success}` 
     };
   }
@@ -360,11 +396,16 @@ export async function sendTelegramMessageWithPhotos(
 
   // 1. Regex to capture markdown images: ![alt](url)
   const imageRegex = /!\[([^\]]*)\]\(((?:https?:\/\/[^\s)]+|\/[^\s)]+))\)/g;
-  const matches: { alt: string; url: string }[] = [];
+  const matches: { alt: string; url: string; start: number; end: number }[] = [];
   let match;
 
   while ((match = imageRegex.exec(text)) !== null) {
-    matches.push({ alt: match[1], url: match[2] });
+    matches.push({
+      alt: match[1],
+      url: match[2],
+      start: match.index,
+      end: imageRegex.lastIndex
+    });
   }
 
   // If no images found, route transparently to standard sendTelegramMessage
@@ -372,13 +413,7 @@ export async function sendTelegramMessageWithPhotos(
     return sendTelegramMessage(markdownToTelegramHtml(text), chatId);
   }
 
-  // 2. Clean markdown text to construct clean HTML text
-  let cleanedMarkdown = text.replace(imageRegex, "").trim();
-  cleanedMarkdown = cleanedMarkdown.replace(/\n{3,}/g, "\n\n");
-
-  const cleanedHtml = markdownToTelegramHtml(cleanedMarkdown);
-
-  // 3. Resolve local relative paths to production URL
+  // Helper to resolve relative snapshot URLs
   const resolveUrl = (url: string) => {
     if (url.startsWith("/")) {
       return `https://hivex-backend.vercel.app${url}`;
@@ -386,50 +421,160 @@ export async function sendTelegramMessageWithPhotos(
     return url;
   };
 
-  const resolvedImages = matches.map(img => ({
-    alt: img.alt || "Gráfico de Análisis",
-    url: resolveUrl(img.url)
-  }));
+  // 2. Partition the text into alternating non-image blocks
+  const nonImageBlocks: string[] = [];
+  let lastIndex = 0;
+  for (let i = 0; i < matches.length; i++) {
+    nonImageBlocks.push(text.substring(lastIndex, matches[i].start));
+    lastIndex = matches[i].end;
+  }
+  nonImageBlocks.push(text.substring(lastIndex));
+
+  // 3. Extract headings and explanations with a highly resilient bottom-to-top pattern
+  let introText = "";
+  const headings: string[] = [];
+  const preExplanations: string[] = [];
+  const postExplanations: string[] = [];
+
+  for (let i = 0; i < matches.length; i++) {
+    const block = nonImageBlocks[i];
+    const lines = block.split("\n");
+    
+    // Find heading index bottom-to-top (only formal headings)
+    let hIdx = -1;
+    for (let j = lines.length - 1; j >= 0; j--) {
+      const trimmedLine = lines[j].trim();
+      if (trimmedLine === "") continue;
+      
+      const isHeading = 
+        trimmedLine.startsWith("#") || 
+        /^\[\d{1,2}:\d{2}(?::\d{2})?\]/i.test(trimmedLine) ||
+        (/^####\s+\[?\d{1,2}:\d{2}/i.test(trimmedLine)) ||
+        (trimmedLine.startsWith("**") && trimmedLine.endsWith("**") && trimmedLine.length < 120);
+        
+      if (isHeading) {
+        hIdx = j;
+        break;
+      }
+    }
+
+    let heading = "";
+    let leftoverBefore = "";
+    let rightoverAfter = "";
+
+    if (hIdx !== -1) {
+      heading = lines[hIdx].trim();
+      leftoverBefore = lines.slice(0, hIdx).join("\n").trim();
+      rightoverAfter = lines.slice(hIdx + 1).join("\n").trim();
+    } else {
+      // If no formal heading is found:
+      // - Treat the entire block as description/explanation (so rightoverAfter = entire block.trim())
+      // - Fall back to the image's alt text as the heading
+      heading = matches[i].alt || "Gráfico de Análisis";
+      leftoverBefore = "";
+      rightoverAfter = block.trim();
+    }
+
+    headings.push(heading);
+    preExplanations.push(rightoverAfter);
+
+    if (i === 0) {
+      introText = leftoverBefore;
+    } else {
+      postExplanations.push(leftoverBefore);
+    }
+  }
+
+  // The final block belongs entirely to the explanation of the last image
+  postExplanations.push(nonImageBlocks[matches.length].trim());
+
+  // Recombine explanation parts (pre-image and post-image) for each image
+  const explanations: string[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const preExp = preExplanations[i] || "";
+    const postExp = postExplanations[i] || "";
+    
+    let combined = "";
+    if (preExp && postExp) {
+      combined = `${preExp}\n\n${postExp}`;
+    } else {
+      combined = preExp || postExp;
+    }
+    explanations.push(combined.trim());
+  }
 
   // If mock/simulation mode (no env vars)
   if (!botToken || !chatId) {
     console.log("================ TELEGRAM MULTIMEDIA SIMULATION MODE ================");
     console.log(`TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.`);
-    console.log(`Resolved Images to send:`, resolvedImages);
-    console.log("Cleaned HTML Caption/Text:");
-    console.log("---------------------------------------------------------");
-    console.log(cleanedHtml);
+    console.log(`Intro Text:`, introText);
+    for (let i = 0; i < matches.length; i++) {
+      console.log(`Image ${i}:`);
+      console.log(`  URL: ${resolveUrl(matches[i].url)}`);
+      console.log(`  Heading: ${headings[i]}`);
+      console.log(`  Explanation: ${explanations[i]}`);
+    }
     console.log("=========================================================");
     return { success: true, simulated: true };
   }
 
-  // 4. Dispatch flow depending on content length and image count
+  // 4. Dispatch the sequence
   try {
-    // If only 1 image and cleaned text is under 950 characters, we can use /sendPhoto with text as caption
-    if (resolvedImages.length === 1 && cleanedHtml.length < 950) {
-      const img = resolvedImages[0];
-      return await sendTelegramPhoto(img.url, cleanedHtml, chatId);
-    } else {
-      // Send each image with its title as caption
-      for (const img of resolvedImages) {
-        const photoResult = await sendTelegramPhoto(img.url, `<b>📊 ${escapeHtml(img.alt)}</b>`, chatId);
-        if (!photoResult.success) {
-          console.warn("[Telegram Service] Failed to send photo, but continuing flow. Error:", photoResult.error);
-        }
+    // 4.1. Send intro text if present
+    if (introText.trim().length > 0) {
+      const introHtml = markdownToTelegramHtml(introText);
+      const introResult = await sendTelegramMessage(introHtml, chatId);
+      if (!introResult.success) {
+        console.warn("[Telegram Service] Failed to send intro text:", introResult.error);
       }
-
-      // Send the analytical long text as a separate message
-      if (cleanedHtml.length > 0) {
-        const chunks = splitMarkdown(cleanedMarkdown, 3000);
-        for (let i = 0; i < chunks.length; i++) {
-          const chunkHtml = markdownToTelegramHtml(chunks[i]);
-          await sendTelegramMessage(chunkHtml, chatId);
-        }
-      }
-      return { success: true, simulated: false };
     }
+
+    // 4.2. Send each image with its accompanying explanation as caption
+    for (let i = 0; i < matches.length; i++) {
+      const imgUrl = resolveUrl(matches[i].url);
+      const heading = headings[i];
+      const explanation = explanations[i];
+
+      // Format caption
+      const captionMarkdown = explanation
+        ? `${heading}\n\n${explanation}`
+        : heading;
+
+      const captionHtml = markdownToTelegramHtml(captionMarkdown);
+
+      if (captionHtml.length <= 950) {
+        // Send image with full description as caption
+        // Pass captionMarkdown as the fallbackText to ensure complete, tag-safe markdown truncation on failure
+        const photoResult = await sendTelegramPhoto(imgUrl, captionHtml, chatId, captionMarkdown);
+        if (!photoResult.success) {
+          console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
+        }
+      } else {
+        // Caption exceeds 950 characters: send image with just the title/heading as caption
+        const headingHtml = markdownToTelegramHtml(heading);
+        // Pass captionMarkdown as fallbackText to send full explanation as text if sending photo fails
+        const photoResult = await sendTelegramPhoto(imgUrl, headingHtml, chatId, captionMarkdown);
+        if (!photoResult.success) {
+          console.warn(`[Telegram Service] Failed to send photo ${i} with heading:`, photoResult.error);
+        }
+
+        // If the photo was successfully sent, we must send the detailed explanation as separate message(s)
+        // If the photo failed, sendTelegramPhoto already fallback-sent the full unified explanation (via captionMarkdown),
+        // so we must skip sending the explanation separately to prevent duplicate messages.
+        if (photoResult.photoSent && explanation) {
+          const chunks = splitMarkdown(explanation, 3000);
+          for (const chunk of chunks) {
+            const chunkHtml = markdownToTelegramHtml(chunk);
+            await sendTelegramMessage(chunkHtml, chatId);
+          }
+        }
+      }
+    }
+
+    return { success: true, simulated: false };
   } catch (error: any) {
     console.error("[Telegram Service] Error in sendTelegramMessageWithPhotos:", error);
     return { success: false, simulated: false, error: error?.message || "Unknown error" };
   }
 }
+
