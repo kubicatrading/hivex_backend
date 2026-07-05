@@ -103,7 +103,7 @@ export default function Home() {
                   <div className="w-2.5 h-2.5 rounded-full bg-zinc-800" />
                   <div className="w-2.5 h-2.5 rounded-full bg-zinc-800" />
                 </div>
-                <span className="text-[10px] text-zinc-500 font-mono tracking-wider">console.hivex.app</span>
+                <span className="text-[10px] text-zinc-500 font-mono tracking-wider">console.hivex-backend.vercel.app</span>
               </div>
 
               {/* Dynamic Mockup UI */}
