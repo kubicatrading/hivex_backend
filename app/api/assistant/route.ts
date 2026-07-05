@@ -113,7 +113,7 @@ export async function POST(request: Request) {
 
     const statsContext = {
       plataforma: "HIVEX SaaS",
-      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh y Judging Freedom). La plataforma realiza de forma autónoma: transcripción a texto de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos como un analista bursátil experto. También incluye un traductor de audios con sintetizador de voz avanzado.",
+      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh, Judging Freedom, Cihat E. Çiçek, Zang International with Lynette Zang, The Rich Dad Channel, Trends Journal, Integral Forextv y Kanal Finans). La plataforma realiza de forma autónoma: transcripción a texto de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos como un analista bursátil experto. También incluye un traductor de audios con sintetizador de voz avanzado.",
       estadoBaseDatosSupabase: {
         totalVideosSincronizados: totalVideos,
         videosPorCanal: channelsCount,

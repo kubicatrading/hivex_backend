@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
 
 ¡Bienvenido al canal interactivo de **HIVEX**!
 
-Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de videos de análisis macroeconómico sincronizados (*Andrei Jikh* y *Judging Freedom*) y dispongo de conexión a internet por satélite para tendencias de hoy.
+Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de videos de análisis macroeconómico sincronizados de tus 8 canales de inversión (*Andrei Jikh*, *Judging Freedom*, *Cihat E. Çiçek*, *Zang International*, *The Rich Dad*, *Trends Journal*, *Integral Forextv* y *Kanal Finans*) y dispongo de conexión a internet por satélite para tendencias de hoy.
 
 **¿Cómo puedo ayudarte hoy?**
 - Hazme preguntas sobre geopolítica o macroeconomía (ej: *“¿Cuál es el diferencial del precio del oro en Shanghái?”*).
@@ -118,7 +118,7 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
 
     const statsContext = {
       plataforma: "HIVEX SaaS",
-      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh y Judging Freedom). La plataforma realiza de forma autónoma: transcripción de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos.",
+      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh, Judging Freedom, Cihat E. Çiçek, Zang International with Lynette Zang, The Rich Dad Channel, Trends Journal, Integral Forextv y Kanal Finans). La plataforma realiza de forma autónoma: transcripción de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos.",
       estadoBaseDatosSupabase: {
         totalVideosSincronizados: totalVideos,
         videosPorCanal: channelsCount,

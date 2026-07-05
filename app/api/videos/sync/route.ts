@@ -3,9 +3,15 @@ import { extractYoutubeId, transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 
 // Standard YouTube feeds map
-const YT_CHANNELS = {
+const YT_CHANNELS: Record<string, string> = {
   "Andrei Jikh": "UCGy7SkBjcIAgTiwkXEtPnYg",
-  "Judging Freedom": "UCDkEYb-TXJVWLvOokshtlsw"
+  "Judging Freedom": "UCDkEYb-TXJVWLvOokshtlsw",
+  "Cihat E. Çiçek": "UCHExW8VqaE0a3W0kwSe_BXg",
+  "Zang International with Lynette Zang": "UCvONE8y1nZarMAnZM-2ojfA",
+  "The Rich Dad Channel": "UCuifm5ns5SRG8LZJ6gCfKyw",
+  "Trends Journal": "UCKNT8BDOkXegtCD9OghepWA",
+  "Integral Forextv": "UCU1l_gWfDhmvG2TgLMuK2ag",
+  "Kanal Finans": "UCGBytjbMXiF1nbe6HD7iORQ"
 };
 
 function isFreedomChannel(channelName: string | null | undefined): boolean {
@@ -55,7 +61,19 @@ async function handleSync(request: Request) {
       console.warn("Failed to parse query params from request, defaulting to Andrei Jikh:", urlErr);
     }
 
-    const channelTitle = channelParam && isFreedomChannel(channelParam) ? "Judging Freedom" : "Andrei Jikh";
+    // Resolve channel dynamically case-insensitively from available YT_CHANNELS keys
+    let channelTitle = "Andrei Jikh";
+    if (channelParam) {
+      const matchedKey = Object.keys(YT_CHANNELS).find(
+        key => key.toLowerCase() === channelParam.toLowerCase()
+      );
+      if (matchedKey) {
+        channelTitle = matchedKey;
+      } else if (isFreedomChannel(channelParam)) {
+        channelTitle = "Judging Freedom";
+      }
+    }
+
     const channelId = YT_CHANNELS[channelTitle];
     const ytRssFeed = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
 
@@ -272,7 +290,9 @@ async function handleSync(request: Request) {
             } else {
               console.log(`[Daemon] Sincronizando vídeo mock/simulado "${fv.title}" (${ytId}). Usando transcripción simulada realista.`);
               // For mock/fallback videos, we use a beautifully structured transcription to simulate real AI output
-              const realisticMockTranscription = `Hello everyone, Andrei Jikh here. Today we are talking about some massive economic shifts. The Federal Reserve has just held their interest rate meeting, and they have decided to keep interest rates higher for longer. This has massive implications for your savings, specifically high-yield savings accounts or HYSAs, as well as dividend growth investing and overall index fund portfolios. The stock market is at a critical juncture right now with some flashing warning signs of a recession, and CPI inflation numbers are remaining sticky. We need to look at real estate markets and how to allocate assets safely. I've been personally buying short-term T-bills and focusing on stable dividend-paying companies. Let's break down the exact numbers and my personal portfolio strategy.
+              const presenter = fv.metadata.channel_title || channelTitle;
+              const shortPresenter = presenter.split(" ")[0];
+              const realisticMockTranscription = `Hello everyone, ${presenter} here. Today we are talking about some massive economic shifts. The Federal Reserve has just held their interest rate meeting, and they have decided to keep interest rates higher for longer. This has massive implications for your savings, specifically high-yield savings accounts or HYSAs, as well as dividend growth investing and overall index fund portfolios. The stock market is at a critical juncture right now with some flashing warning signs of a recession, and CPI inflation numbers are remaining sticky. We need to look at real estate markets and how to allocate assets safely. I've been personally buying short-term T-bills and focusing on stable dividend-paying companies. Let's break down the exact numbers and my personal portfolio strategy.
 
 ---
 
@@ -285,7 +305,7 @@ async function handleSync(request: Request) {
 
 #### [04:30] **Stock Market Valuations and Portfolio Allocation**
 - **Divergencia en el mercado bursátil**: Los principales índices (S&P 500, Nasdaq) están siendo impulsados a máximos históricos por un puñado de acciones tecnológicas de gran capitalización, mientras que la amplitud del mercado general sigue siendo débil.
-- **Estrategia de crecimiento de dividendos**: Andrei enfatiza centrarse en la inversión en crecimiento de dividendos (DGI) para generar un flujo de caja pasivo constante y resistente en entornos volátiles.
+- **Estrategia de crecimiento de dividendos**: ${shortPresenter} enfatiza centrarse en la inversión en crecimiento de dividendos (DGI) para generar un flujo de caja pasivo constante y resistente en entornos volátiles.
 - **Letras del Tesoro como refugio**: Asignar una parte de los activos a Letras del Tesoro de EE. UU. a corto plazo (T-Bills) ofrece un rendimiento seguro y libre de riesgo cercano al 5%.
 
 #### [09:15] **Inflation Concerns and Geopolitics**
@@ -294,7 +314,7 @@ async function handleSync(request: Request) {
 
 #### [11:15] **Estrategia Inmobiliaria y REITs**
 - **Presión en el sector inmobiliario**: Las tasas hipotecarias elevadas y persistentes han frenado la actividad de compra de viviendas particulares, beneficiando el mercado de alquiler.
-- **Enfoque selectivo en REITs**: Andrei sugiere considerar fideicomisos de inversión en bienes raíces (REITs) residenciales y comerciales especializados con balances sólidos y bajo endeudamiento.
+- **Enfoque selectivo en REITs**: ${shortPresenter} sugiere considerar fideicomisos de inversión en bienes raíces (REITs) residenciales y comerciales especializados con balances sólidos y bajo endeudamiento.
 
 #### [13:00] **Conclusiones Estratégicas y Plan de Acción**
 - **Promedio de coste monetario (DCA)**: Se reitera el plan de acumular de manera constante y disciplinada en fondos indexados del mercado amplio y empresas DGI para mitigar las fluctuaciones a corto plazo.
@@ -305,12 +325,12 @@ async function handleSync(request: Request) {
 - **Optimización de rendimientos líquidos**: Se destaca la importancia de rentabilizar todo el capital ocioso en cuentas de ahorro premium o fondos monetarios para mitigar la devaluación adquisitiva.
 
 #### [22:10] **Asignación Defensiva frente a Fluctuaciones Macroeconómicas**
-- **Diversificación resiliente**: Andrei detalla cómo construir una cartera equilibrada que pueda absorber impactos inflacionarios combinando renta variable de dividendos crecientes y renta fija a corto plazo.
+- **Diversificación resiliente**: ${shortPresenter} detalla cómo construir una cartera equilibrada que pueda absorber impactos inflacionarios combinando renta variable de dividendos crecientes y renta fija a corto plazo.
 - **Enfoque en la paciencia financiera**: Se aconseja no intentar predecir el fondo del mercado, sino mantener compras periódicas constantes y consistentes en activos generadores de valor productivo.
 
 #### [25:30] **Cierre y Conclusión de la Sesión**
 - **Síntesis del plan de acción**: Resumen de los tres pilares estratégicos de la sesión: maximizar rendimiento de liquidez, acumular dividendos de calidad y mantener una exposición prudente libre de apalancamiento excesivo.
-- **Consejo final**: Andrei incentiva a la audiencia a mantenerse enfocados en el largo plazo y construir disciplina financiera diaria como el mayor motor de riqueza.
+- **Consejo final**: ${shortPresenter} incentiva a la audiencia a mantenerse enfocados en el largo plazo y construir disciplina financiera diaria como el mayor motor de riqueza.
 
 ---
 

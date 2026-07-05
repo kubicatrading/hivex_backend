@@ -67,7 +67,7 @@ export default function AssistantPage() {
     es: [
       { 
         title: "Vídeos Sincronizados", 
-        desc: "Saber qué vídeos de Judging Freedom y Andrei Jikh hay guardados", 
+        desc: "Saber qué vídeos de tus canales de inversión sincronizados hay guardados", 
         query: "¿Qué vídeos tenemos sincronizados en Supabase para mi cuenta?" 
       },
       { 
@@ -89,7 +89,7 @@ export default function AssistantPage() {
     en: [
       { 
         title: "Synced Videos", 
-        desc: "Check which videos from Judging Freedom & Andrei Jikh are saved", 
+        desc: "Check which videos from your synchronized investment channels are saved", 
         query: "Which videos do we have synchronized in Supabase for my account?" 
       },
       { 
@@ -111,7 +111,7 @@ export default function AssistantPage() {
     de: [
       { 
         title: "Synchronisierte Videos", 
-        desc: "Prüfen Sie, welche Videos von Judging Freedom & Andrei Jikh gespeichert sind", 
+        desc: "Prüfen Sie, welche Videos von Ihren synchronisierten Anlagekanälen gespeichert sind", 
         query: "Welche Videos haben wir in Supabase für mein Konto synchronisiert?" 
       },
       { 
@@ -133,7 +133,7 @@ export default function AssistantPage() {
     tr: [
       { 
         title: "Senkronize Videolar", 
-        desc: "Judging Freedom ve Andrei Jikh kanallarından hangi videoların kayıtlı olduğunu görün", 
+        desc: "Senkronize edilmiş yatırım kanallarınızdan hangi videoların kayıtlı olduğunu görün", 
         query: "Hesabım için Supabase'de hangi videolar senkronize edilmiş durumda?" 
       },
       { 

@@ -57,8 +57,19 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   };
   
   // Canales hierarchy state
+  const DEFAULT_CHANNELS = [
+    "Andrei Jikh",
+    "Judging Freedom",
+    "Cihat E. Çiçek",
+    "Zang International with Lynette Zang",
+    "The Rich Dad Channel",
+    "Trends Journal",
+    "Integral Forextv",
+    "Kanal Finans"
+  ];
+
   const [canalesOpen, setCanalesOpen] = useState(true);
-  const [channels, setChannels] = useState<string[]>(["Andrei Jikh", "Judging Freedom"]);
+  const [channels, setChannels] = useState<string[]>(DEFAULT_CHANNELS);
 
   // Fetch unique channels dynamically from saved videos
   useEffect(() => {
@@ -70,15 +81,15 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           .eq("type", "video");
         
         if (data) {
-          const uniqueChannels = new Set<string>();
-          uniqueChannels.add("Andrei Jikh"); // Default channel always listed
-          uniqueChannels.add("Judging Freedom"); // Judging Freedom always listed next
+          const uniqueChannels = new Set<string>(DEFAULT_CHANNELS);
           
           data.forEach((doc: { metadata?: { channel_title?: string } }) => {
             if (doc.metadata && doc.metadata.channel_title) {
               const ch = doc.metadata.channel_title;
-              if (ch !== "HIVEX Demo") {
-                uniqueChannels.add(ch);
+              // Clean up any dynamic (Mock Feed) suffixes so they map to the clean sidebar categories
+              const cleanCh = ch.replace(/\s*\(Mock\s+Feed\)/i, "");
+              if (cleanCh !== "HIVEX Demo") {
+                uniqueChannels.add(cleanCh);
               }
             }
           });

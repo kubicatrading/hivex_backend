@@ -3166,20 +3166,16 @@ export default function VideosPage() {
       return Boolean(v.metadata?.is_favorite);
     }
 
-    const finalCh = v.metadata?.channel_title || "Andrei Jikh";
-    const isFilterFreedom = filterChannel && isFreedomChannel(filterChannel);
-    const isVideoFreedom = isFreedomChannel(finalCh);
+    const rawCh = v.metadata?.channel_title || "Andrei Jikh";
+    const finalCh = rawCh.replace(/\s*\(Mock\s+Feed\)/i, "").trim();
+    
+    const currentFilter = filterChannel || "Andrei Jikh";
 
-    if (!filterChannel) {
-      return !isVideoFreedom;
+    if (isFreedomChannel(currentFilter)) {
+      return isFreedomChannel(finalCh);
     }
-    if (filterChannel === "Andrei Jikh") {
-      return !isVideoFreedom;
-    }
-    if (isFilterFreedom) {
-      return isVideoFreedom;
-    }
-    return finalCh === filterChannel;
+
+    return finalCh.toLowerCase() === currentFilter.toLowerCase();
   });
 
   // Sort favorites first by channel alphabetically ascending, and then by age descending (most recent first)
@@ -3803,7 +3799,7 @@ export default function VideosPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No se encontró una sesión de usuario activa.");
 
-      const targetChannel = filterChannel && isFreedomChannel(filterChannel) ? "Judging Freedom" : "Andrei Jikh";
+      const targetChannel = filterChannel || "Andrei Jikh";
 
       // Start-from-scratch cleanup disabled by user request. We keep existing videos and continue syncing new ones incrementally.
 
