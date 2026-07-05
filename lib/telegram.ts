@@ -286,6 +286,13 @@ export async function sendTelegramPhoto(
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = customChatId || process.env.TELEGRAM_CHAT_ID;
 
+  // Try to extract videoId from photoUrl to build a direct link to the HIVEX study cabin in the fallback
+  const videoIdMatch = photoUrl.match(/\/snapshots\/([a-zA-Z0-9\-]+)/);
+  const videoId = videoIdMatch ? videoIdMatch[1] : null;
+  const cabinLink = videoId 
+    ? `\n🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}">Acceder a la Cabina de Estudio en HIVEX</a>` 
+    : "";
+
   if (!botToken || !chatId) {
     console.log("================ TELEGRAM PHOTO SIMULATION MODE ================");
     console.log(`URL: ${photoUrl}`);
@@ -327,14 +334,14 @@ export async function sendTelegramPhoto(
           truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
         }
         const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
-        finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+        finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
       } else if (caption) {
-        finalFallbackText = `${caption}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+        finalFallbackText = `${caption}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
         if (finalFallbackText.length > 4000) {
           finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
         }
       } else {
-        finalFallbackText = `<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>`;
+        finalFallbackText = `<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
       }
 
       console.log("[Telegram Fallback Debug] finalFallbackText constructed (API fail):", finalFallbackText);
@@ -359,14 +366,14 @@ export async function sendTelegramPhoto(
         truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
       }
       const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
-      finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
     } else if (caption) {
-      finalFallbackText = `${caption}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      finalFallbackText = `${caption}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
       if (finalFallbackText.length > 4000) {
         finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
       }
     } else {
-      finalFallbackText = `<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>`;
+      finalFallbackText = `<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
     }
     
     const msgResult = await sendTelegramMessage(finalFallbackText, chatId);

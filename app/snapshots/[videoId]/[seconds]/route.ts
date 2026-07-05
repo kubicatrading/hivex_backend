@@ -130,7 +130,19 @@ export async function GET(
       });
     }
 
-    if (response.status === 404) {
+    let isNotFound = response.status === 404;
+    if (response.status === 400) {
+      try {
+        const json = await response.clone().json();
+        if (json && (json.statusCode === "404" || json.statusCode === 404 || json.error === "not_found" || json.message === "Object not found")) {
+          isNotFound = true;
+        }
+      } catch (e) {
+        // Ignore JSON parse errors
+      }
+    }
+
+    if (isNotFound) {
       console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Triggering dynamic on-demand generation for video ${resolvedVideoId}...`);
       
       // Parse seconds to integer
@@ -238,7 +250,18 @@ export async function GET(
       });
     }
 
-    return new NextResponse(`Failed to fetch image from storage: ${response.statusText}`, { status: response.status });
+    let isNotFoundFinal = response.status === 404;
+    if (response.status === 400) {
+      try {
+        const json = await response.clone().json();
+        if (json && (json.statusCode === "404" || json.statusCode === 404 || json.error === "not_found" || json.message === "Object not found")) {
+          isNotFoundFinal = true;
+        }
+      } catch (e) {}
+    }
+    const finalStatus = isNotFoundFinal ? 404 : response.status;
+    const finalStatusText = isNotFoundFinal ? "Not Found" : response.statusText;
+    return new NextResponse(`Failed to fetch image from storage: ${finalStatusText}`, { status: finalStatus });
   } catch (error) {
     console.error("Error proxying snapshot:", error);
     // Fallback to direct redirect to prevent failure if proxy fails for unexpected reason
