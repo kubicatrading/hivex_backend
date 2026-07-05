@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
-import { markdownToTelegramHtml } from "@/lib/telegram";
+import { markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
 
 export async function POST(request: NextRequest) {
   try {
@@ -258,28 +258,33 @@ NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
       geminiResponseText = "Disculpa, en este momento el analista de HIVEX no puede procesar tu consulta. Inténtalo de nuevo en unos instantes.";
     }
 
-    // 6. Convert Gemini's markdown response to Telegram-compatible HTML
-    const telegramHtml = markdownToTelegramHtml(geminiResponseText);
-    console.log(`[Telegram Webhook] Final formatted Telegram HTML (length: ${telegramHtml.length} chars):\n`, telegramHtml);
+    // 6. Split Gemini's markdown response into chunks under 3000 chars to avoid Telegram's 4096 char limit
+    const markdownChunks = splitMarkdown(geminiResponseText, 3000);
+    console.log(`[Telegram Webhook] Gemini response text split into ${markdownChunks.length} chunks.`);
 
-    // 7. Send the reply back to the Telegram chat
-    console.log(`[Telegram Webhook] Sending reply to Telegram chat ${chatId}...`);
-    const telRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: telegramHtml,
-        parse_mode: "HTML",
-        disable_web_page_preview: false,
-      }),
-    });
+    for (let i = 0; i < markdownChunks.length; i++) {
+      const chunk = markdownChunks[i];
+      const telegramHtml = markdownToTelegramHtml(chunk);
+      console.log(`[Telegram Webhook] Sending chunk ${i + 1}/${markdownChunks.length} (length: ${telegramHtml.length} chars) to Telegram chat ${chatId}...`);
 
-    const telData = await telRes.json();
-    if (!telRes.ok || !telData.ok) {
-      console.error("[Telegram Webhook] Failed to send message to Telegram API:", telData.description || `HTTP ${telRes.status}`);
-    } else {
-      console.log("[Telegram Webhook] Message sent successfully to Telegram API! Message ID:", telData.result?.message_id);
+      // 7. Send the reply chunk back to the Telegram chat
+      const telRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: telegramHtml,
+          parse_mode: "HTML",
+          disable_web_page_preview: i !== 0, // Enable web page preview only for the first chunk if relevant
+        }),
+      });
+
+      const telData = await telRes.json();
+      if (!telRes.ok || !telData.ok) {
+        console.error(`[Telegram Webhook] Failed to send chunk ${i + 1}/${markdownChunks.length} to Telegram API:`, telData.description || `HTTP ${telRes.status}`);
+      } else {
+        console.log(`[Telegram Webhook] Chunk ${i + 1}/${markdownChunks.length} sent successfully! Message ID:`, telData.result?.message_id);
+      }
     }
 
     return NextResponse.json({ ok: true });

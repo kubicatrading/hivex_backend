@@ -59,7 +59,7 @@ export function markdownToTelegramHtml(markdown: string): string {
   html = html.replace(/_([^_\n]+?)_/g, "<i>$1</i>");
 
   // 9. Convert Blockquotes: > text -> <blockquote>text</blockquote>
-  html = html.replace(/^\s*>\s+(.*)$/gm, "<blockquote>$1</blockquote>");
+  html = html.replace(/^\s*(?:>|&gt;)\s+(.*)$/gm, "<blockquote>$1</blockquote>");
 
   // 10. Restore code blocks and inline code
   codeBlocks.forEach((code, index) => {
@@ -179,4 +179,76 @@ export async function sendTelegramMessage(text: string): Promise<{
     console.error("[Telegram Service] Fetch error:", error);
     return { success: false, simulated: false, error: error?.message || "Unknown network error" };
   }
+}
+
+/**
+ * Splits a markdown text into chunks of at most maxLength characters,
+ * respecting paragraph boundaries (\n\n) where possible.
+ */
+export function splitMarkdown(text: string, maxLength: number = 3000): string[] {
+  if (!text) return [];
+  if (text.length <= maxLength) return [text];
+
+  const chunks: string[] = [];
+  const paragraphs = text.split("\n\n");
+  let currentChunk = "";
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.length > maxLength) {
+      // If a single paragraph is longer than maxLength, split it by lines
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = "";
+      }
+
+      const lines = paragraph.split("\n");
+      for (const line of lines) {
+        if (line.length > maxLength) {
+          // If a single line is still longer than maxLength, split by characters
+          if (currentChunk) {
+            chunks.push(currentChunk.trim());
+            currentChunk = "";
+          }
+
+          let remaining = line;
+          while (remaining.length > 0) {
+            let sliceEnd = maxLength;
+            if (remaining.length > maxLength) {
+              // Try to split at a space to avoid cutting words
+              const lastSpace = remaining.lastIndexOf(" ", maxLength);
+              if (lastSpace > 0) {
+                sliceEnd = lastSpace;
+              }
+            }
+            chunks.push(remaining.slice(0, sliceEnd).trim());
+            remaining = remaining.slice(sliceEnd).trim();
+          }
+        } else {
+          // Check if adding this line exceeds limit
+          const separator = currentChunk ? "\n" : "";
+          if ((currentChunk + separator + line).length > maxLength) {
+            chunks.push(currentChunk.trim());
+            currentChunk = line;
+          } else {
+            currentChunk += separator + line;
+          }
+        }
+      }
+    } else {
+      // Check if adding this paragraph exceeds limit
+      const separator = currentChunk ? "\n\n" : "";
+      if ((currentChunk + separator + paragraph).length > maxLength) {
+        chunks.push(currentChunk.trim());
+        currentChunk = paragraph;
+      } else {
+        currentChunk += separator + paragraph;
+      }
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks;
 }
