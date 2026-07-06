@@ -54,13 +54,22 @@ export async function POST(request: Request) {
 
 async function handleSync(request: Request) {
   try {
-    let channelParam = "all";
-    try {
-      const { searchParams } = new URL(request.url);
-      channelParam = searchParams.get("channel") || "all";
-    } catch (urlErr) {
-      console.warn("Failed to parse query params from request, defaulting to all:", urlErr);
+    // 1. Validate Secret Auth Token to prevent unauthorized invocation
+    const { searchParams } = new URL(request.url);
+    const authHeader = request.headers.get("authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+    const cronSecret = searchParams.get("secret") || 
+                       request.headers.get("x-cron-secret") || 
+                       bearerToken;
+
+    const expectedSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (expectedSecret && cronSecret !== expectedSecret) {
+      return NextResponse.json({ success: false, error: "Unauthorized access" }, { status: 401 });
     }
+
+    let channelParam = searchParams.get("channel") || "all";
 
     // Determine channels to sync (defaults to all channels)
     let channelsToSync: string[] = [];

@@ -12,6 +12,21 @@ export async function POST(request: NextRequest) {
 
 async function handleDigest(request: NextRequest) {
   try {
+    // Validate Secret Auth Token to prevent unauthorized invocation
+    const { searchParams } = new URL(request.url);
+    const authHeader = request.headers.get("authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+    const cronSecret = searchParams.get("secret") || 
+                       request.headers.get("x-cron-secret") || 
+                       bearerToken;
+
+    const expectedSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (expectedSecret && cronSecret !== expectedSecret) {
+      return NextResponse.json({ success: false, error: "Unauthorized access" }, { status: 401 });
+    }
+
     // 1. Parse query parameters
     let hours = 24;
     let dryRun = false;
@@ -19,7 +34,6 @@ async function handleDigest(request: NextRequest) {
     let lang = "en";
 
     try {
-      const { searchParams } = new URL(request.url);
       const hoursParam = searchParams.get("hours");
       if (hoursParam) {
         const parsedHours = parseInt(hoursParam, 10);
