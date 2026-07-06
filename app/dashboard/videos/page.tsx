@@ -702,7 +702,18 @@ async function saveVideoKnowledgeBase(videoDoc: { id?: string; title: string; fi
           }
         }
       } else {
-        console.log(`[Base de Conocimiento] Documento de tipo ${item.type} ya existe para: ${videoDoc.title}. No se duplica.`);
+        const { error: updateErr } = await supabase
+          .from("documents")
+          .update(item.doc as any)
+          .eq("id", existing[0].id);
+        if (updateErr) {
+          console.warn(`[Base de Conocimiento] Error al actualizar ${item.type} para ${videoDoc.title}:`, updateErr);
+        } else {
+          console.log(`[Base de Conocimiento] Actualizado con éxito ${item.type} para: ${videoDoc.title}`);
+          if (item.type === "knowledge_analysis") {
+            newlyAnalyzed = true;
+          }
+        }
       }
     }
 
@@ -3057,6 +3068,9 @@ export default function VideosPage() {
   }, []);
 
   // Monitor active study cabin video and trigger background transcription ONLY if needed
+  // DESACTIVADO: La sincronización ya no se relanza automáticamente al entrar a la cabina de estudio para evitar solicitudes innecesarias.
+  // Solo se inicia mediante un botón manual de análisis o vía cron job en segundo plano.
+  /*
   useEffect(() => {
     let active = true;
 
@@ -3086,6 +3100,7 @@ export default function VideosPage() {
       active = false;
     };
   }, [activeStudyVideo, triggerBackgroundTranscription]);
+  */
 
   const searchParams = useSearchParams();
   const filterChannel = searchParams.get("channel");
@@ -3497,12 +3512,8 @@ export default function VideosPage() {
           return sortedData[0] || null;
         });
 
-        // Trigger early transcription for any videos that don't have it cached yet
-        for (const v of sortedData) {
-          if (!v.metadata?.transcription) {
-            triggerBackgroundTranscription(v);
-          }
-        }
+        // DESACTIVADO: La transcripción automática masiva al cargar se delega completamente al cron de monitoreo (/api/videos/monitor-analysis)
+        // para prevenir cuellos de botella y sobrecarga de la API de Gemini en el frontend.
       }
     } catch (err) {
       console.error("Failed to load videos:", err);
@@ -3638,6 +3649,28 @@ export default function VideosPage() {
         delete updated[videoDoc.id];
         return updated;
       });
+
+      // Explicitly delete previous knowledge base entries and audio records matching the file_url of the video
+      if (videoDoc.file_url) {
+        const typesToDelete = [
+          "knowledge_transcription",
+          "knowledge_summary",
+          "knowledge_charts",
+          "knowledge_analysis",
+          "audio"
+        ];
+        const { error: deleteError } = await supabase
+          .from("documents")
+          .delete()
+          .in("type", typesToDelete)
+          .eq("file_url", videoDoc.file_url);
+
+        if (deleteError) {
+          console.warn("[Re-analizar] Error al eliminar documentos antiguos de Supabase:", deleteError);
+        } else {
+          console.log("[Re-analizar] Documentos antiguos de la base de conocimientos y audios eliminados correctamente para:", videoDoc.file_url);
+        }
+      }
 
       const { error: updateError } = await supabase
         .from("documents")
@@ -4109,8 +4142,16 @@ export default function VideosPage() {
             >
               <RotateCcw className={`w-3.5 h-3.5 ${isReanalyzing || transcribing ? 'animate-spin' : ''}`} />
               {isReanalyzing || transcribing 
-                ? (selectedLanguage === "es" ? "Re-analizando..." : selectedLanguage === "de" ? "Wird neu analysiert..." : selectedLanguage === "tr" ? "Yeniden Analiz Ediliyor..." : "Re-analyzing...")
-                : (selectedLanguage === "es" ? "Re-analizar Inteligencia" : selectedLanguage === "de" ? "Intelligenz neu analysieren" : selectedLanguage === "tr" ? "Zekayı Yeniden Analiz Et" : "Re-analyze Intelligence")
+                ? (
+                    activeStudyVideo.metadata?.transcription
+                      ? (selectedLanguage === "es" ? "Re-analizando..." : selectedLanguage === "de" ? "Wird neu analysiert..." : selectedLanguage === "tr" ? "Yeniden Analiz Ediliyor..." : "Re-analyzing...")
+                      : (selectedLanguage === "es" ? "Analizando..." : selectedLanguage === "de" ? "Wird analysiert..." : selectedLanguage === "tr" ? "Analiz Ediliyor..." : "Analyzing...")
+                  )
+                : (
+                    activeStudyVideo.metadata?.transcription
+                      ? (selectedLanguage === "es" ? "Re-analizar Inteligencia" : selectedLanguage === "de" ? "Intelligenz neu analysieren" : selectedLanguage === "tr" ? "Zekayı Yeniden Analiz Et" : "Re-analyze Intelligence")
+                      : (selectedLanguage === "es" ? "Analizar Inteligencia" : selectedLanguage === "de" ? "Intelligenz analysieren" : selectedLanguage === "tr" ? "Zekayı Analiz Et" : "Analyze Intelligence")
+                  )
               }
             </button>
           </div>

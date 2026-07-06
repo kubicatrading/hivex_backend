@@ -240,12 +240,12 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y estilo:
 
 2. Cada vídeo analizado debe presentarse como un elemento numerado con la siguiente estructura exacta (reemplazando los corchetes con los datos sintetizados):
 
-[Número]. [Concept Headline / Título Conceptual de Inversión de Alto Impacto] ([Fecha de Publicación del Vídeo en formato corto legible, ej. 5 de julio de 2026])
-* Fuente: [[Título Real del Vídeo]](https://hivex-backend.vercel.app/dashboard/videos?id=[id_real_del_video]&from=telegram)
+[Número]. [Título Real del Vídeo](https://hivex-backend.vercel.app/dashboard/videos?id=[id_real_del_video]&from=telegram) ([Fecha de Publicación del Vídeo en formato corto legible, ej. 5 de julio de 2026])
+* Canal: [Nombre del Canal de YouTube, ej. Andrei Jikh]
 * Análisis Clave: [Síntesis premium, rigurosa, fluida y sumamente profesional de las implicaciones financieras, macroeconómicas y geopolíticas del vídeo en base al material provisto. Debe tener aproximadamente 3-5 oraciones densas en información y un estilo sofisticado.]
 
 3. No agregues introducciones, preámbulos, conclusiones ni resúmenes generales antes o después de la lista numerada. El informe debe comenzar directamente con "🚨 HIVEX News - 24H" y seguir inmediatamente con el primer elemento numerado.
-4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto, ya que el sistema convertirá tu respuesta a HTML compatible con Telegram usando un formateador preestablecido. El enlace de la fuente en Markdown estándar ([Título del Vídeo](URL)) será transformado automáticamente a etiqueta HTML de forma limpia.
+4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto, ya que el sistema convertirá tu respuesta a HTML compatible con Telegram usando un formateador preestablecido. El enlace del título del vídeo en Markdown estándar ([Título del Vídeo](URL)) será transformado automáticamente a etiqueta HTML de forma limpia.
 5. El enlace de la cabina de estudio para cada vídeo debe tener exactamente este formato:
 https://hivex-backend.vercel.app/dashboard/videos?id=[id_real_del_video]&from=telegram
 Asegúrate de inyectar el ID real de cada vídeo (provisto en cada objeto de datos) y añadir el parámetro '&from=telegram'.
@@ -262,12 +262,12 @@ STRICTLY follow the formatting and style rules below:
 
 2. Each analyzed video must be presented as a numbered item with the following exact structure (replacing the brackets with the synthesized data):
 
-[Number]. [High-Impact Conceptual Investment Headline] ([Short, readable publication date, e.g., July 5, 2026])
-* Source: [[Real Video Title]](https://hivex-backend.vercel.app/dashboard/videos?id=[real_video_id]&from=telegram)
+[Number]. [Real Video Title](https://hivex-backend.vercel.app/dashboard/videos?id=[real_video_id]&from=telegram) ([Short, readable publication date, e.g., July 5, 2026])
+* Channel: [YouTube Channel Name, e.g., Andrei Jikh]
 * Key Analysis: [Premium, rigorous, fluid, and highly professional synthesis of the financial, macroeconomic, and geopolitical implications of the video based on the provided material. It must have approximately 3-5 information-dense sentences and a highly sophisticated style.]
 
 3. Do not add introductions, preambles, conclusions, or general summaries before or after the numbered list. The report must begin directly with "🚨 HIVEX News - 24H" and be followed immediately by the first numbered item.
-4. Generate ONLY standard Markdown. Do not use HTML tags at all, as the system will convert your response to Telegram-compliant HTML using a pre-established formatter. The standard Markdown source link ([Video Title](URL)) will be automatically converted to a clean HTML tag.
+4. Generate ONLY standard Markdown. Do not use HTML tags at all, as the system will convert your response to Telegram-compliant HTML using a pre-established formatter. The standard Markdown title link ([Video Title](URL)) will be automatically converted to a clean HTML tag.
 5. The study cabin link for each video must have exactly this format:
 https://hivex-backend.vercel.app/dashboard/videos?id=[real_video_id]&from=telegram
 Be sure to inject the real ID of each video (provided in each data object) and append the parameter '&from=telegram'.
@@ -311,7 +311,7 @@ ${JSON.stringify(videoContexts, null, 2)}
         },
         generationConfig: {
           temperature: 0.15,
-          maxOutputTokens: 2500,
+          maxOutputTokens: 8192,
         },
       };
 
@@ -446,17 +446,16 @@ function extractKeyAnalysis(content: string): string {
 function generateDeterministicDigest(videoContexts: any[], lang: string): string {
   let output = "🚨 HIVEX News - 24H\n\n";
   const isSpanish = lang === "es";
-  const sourceLabel = isSpanish ? "Fuente" : "Source";
+  const channelLabel = isSpanish ? "Canal" : "Channel";
   const analysisLabel = isSpanish ? "Análisis Clave" : "Key Analysis";
 
   videoContexts.forEach((video, idx) => {
-    const headline = cleanHeadline(video.title);
     const dateText = formatShortDate(video.publishedAt, lang);
     const studyCabinUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
     const keyAnalysisText = extractKeyAnalysis(video.content);
 
-    output += `${idx + 1}. ${headline} (${dateText})\n`;
-    output += `* ${sourceLabel}: [${video.title}](${studyCabinUrl})\n`;
+    output += `${idx + 1}. [${video.title}](${studyCabinUrl}) (${dateText})\n`;
+    output += `* ${channelLabel}: ${video.channel}\n`;
     output += `* ${analysisLabel}: ${keyAnalysisText}\n\n`;
   });
 

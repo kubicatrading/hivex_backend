@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractYoutubeId, transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
-import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
+import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
 
 // Standard YouTube feeds map
 const YT_CHANNELS: Record<string, string> = {
@@ -54,51 +54,29 @@ export async function POST(request: Request) {
 
 async function handleSync(request: Request) {
   try {
-    let channelParam = "Andrei Jikh";
+    let channelParam = "all";
     try {
       const { searchParams } = new URL(request.url);
-      channelParam = searchParams.get("channel") || "Andrei Jikh";
+      channelParam = searchParams.get("channel") || "all";
     } catch (urlErr) {
-      console.warn("Failed to parse query params from request, defaulting to Andrei Jikh:", urlErr);
+      console.warn("Failed to parse query params from request, defaulting to all:", urlErr);
     }
 
-    // Resolve channel dynamically case-insensitively from available YT_CHANNELS keys
-    let channelTitle = "Andrei Jikh";
-    if (channelParam) {
+    // Determine channels to sync (defaults to all channels)
+    let channelsToSync: string[] = [];
+    if (channelParam.toLowerCase() === "all") {
+      channelsToSync = Object.keys(YT_CHANNELS);
+    } else {
       const matchedKey = Object.keys(YT_CHANNELS).find(
         key => key.toLowerCase() === channelParam.toLowerCase()
       );
       if (matchedKey) {
-        channelTitle = matchedKey;
+        channelsToSync = [matchedKey];
       } else if (isFreedomChannel(channelParam)) {
-        channelTitle = "Judging Freedom";
-      }
-    }
-
-    const channelId = YT_CHANNELS[channelTitle];
-    const ytRssFeed = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
-
-    let xmlText = "";
-    let useFallback = false;
-
-    try {
-      // 1. Fetch RSS XML Feed from YouTube
-      const response = await fetch(ytRssFeed, {
-        next: { revalidate: 3600 }, // Cache feed for 1 hour
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-      });
-
-      if (!response.ok) {
-        console.warn(`YouTube feed fetch returned status ${response.status}.`);
-        useFallback = true;
+        channelsToSync = ["Judging Freedom"];
       } else {
-        xmlText = await response.text();
+        channelsToSync = ["Andrei Jikh"];
       }
-    } catch (fetchErr) {
-      console.warn("Failed to reach YouTube RSS endpoint:", fetchErr);
-      useFallback = true;
     }
 
     const now = Date.now();
@@ -106,151 +84,190 @@ async function handleSync(request: Request) {
     const CUTOFF_TIMESTAMP = Date.parse("2026-06-24T00:00:00Z");
     const syncedVideos: AnalysedVideo[] = [];
 
-    if (useFallback) {
-      if (channelTitle === "Judging Freedom") {
-        throw new Error("No se pudo obtener el feed real de Judging Freedom de YouTube. El modo de simulación está prohibido para este canal.");
+    for (const channelTitle of channelsToSync) {
+      const channelId = YT_CHANNELS[channelTitle];
+      if (!channelId) {
+        console.warn(`[Sync] Channel ID not found for channel: ${channelTitle}`);
+        continue;
       }
 
-      // Create hyper-realistic mock videos inside the active 24-hour window
-      const fallbackData = [
-        {
-          videoId: "fed-decision-2026",
-          title: "The Fed Just Made A Major Decision (Interest Rate Update)",
-          publishedAt: new Date(now).toISOString(), // Published today
-          description: "The Federal Reserve just held their meeting. Interest rates are higher for longer but we might see cuts soon. What does this mean for savings accounts, HYSA, dividend stocks, and the stock market index? We look at real estate and how to prepare.",
-          duration: "26:00"
-        },
-        {
-          videoId: "market-move-2026",
-          title: "Why The Stock Market Is Preparing For A Big Move",
-          publishedAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(), // Published today (2 hours ago)
-          description: "Is a recession coming? Stock market warning signs are flashing. We cover CPI inflation numbers, geopolitics in trade routes, and why gold or bonds might be a great hedge right now. Let's look at my dividend growth investing portfolio strategy.",
-          duration: "26:00"
-        },
-        {
-          videoId: "btc-devaluation-2026",
-          title: "Bitcoin vs. Global Currency Devaluation & Petro Dollar",
-          publishedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(), // Published 2 days ago (Now INCLUDED by June 24th cutoff!)
-          description: "The Petro Dollar, inflation, and global money printing are devaluing cash. Here's why Bitcoin, crypto, and alternative commodities are rising in popularity. How to allocate assets in your long term portfolio with low-risk T-bills.",
-          duration: "26:00"
-        }
-      ];
+      console.log(`[Sync] Synchronizing channel: "${channelTitle}" (${channelId})...`);
+      const ytRssFeed = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
 
-      for (const item of fallbackData) {
-        const publishedTime = Date.parse(item.publishedAt);
-        const durationSecs = parseDurationToSeconds(item.duration);
+      let xmlText = "";
+      let useFallback = false;
 
-        // Apply filters: within the current day AND duration > 5 minutes (300s)
-        if (publishedTime < CUTOFF_TIMESTAMP) {
-          console.log(`Skipping mock video due to date constraint (not from current day): ${item.title}`);
-          continue;
-        }
-        if (durationSecs <= 300) {
-          console.log(`Skipping mock video due to duration constraint (<= 5 mins): ${item.title}`);
-          continue;
-        }
-
-        syncedVideos.push({
-          id: `yt-video-${item.videoId}`,
-          title: item.title,
-          description: item.description,
-          file_url: `https://www.youtube.com/embed/${item.videoId}`,
-          created_at: item.publishedAt,
-          metadata: {
-            duration: item.duration,
-            resolution: "4K UHD",
-            thumbnail: `https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=800&q=80`,
-            is_youtube: true,
-            channel_title: `${channelTitle} (Mock Feed)`,
-            published_at: item.publishedAt,
-          }
+      try {
+        // 1. Fetch RSS XML Feed from YouTube
+        const response = await fetch(ytRssFeed, {
+          next: { revalidate: 3600 }, // Cache feed for 1 hour
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
         });
-      }
-    } else {
-      // 2. Parse Entries using a robust RegExp parser
-      const entryMatches: string[] = [];
-      const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
-      let match;
-      while ((match = entryRegex.exec(xmlText)) !== null) {
-        entryMatches.push(match[1]);
-      }
 
-      for (const entryXml of entryMatches) {
-        const videoId = extractTagContent(entryXml, "yt:videoId");
-        if (!videoId) continue;
-
-        const title = extractTagContent(entryXml, "title");
-        const publishedAtStr = extractTagContent(entryXml, "published");
-        const publishedTime = publishedAtStr ? Date.parse(publishedAtStr) : now;
-
-        // Apply date filter: within the current day
-        if (publishedTime < CUTOFF_TIMESTAMP) {
-          console.log(`Skipping real feed video due to date constraint (not from current day): ${title}`);
-          continue;
+        if (!response.ok) {
+          console.warn(`YouTube feed fetch returned status ${response.status} for ${channelTitle}.`);
+          useFallback = true;
+        } else {
+          xmlText = await response.text();
         }
+      } catch (fetchErr) {
+        console.warn(`Failed to reach YouTube RSS endpoint for ${channelTitle}:`, fetchErr);
+        useFallback = true;
+      }
 
-        // Extract description
-        let rawDescription = extractTagContent(entryXml, "media:description");
-        if (!rawDescription) {
-          rawDescription = extractTagContent(entryXml, "description");
-        }
-
-        // Fetch actual duration from YouTube watch page
-        console.log(`Fetching real duration for YouTube video ${videoId} (${title})...`);
-        let durationSecs = await fetchRealYoutubeDuration(videoId);
-
-        if (durationSecs === 0) {
-          console.warn(`[Sync] Failed to scrape duration for video ${videoId} (${title}). Likely blocked by YouTube. Applying smart fallback.`);
-          
-          // Check if it's a YouTube Short
-          const isShort = title.toLowerCase().includes("#shorts") || 
-                          title.toLowerCase().includes("#short") ||
-                          (rawDescription && (rawDescription.toLowerCase().includes("#shorts") || rawDescription.toLowerCase().includes("#short"))) ||
-                          entryXml.includes("/shorts/");
-          
-          if (isShort) {
-            console.log(`[Sync] Skipping video because it is classified as a YouTube Short: ${title}`);
+      if (useFallback) {
+        if (channelTitle === "Judging Freedom") {
+          if (channelsToSync.length === 1) {
+            throw new Error("No se pudo obtener el feed real de Judging Freedom de YouTube. El modo de simulación está prohibido para este canal.");
+          } else {
+            console.error(`[Sync] No se pudo obtener el feed real de Judging Freedom de YouTube. Se omite este canal ya que el modo de simulación está prohibido.`);
             continue;
           }
-          
-          // Fallback to 900 seconds (15 minutes) for standard videos to pass the duration filter
-          durationSecs = 900;
         }
 
-        // Apply strict duration filter: > 5 minutes (300 seconds)
-        if (durationSecs <= 300) {
-          console.log(`Skipping real feed video due to duration constraint (duration: ${durationSecs}s <= 5 mins): ${title}`);
-          continue;
-        }
-
-        const durationStr = formatSecondsToDuration(durationSecs);
-
-        // Create Synced Video Document
-        const videoDoc: AnalysedVideo = {
-          id: `yt-video-${videoId}`,
-          title: title,
-          description: rawDescription || "Sin descripción proporcionada.",
-          file_url: `https://www.youtube.com/embed/${videoId}`,
-          created_at: new Date(publishedTime).toISOString(),
-          metadata: {
-            duration: durationStr,
-            resolution: "4K UHD",
-            thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
-            is_youtube: true,
-            channel_title: channelTitle,
-            published_at: publishedAtStr,
+        // Create hyper-realistic mock videos inside the active 24-hour window
+        const fallbackData = [
+          {
+            videoId: "fed-decision-2026",
+            title: "The Fed Just Made A Major Decision (Interest Rate Update)",
+            publishedAt: new Date(now).toISOString(), // Published today
+            description: "The Federal Reserve just held their meeting. Interest rates are higher for longer but we might see cuts soon. What does this mean for savings accounts, HYSA, dividend stocks, and the stock market index? We look at real estate and how to prepare.",
+            duration: "26:00"
           },
-        };
+          {
+            videoId: "market-move-2026",
+            title: "Why The Stock Market Is Preparing For A Big Move",
+            publishedAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(), // Published today (2 hours ago)
+            description: "Is a recession coming? Stock market warning signs are flashing. We cover CPI inflation numbers, geopolitics in trade routes, and why gold or bonds might be a great hedge right now. Let's look at my dividend growth investing portfolio strategy.",
+            duration: "26:00"
+          },
+          {
+            videoId: "btc-devaluation-2026",
+            title: "Bitcoin vs. Global Currency Devaluation & Petro Dollar",
+            publishedAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(), // Published 2 days ago (Now INCLUDED by June 24th cutoff!)
+            description: "The Petro Dollar, inflation, and global money printing are devaluing cash. Here's why Bitcoin, crypto, and alternative commodities are rising in popularity. How to allocate assets in your long term portfolio with low-risk T-bills.",
+            duration: "26:00"
+          }
+        ];
 
-        syncedVideos.push(videoDoc);
+        for (const item of fallbackData) {
+          const publishedTime = Date.parse(item.publishedAt);
+          const durationSecs = parseDurationToSeconds(item.duration);
+
+          // Apply filters: within the current day AND duration > 5 minutes (300s)
+          if (publishedTime < CUTOFF_TIMESTAMP) {
+            console.log(`Skipping mock video due to date constraint (not from current day): ${item.title}`);
+            continue;
+          }
+          if (durationSecs <= 300) {
+            console.log(`Skipping mock video due to duration constraint (<= 5 mins): ${item.title}`);
+            continue;
+          }
+
+          syncedVideos.push({
+            id: `yt-video-${item.videoId}-${channelTitle.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase()}`,
+            title: item.title,
+            description: item.description,
+            file_url: `https://www.youtube.com/embed/${item.videoId}?channel=${encodeURIComponent(channelTitle)}`,
+            created_at: item.publishedAt,
+            metadata: {
+              duration: item.duration,
+              resolution: "4K UHD",
+              thumbnail: `https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=800&q=80`,
+              is_youtube: true,
+              channel_title: `${channelTitle} (Mock Feed)`,
+              published_at: item.publishedAt,
+            }
+          });
+        }
+      } else {
+        // 2. Parse Entries using a robust RegExp parser
+        const entryMatches: string[] = [];
+        const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+        let match;
+        while ((match = entryRegex.exec(xmlText)) !== null) {
+          entryMatches.push(match[1]);
+        }
+
+        for (const entryXml of entryMatches) {
+          const videoId = extractTagContent(entryXml, "yt:videoId");
+          if (!videoId) continue;
+
+          const title = extractTagContent(entryXml, "title");
+          const publishedAtStr = extractTagContent(entryXml, "published");
+          const publishedTime = publishedAtStr ? Date.parse(publishedAtStr) : now;
+
+          // Apply date filter: within the current day
+          if (publishedTime < CUTOFF_TIMESTAMP) {
+            console.log(`Skipping real feed video due to date constraint (not from current day): ${title}`);
+            continue;
+          }
+
+          // Extract description
+          let rawDescription = extractTagContent(entryXml, "media:description");
+          if (!rawDescription) {
+            rawDescription = extractTagContent(entryXml, "description");
+          }
+
+          // Fetch actual duration from YouTube watch page
+          console.log(`Fetching real duration for YouTube video ${videoId} (${title})...`);
+          let durationSecs = await fetchRealYoutubeDuration(videoId);
+
+          if (durationSecs === 0) {
+            console.warn(`[Sync] Failed to scrape duration for video ${videoId} (${title}). Likely blocked by YouTube. Applying smart fallback.`);
+            
+            // Check if it's a YouTube Short
+            const isShort = title.toLowerCase().includes("#shorts") || 
+                            title.toLowerCase().includes("#short") ||
+                            (rawDescription && (rawDescription.toLowerCase().includes("#shorts") || rawDescription.toLowerCase().includes("#short"))) ||
+                            entryXml.includes("/shorts/");
+            
+            if (isShort) {
+              console.log(`[Sync] Skipping video because it is classified as a YouTube Short: ${title}`);
+              continue;
+            }
+            
+            // Fallback to 900 seconds (15 minutes) for standard videos to pass the duration filter
+            durationSecs = 900;
+          }
+
+          // Apply strict duration filter: > 5 minutes (300 seconds)
+          if (durationSecs <= 300) {
+            console.log(`Skipping real feed video due to duration constraint (duration: ${durationSecs}s <= 5 mins): ${title}`);
+            continue;
+          }
+
+          const durationStr = formatSecondsToDuration(durationSecs);
+
+          // Create Synced Video Document
+          const videoDoc: AnalysedVideo = {
+            id: `yt-video-${videoId}`,
+            title: title,
+            description: rawDescription || "Sin descripción proporcionada.",
+            file_url: `https://www.youtube.com/embed/${videoId}`,
+            created_at: new Date(publishedTime).toISOString(),
+            metadata: {
+              duration: durationStr,
+              resolution: "4K UHD",
+              thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+              is_youtube: true,
+              channel_title: channelTitle,
+              published_at: publishedAtStr,
+            },
+          };
+
+          syncedVideos.push(videoDoc);
+        }
       }
     }
 
     // Server-side database synchronization fallback/daemon logic
     // This allows a silent background cron calling GET /api/videos/sync to automatically
     // synchronize and populate new videos in the database for all registered profiles!
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
     if (supabaseUrl && serviceRoleKey && syncedVideos.length > 0) {
       console.log("[Daemon] Sincronización silenciosa en segundo plano iniciada para todos los usuarios...");
@@ -291,7 +308,7 @@ async function handleSync(request: Request) {
             } else {
               console.log(`[Daemon] Sincronizando vídeo mock/simulado "${fv.title}" (${ytId}). Usando transcripción simulada realista.`);
               // For mock/fallback videos, we use a beautifully structured transcription to simulate real AI output
-              const presenter = fv.metadata.channel_title || channelTitle;
+              const presenter = fv.metadata.channel_title || "Andrei Jikh";
               const shortPresenter = presenter.split(" ")[0];
               const realisticMockTranscription = `Hello everyone, ${presenter} here. Today we are talking about some massive economic shifts. The Federal Reserve has just held their interest rate meeting, and they have decided to keep interest rates higher for longer. This has massive implications for your savings, specifically high-yield savings accounts or HYSAs, as well as dividend growth investing and overall index fund portfolios. The stock market is at a critical juncture right now with some flashing warning signs of a recession, and CPI inflation numbers are remaining sticky. We need to look at real estate markets and how to allocate assets safely. I've been personally buying short-term T-bills and focusing on stable dividend-paying companies. Let's break down the exact numbers and my personal portfolio strategy.
 
@@ -410,7 +427,7 @@ async function handleSync(request: Request) {
                 resolution: fv.metadata.resolution,
                 thumbnail: fv.metadata.thumbnail,
                 is_youtube: true,
-                channel_title: fv.metadata.channel_title || channelTitle,
+                channel_title: fv.metadata.channel_title || "Andrei Jikh",
                 transcription: transData?.transcription,
                 transcription_model: transData?.modelUsed
               }
@@ -426,7 +443,36 @@ async function handleSync(request: Request) {
             if (insertError) {
               console.warn(`[Daemon] Error al insertar ${newDocsToInsert.length} nuevos videos para el administrador:`, insertError);
             } else if (insertedDocs && insertedDocs.length > 0) {
-              console.log(`[Daemon] Sincronizados e insertados exitosamente ${insertedDocs.length} nuevos videos bajo el Administrador (Alerta de Telegram desactivada por solicitud del usuario).`);
+              console.log(`[Daemon] Sincronizados e insertados exitosamente ${insertedDocs.length} nuevos videos bajo el Administrador.`);
+              
+              // Trigger individual 'AddNewVideo' Telegram alerts for each newly synchronized video
+              try {
+                const activeLang = await getTelegramLanguage();
+                console.log(`[Daemon] Enviando ${insertedDocs.length} alertas de Telegram ("HIVEX Update - AddNewVideo") en idioma: ${activeLang}`);
+                
+                for (const doc of insertedDocs) {
+                  const channelName = doc.metadata?.channel_title || "Andrei Jikh";
+                  const ytId = extractYoutubeId(doc.file_url, doc.id);
+                  
+                  const formattedMsg = formatVideoNotification({
+                    videoTitle: doc.title,
+                    channelName,
+                    youtubeId: ytId || undefined,
+                    videoId: doc.id,
+                    lang: activeLang,
+                  });
+                  
+                  console.log(`[Daemon] Despachando alerta individual de nuevo vídeo para: "${doc.title}"...`);
+                  const res = await sendTelegramMessage(formattedMsg);
+                  if (res.success) {
+                    console.log(`[Daemon] Alerta de Telegram enviada con éxito para: "${doc.title}"`);
+                  } else {
+                    console.warn(`[Daemon] Falló el envío de la alerta de Telegram para: "${doc.title}":`, res.error);
+                  }
+                }
+              } catch (alertErr) {
+                console.error("[Daemon] Error crítico al enviar alertas individuales de Telegram:", alertErr);
+              }
             }
           } else {
             console.log("[Daemon] La videoteca compartida ya está al día. 0 videos nuevos insertados.");
@@ -462,8 +508,8 @@ async function generateGlobalInvestmentReport(insertedDocs: any[]): Promise<stri
     throw new Error("Falta la clave GEMINI_API_KEY en el entorno para generar el informe global.");
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
   let supabaseAdmin: any = null;
   if (supabaseUrl && serviceRoleKey) {
