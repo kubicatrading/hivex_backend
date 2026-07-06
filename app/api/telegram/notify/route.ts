@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendTelegramMessage, formatVideoNotification, escapeHtml, markdownToTelegramHtml } from "@/lib/telegram";
+import { sendTelegramMessage, formatVideoNotification, escapeHtml, markdownToTelegramHtml, getTelegramLanguage } from "@/lib/telegram";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, message, videoTitle, channelName, analysisSummary, youtubeId, videoId } = body;
+    const { type, message, videoTitle, channelName, analysisSummary, youtubeId, videoId, lang } = body;
 
     let textToSend = "";
 
@@ -16,12 +16,14 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+      const activeLang = lang || await getTelegramLanguage();
       textToSend = formatVideoNotification({
         videoTitle,
         channelName,
         analysisSummary,
         youtubeId,
         videoId,
+        lang: activeLang,
       });
     } else {
       // Manual broadcast or general message

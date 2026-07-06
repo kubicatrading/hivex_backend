@@ -3,6 +3,8 @@
  * Secure server-side dispatcher for sending premium financial notifications and alerts.
  */
 
+import { createClient } from "@supabase/supabase-js";
+
 export function escapeHtml(text: string): string {
   if (!text) return "";
   return text
@@ -89,6 +91,7 @@ export interface VideoAnalysisPayload {
   analysisSummary?: string;
   youtubeId?: string;
   videoId?: string;
+  lang?: string;
 }
 
 /**
@@ -99,10 +102,14 @@ export function formatVideoNotification({
   channelName,
   youtubeId,
   videoId,
+  lang,
 }: VideoAnalysisPayload): string {
-  const dateStr = new Date().toLocaleDateString("es-ES", {
+  const isSpanish = lang === "es";
+  const locale = isSpanish ? "es-ES" : "en-US";
+  
+  const dateStr = new Date().toLocaleDateString(locale, {
     day: "numeric",
-    month: "long",
+    month: isSpanish ? "long" : "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit"
@@ -112,11 +119,15 @@ export function formatVideoNotification({
   const escapedTitle = escapeHtml(videoTitle);
   const targetId = videoId || youtubeId;
 
+  const labelTitle = isSpanish ? "Título" : "Title";
+  const labelChannel = isSpanish ? "Canal" : "Channel";
+  const labelDate = isSpanish ? "Fecha" : "Date";
+
   let message = `<b>HIVEX Update - AddNewVideo</b>\n`;
   message += `---\n`;
-  message += `<b>Título:</b> ${escapedTitle}\n`;
-  message += `<b>Canal:</b> ${escapedChannel}\n`;
-  message += `<b>Fecha:</b> ${dateStr}\n`;
+  message += `<b>${labelTitle}:</b> ${escapedTitle}\n`;
+  message += `<b>${labelChannel}:</b> ${escapedChannel}\n`;
+  message += `<b>${labelDate}:</b> ${dateStr}\n`;
   
   if (targetId) {
     message += `<a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}</a>\n`;
@@ -127,6 +138,119 @@ export function formatVideoNotification({
   message += `---`;
   return message;
 }
+
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.warn("[Telegram Service] Missing Supabase keys. DB operations will be bypassed.");
+    return null;
+  }
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false }
+  });
+}
+
+export async function getTelegramLanguage(): Promise<string> {
+  const supabaseAdmin = getSupabaseAdmin();
+  if (!supabaseAdmin) return "en";
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("documents")
+      .select("metadata")
+      .eq("type", "knowledge_analysis")
+      .eq("title", "telegram_language")
+      .eq("file_url", "https://telegram.org/settings")
+      .maybeSingle();
+
+    if (error || !data) {
+      return "en";
+    }
+
+    const lang = data.metadata?.language;
+    if (lang === "es") return "es";
+    return "en";
+  } catch (err) {
+    console.error("[Telegram Service] Failed to get Telegram language from DB:", err);
+    return "en";
+  }
+}
+
+export async function setTelegramLanguage(lang: string): Promise<boolean> {
+  const supabaseAdmin = getSupabaseAdmin();
+  if (!supabaseAdmin) return false;
+
+  try {
+    // 1. Get a valid user_id from profiles
+    const { data: profile, error: pError } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .limit(1)
+      .maybeSingle();
+
+    if (pError || !profile) {
+      console.error("[Telegram Service] No profiles found or error fetching profile:", pError);
+      return false;
+    }
+
+    const userId = profile.id;
+
+    // 2. Check if settings document already exists
+    const { data: existing, error: findError } = await supabaseAdmin
+      .from("documents")
+      .select("id")
+      .eq("type", "knowledge_analysis")
+      .eq("title", "telegram_language")
+      .eq("file_url", "https://telegram.org/settings")
+      .maybeSingle();
+
+    if (findError) {
+      console.error("[Telegram Service] Error checking existing settings:", findError);
+      return false;
+    }
+
+    const metadata = { language: lang === "es" ? "es" : "en" };
+
+    if (existing?.id) {
+      // Update
+      const { error: updateError } = await supabaseAdmin
+        .from("documents")
+        .update({
+          metadata,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", existing.id);
+
+      if (updateError) {
+        console.error("[Telegram Service] Error updating settings:", updateError);
+        return false;
+      }
+    } else {
+      // Insert
+      const { error: insertError } = await supabaseAdmin
+        .from("documents")
+        .insert({
+          user_id: userId,
+          title: "telegram_language",
+          file_url: "https://telegram.org/settings",
+          type: "knowledge_analysis",
+          metadata
+        });
+
+      if (insertError) {
+        console.error("[Telegram Service] Error inserting settings:", insertError);
+        return false;
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.error("[Telegram Service] Failed to set Telegram language in DB:", err);
+    return false;
+  }
+}
+
 
 /**
  * Server-side helper to safely transmit a message to Telegram.

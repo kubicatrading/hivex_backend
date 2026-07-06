@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
-import { markdownToTelegramHtml, splitMarkdown, sendTelegramMessageWithPhotos, escapeHtml } from "@/lib/telegram";
+import { markdownToTelegramHtml, splitMarkdown, sendTelegramMessageWithPhotos, escapeHtml, setTelegramLanguage } from "@/lib/telegram";
 
 export async function POST(request: NextRequest) {
   try {
@@ -137,6 +137,70 @@ export async function POST(request: NextRequest) {
           parse_mode: "HTML",
         }),
       });
+      return NextResponse.json({ ok: true });
+    }
+
+    // Language configuration detector
+    const lowerText = userText.toLowerCase();
+    let targetLang: "en" | "es" | null = null;
+
+    if (lowerText.startsWith("/lang") || lowerText.startsWith("/idioma")) {
+      const parts = lowerText.split(/\s+/);
+      if (parts.includes("es") || parts.includes("spanish") || parts.includes("español")) {
+        targetLang = "es";
+      } else if (parts.includes("en") || parts.includes("english") || parts.includes("inglés") || parts.includes("ingles")) {
+        targetLang = "en";
+      }
+    } else if (
+      lowerText.includes("alertas en español") ||
+      lowerText.includes("alertas en espanol") ||
+      lowerText.includes("poner en español") ||
+      lowerText.includes("poner en espanol") ||
+      lowerText.includes("idioma español") ||
+      lowerText.includes("idioma espanol") ||
+      lowerText.includes("alerts in spanish") ||
+      lowerText.includes("set language to spanish") ||
+      lowerText.includes("change language to spanish")
+    ) {
+      targetLang = "es";
+    } else if (
+      lowerText.includes("alertas en inglés") ||
+      lowerText.includes("alertas en ingles") ||
+      lowerText.includes("poner en inglés") ||
+      lowerText.includes("poner en ingles") ||
+      lowerText.includes("idioma inglés") ||
+      lowerText.includes("idioma ingles") ||
+      lowerText.includes("alerts in english") ||
+      lowerText.includes("set language to english") ||
+      lowerText.includes("change language to english")
+    ) {
+      targetLang = "en";
+    }
+
+    if (targetLang) {
+      const success = await setTelegramLanguage(targetLang);
+      let confirmationText = "";
+      
+      if (targetLang === "es") {
+        confirmationText = `🌐 <b>HIVEX Configuración de Idioma</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nEl idioma de las alertas de Telegram se ha configurado correctamente a: <b>Español</b>.\n\n<i>A partir de ahora, tanto los avisos de nuevos vídeos como los boletines diarios "HIVEX News - 24H" se generarán y enviarán en español.</i>`;
+      } else {
+        confirmationText = `🌐 <b>HIVEX Language Settings</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nTelegram alerts language has been successfully set to: <b>English</b> (Default).\n\n<i>From now on, both new video notifications and daily bulletins "HIVEX News - 24H" will be generated and dispatched in English.</i>`;
+      }
+
+      if (!success) {
+        confirmationText = `⚠️ <b>Error de Configuración</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nNo se pudo persistir la configuración en la base de datos de producción. Por favor, verifica el estado de Supabase.`;
+      }
+
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: confirmationText,
+          parse_mode: "HTML",
+        }),
+      });
+
       return NextResponse.json({ ok: true });
     }
 
