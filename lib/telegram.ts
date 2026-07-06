@@ -86,7 +86,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 export interface VideoAnalysisPayload {
   videoTitle: string;
   channelName: string;
-  analysisSummary: string;
+  analysisSummary?: string;
   youtubeId?: string;
   videoId?: string;
 }
@@ -97,7 +97,6 @@ export interface VideoAnalysisPayload {
 export function formatVideoNotification({
   videoTitle,
   channelName,
-  analysisSummary,
   youtubeId,
   videoId,
 }: VideoAnalysisPayload): string {
@@ -111,30 +110,21 @@ export function formatVideoNotification({
 
   const escapedChannel = escapeHtml(channelName);
   const escapedTitle = escapeHtml(videoTitle);
-  
-  // Format summary: limit length if extremely long to avoid Telegram's 4096 char limit
-  let trimmedSummary = analysisSummary;
-  if (trimmedSummary.length > 2500) {
-    trimmedSummary = trimmedSummary.slice(0, 2500) + "\n\n<i>[Resumen truncado debido a longitud...]</i>";
-  }
-  const escapedSummary = escapeHtml(trimmedSummary);
-
-  let message = `<b>🎬 NUEVO VÍDEO SINCRONIZADO EN HIVEX</b>\n`;
-  message += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
-  message += `<b>📡 Canal:</b> <code>${escapedChannel}</code>\n`;
-  message += `<b>🎬 Título:</b> <i>${escapedTitle}</i>\n`;
-  message += `<b>📅 Fecha de Análisis:</b> <code>${dateStr}</code>\n\n`;
-  message += `<b>📊 Resumen del Análisis Bursátil:</b>\n`;
-  message += `<blockquote>${escapedSummary}</blockquote>\n\n`;
-  
-  message += `━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
   const targetId = videoId || youtubeId;
-  if (targetId) {
-    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">Acceder a la Cabina de Estudio en HIVEX</a>`;
-  } else {
-    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?from=telegram">Abrir Plataforma HIVEX</a>`;
-  }
 
+  let message = `<b>HIVEX Update - AddNewVideo</b>\n`;
+  message += `---\n`;
+  message += `<b>Título:</b> ${escapedTitle}\n`;
+  message += `<b>Canal:</b> ${escapedChannel}\n`;
+  message += `<b>Fecha:</b> ${dateStr}\n`;
+  
+  if (targetId) {
+    message += `<a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}</a>\n`;
+  } else {
+    message += `<a href="https://hivex-backend.vercel.app/dashboard/videos?from=telegram">https://hivex-backend.vercel.app/dashboard/videos</a>\n`;
+  }
+  
+  message += `---`;
   return message;
 }
 
