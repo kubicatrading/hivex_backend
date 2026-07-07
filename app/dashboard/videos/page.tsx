@@ -2021,6 +2021,7 @@ export default function VideosPage() {
 
   // Audio queue references for playing
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeObjectUrlRef = useRef<string | null>(null);
 
   const stopGeminiAudio = () => {
     if (activeAudioRef.current) {
@@ -2029,6 +2030,10 @@ export default function VideosPage() {
       activeAudioRef.current.onerror = null;
       activeAudioRef.current.src = "";
       activeAudioRef.current = null;
+    }
+    if (activeObjectUrlRef.current) {
+      URL.revokeObjectURL(activeObjectUrlRef.current);
+      activeObjectUrlRef.current = null;
     }
   };
 
@@ -2050,83 +2055,105 @@ export default function VideosPage() {
     }
 
     // Stop active audio if any
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current.onended = null;
-      activeAudioRef.current.onerror = null;
-    }
+    stopGeminiAudio();
 
     setIsPlayingAudio(true);
     setIsPausedAudio(false);
     setActiveSentenceIndex(index);
     activeSentenceIndexRef.current = index;
 
-    // Create new Audio element and play immediately
-    const audio = new Audio();
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
     const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
-    audio.src = audioSrc;
-    activeAudioRef.current = audio;
 
-    // Apply playback rate
-    audio.playbackRate = playbackRateRef.current;
+    // Load dynamic audio as blob first to completely avoid Safari/iOS range-request issues
+    // and provide high-fidelity server diagnostics before instantiating HTML5 audio.
+    fetch(audioSrc)
+      .then(async (res) => {
+        if (!res.ok) {
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const errData = await res.json();
+            const errMsg = errData.error || errData.message || JSON.stringify(errData);
+            throw new Error(`Error del servidor (${res.status}): ${errMsg}`);
+          } else {
+            const errText = await res.text();
+            throw new Error(`Error del servidor (${res.status}): ${errText.slice(0, 100)}`);
+          }
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        // Ensure that we are still playing the same sentence after the asynchronous fetch completes
+        if (activeSentenceIndexRef.current !== index) {
+          return;
+        }
 
-    // Setup events
-    audio.onended = () => {
-      if (!isPlayingAudioRef.current) return;
-      
-      const nextIdx = index + 1;
-      if (nextIdx < chunks.length) {
-        playGeminiSentence(nextIdx);
-      } else {
+        const objectUrl = URL.createObjectURL(blob);
+        activeObjectUrlRef.current = objectUrl;
+
+        const audio = new Audio();
+        audio.src = objectUrl;
+        activeAudioRef.current = audio;
+
+        // Apply playback rate
+        audio.playbackRate = playbackRateRef.current;
+
+        // Setup events
+        audio.onended = () => {
+          URL.revokeObjectURL(objectUrl);
+          if (activeObjectUrlRef.current === objectUrl) {
+            activeObjectUrlRef.current = null;
+          }
+          if (!isPlayingAudioRef.current) return;
+          
+          const nextIdx = index + 1;
+          if (nextIdx < chunks.length) {
+            playGeminiSentence(nextIdx);
+          } else {
+            setIsPlayingAudio(false);
+            setIsPausedAudio(false);
+            setActiveSentenceIndex(-1);
+            activeSentenceIndexRef.current = -1;
+          }
+        };
+
+        audio.onerror = (e) => {
+          console.error("[Gemini Audio Player Error] Failed to play Object URL:", index, e);
+          URL.revokeObjectURL(objectUrl);
+          if (activeObjectUrlRef.current === objectUrl) {
+            activeObjectUrlRef.current = null;
+          }
+          setIsPlayingAudio(false);
+          setIsPausedAudio(false);
+          setAudioError(`Error del navegador al reproducir el formato de audio (Código ${audio.error?.code || 'desconocido'}).`);
+        };
+
+        // Play!
+        audio.play().catch((playErr: any) => {
+          URL.revokeObjectURL(objectUrl);
+          if (activeObjectUrlRef.current === objectUrl) {
+            activeObjectUrlRef.current = null;
+          }
+          if (playErr.name === "AbortError") {
+            console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
+            return;
+          }
+          console.error("[Gemini Play Failure] Could not play audio:", playErr);
+          if (playErr.name === "NotAllowedError") {
+            setAudioError("El navegador bloqueó la reproducción automática. Por favor haga clic en el botón de reproducción.");
+          } else {
+            setAudioError(`Bloqueo de reproducción en el navegador: ${playErr.message || "Por favor haga clic de nuevo para interactuar."}`);
+          }
+          setIsPlayingAudio(false);
+          setIsPausedAudio(false);
+        });
+      })
+      .catch((err) => {
+        console.error("[Gemini Load Failure] Failed to load audio chunk:", index, err);
+        setAudioError(err.message || "Error de red o conexión al servidor de voz. Verifique su conexión.");
         setIsPlayingAudio(false);
         setIsPausedAudio(false);
-        setActiveSentenceIndex(-1);
-        activeSentenceIndexRef.current = -1;
-      }
-    };
-
-    audio.onerror = (e) => {
-      console.error("[Gemini Audio Player Error] Failed to play chunk:", index, e);
-      
-      // Stop playback on error to prevent silent skip loop cascade
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-
-      // Advanced fetch diagnostics to read actual server-side JSON/text error body
-      fetch(audioSrc)
-        .then(async (res) => {
-          if (!res.ok) {
-            const contentType = res.headers.get("content-type") || "";
-            if (contentType.includes("application/json")) {
-              const errData = await res.json();
-              const errMsg = errData.error || errData.message || JSON.stringify(errData);
-              setAudioError(`Error del servidor (${res.status}): ${errMsg}`);
-            } else {
-              const errText = await res.text();
-              setAudioError(`Error del servidor (${res.status}): ${errText.slice(0, 100)}`);
-            }
-          } else {
-            setAudioError(`Error del navegador al reproducir el formato de audio (Código ${audio.error?.code || 'desconocido'}).`);
-          }
-        })
-        .catch((fetchErr) => {
-          console.error("[Diagnostics Fail] Failed to contact server to diagnose audio error:", fetchErr);
-          setAudioError("Error de red o conexión al servidor de voz. Verifique su conexión.");
-        });
-    };
-
-    // Play!
-    audio.play().catch((playErr: any) => {
-      if (playErr.name === "AbortError") {
-        console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
-        return;
-      }
-      console.error("[Gemini Play Failure] Could not play audio:", playErr);
-      setAudioError(`Bloqueo de reproducción en el navegador: ${playErr.message || "Por favor haga clic de nuevo para interactuar."}`);
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-    });
+      });
   };
 
   // Multilingual states
