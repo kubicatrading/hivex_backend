@@ -2010,6 +2010,7 @@ export default function VideosPage() {
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number>(-1);
   const [totalSentences, setTotalSentences] = useState<number>(0);
   const [sentenceChunks, setSentenceChunks] = useState<string[]>([]);
+  const [audioError, setAudioError] = useState<string | null>(null);
 
   // Voice selection states (premium Gemini voices)
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>("gemini-charon");
@@ -2038,6 +2039,7 @@ export default function VideosPage() {
   };
 
   const playGeminiSentence = (index: number) => {
+    setAudioError(null); // Reset audio error on any new sentence attempt
     const chunks = sentenceChunksRef.current;
     if (index < 0 || index >= chunks.length) {
       setIsPlayingAudio(false);
@@ -2062,7 +2064,8 @@ export default function VideosPage() {
     // Create new Audio element and play immediately
     const audio = new Audio();
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-    audio.src = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    audio.src = audioSrc;
     activeAudioRef.current = audio;
 
     // Apply playback rate
@@ -2085,16 +2088,32 @@ export default function VideosPage() {
 
     audio.onerror = (e) => {
       console.error("[Gemini Audio Player Error] Failed to play chunk:", index, e);
-      // Skip failed chunk to keep user experience pleasant
-      const nextIdx = index + 1;
-      if (nextIdx < chunks.length) {
-        playGeminiSentence(nextIdx);
-      } else {
-        setIsPlayingAudio(false);
-        setIsPausedAudio(false);
-        setActiveSentenceIndex(-1);
-        activeSentenceIndexRef.current = -1;
-      }
+      
+      // Stop playback on error to prevent silent skip loop cascade
+      setIsPlayingAudio(false);
+      setIsPausedAudio(false);
+
+      // Advanced fetch diagnostics to read actual server-side JSON/text error body
+      fetch(audioSrc)
+        .then(async (res) => {
+          if (!res.ok) {
+            const contentType = res.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+              const errData = await res.json();
+              const errMsg = errData.error || errData.message || JSON.stringify(errData);
+              setAudioError(`Error del servidor (${res.status}): ${errMsg}`);
+            } else {
+              const errText = await res.text();
+              setAudioError(`Error del servidor (${res.status}): ${errText.slice(0, 100)}`);
+            }
+          } else {
+            setAudioError(`Error del navegador al reproducir el formato de audio (Código ${audio.error?.code || 'desconocido'}).`);
+          }
+        })
+        .catch((fetchErr) => {
+          console.error("[Diagnostics Fail] Failed to contact server to diagnose audio error:", fetchErr);
+          setAudioError("Error de red o conexión al servidor de voz. Verifique su conexión.");
+        });
     };
 
     // Play!
@@ -2104,6 +2123,7 @@ export default function VideosPage() {
         return;
       }
       console.error("[Gemini Play Failure] Could not play audio:", playErr);
+      setAudioError(`Bloqueo de reproducción en el navegador: ${playErr.message || "Por favor haga clic de nuevo para interactuar."}`);
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
     });
@@ -2393,6 +2413,7 @@ export default function VideosPage() {
 
     // Stop any active audio
     stopGeminiAudio();
+    setAudioError(null); // Clean any previous error
 
     setIsPlayingAudio(true);
     setIsPausedAudio(false);
@@ -2432,6 +2453,7 @@ export default function VideosPage() {
   const stopAudio = () => {
     // Stop any active audio
     stopGeminiAudio();
+    setAudioError(null); // Clean any previous error
 
     setIsPlayingAudio(false);
     setIsPausedAudio(false);
@@ -2506,6 +2528,8 @@ export default function VideosPage() {
 
   // Pre-populate audio chunks and total sentences whenever the study video, selected language, or its transcription text changes
   useEffect(() => {
+    setAudioError(null); // Reset audio error state when content changes
+
     if (!activeStudyVideo) {
       sentenceChunksRef.current = [];
       setSentenceChunks([]);
@@ -4629,6 +4653,21 @@ export default function VideosPage() {
                       ) : (
                         /* Premium horizontal scrubber deck */
                         <div className="relative z-10 flex flex-col gap-4 w-full">
+                          {audioError && (
+                            <div className="flex items-center gap-3 text-xs font-semibold text-rose-400 bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl animate-fade-in select-none">
+                              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500 animate-pulse" />
+                              <span className="flex-grow">{audioError}</span>
+                              <button
+                                onClick={() => {
+                                  setAudioError(null);
+                                  playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+                                }}
+                                className="px-3 py-1.5 text-[10px] font-bold bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-lg active:scale-95 transition-all uppercase tracking-wider"
+                              >
+                                Reintentar
+                              </button>
+                            </div>
+                          )}
                           <div className="flex flex-col md:flex-row items-center gap-4 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-2xl select-none">
                             
                             {/* Row 1: Controls, index markers, and percentage badge (mobile) */}
