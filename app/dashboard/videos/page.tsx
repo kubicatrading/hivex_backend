@@ -2098,12 +2098,14 @@ export default function VideosPage() {
     };
 
     // Play!
-    audio.play().catch((playErr) => {
-      console.error("[Gemini Play Failure] Could not play audio:", playErr);
-      const nextIdx = index + 1;
-      if (nextIdx < chunks.length) {
-        playGeminiSentence(nextIdx);
+    audio.play().catch((playErr: any) => {
+      if (playErr.name === "AbortError") {
+        console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
+        return;
       }
+      console.error("[Gemini Play Failure] Could not play audio:", playErr);
+      setIsPlayingAudio(false);
+      setIsPausedAudio(false);
     });
   };
 
@@ -2525,10 +2527,11 @@ export default function VideosPage() {
       }
     }
 
-    const { summary } = splitTranscription(textToUse);
+    const { summary, transcription } = splitTranscription(textToUse);
+    const textForSpeech = summary || transcription || textToUse;
 
-    if (summary) {
-      const cleanedText = cleanSummaryForSpeech(summary);
+    if (textForSpeech) {
+      const cleanedText = cleanSummaryForSpeech(textForSpeech);
       const chunks = chunkTextForSpeech(cleanedText);
       sentenceChunksRef.current = chunks;
       setSentenceChunks(chunks);
