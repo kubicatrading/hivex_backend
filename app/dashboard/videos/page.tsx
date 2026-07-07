@@ -2014,6 +2014,132 @@ export default function VideosPage() {
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
 
+  // Voice selection states (unified list containing premium Gemini voices and standard browser fallback voices)
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>("gemini-charon");
+  const selectedVoiceIdRef = useRef<string>("gemini-charon");
+  useEffect(() => {
+    selectedVoiceIdRef.current = selectedVoiceId;
+  }, [selectedVoiceId]);
+
+  // Audio queue references for pre-buffering (Double-Buffering)
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bufferedAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bufferedIndexRef = useRef<number>(-1);
+
+  const stopGeminiAudio = () => {
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current.onended = null;
+      activeAudioRef.current.onerror = null;
+      activeAudioRef.current.src = "";
+      activeAudioRef.current = null;
+    }
+    if (bufferedAudioRef.current) {
+      bufferedAudioRef.current.pause();
+      bufferedAudioRef.current.src = "";
+      bufferedAudioRef.current = null;
+    }
+    bufferedIndexRef.current = -1;
+  };
+
+  const getVoiceNameFromId = (id: string): string => {
+    if (id === "gemini-aoede") return "Aoede";
+    if (id === "gemini-puck") return "Puck";
+    return "Charon"; // Default
+  };
+
+  const playGeminiSentence = (index: number) => {
+    const chunks = sentenceChunksRef.current;
+    if (index < 0 || index >= chunks.length) {
+      setIsPlayingAudio(false);
+      setIsPausedAudio(false);
+      setActiveSentenceIndex(-1);
+      activeSentenceIndexRef.current = -1;
+      return;
+    }
+
+    // Stop active audio if any
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current.onended = null;
+      activeAudioRef.current.onerror = null;
+    }
+
+    setIsPlayingAudio(true);
+    setIsPausedAudio(false);
+    setActiveSentenceIndex(index);
+    activeSentenceIndexRef.current = index;
+
+    let audio: HTMLAudioElement;
+
+    // 1. Check if we have pre-buffered this exact index
+    if (bufferedAudioRef.current && bufferedIndexRef.current === index) {
+      audio = bufferedAudioRef.current;
+      // Promote buffered to active
+      activeAudioRef.current = audio;
+      // Reset buffered reference
+      bufferedAudioRef.current = null;
+      bufferedIndexRef.current = -1;
+    } else {
+      // Create new Audio element
+      audio = new Audio();
+      const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+      audio.src = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+      activeAudioRef.current = audio;
+    }
+
+    // Apply playback rate
+    audio.playbackRate = playbackRateRef.current;
+
+    // Setup events
+    audio.onended = () => {
+      if (!isPlayingAudioRef.current) return;
+      
+      const nextIdx = index + 1;
+      if (nextIdx < chunks.length) {
+        playGeminiSentence(nextIdx);
+      } else {
+        setIsPlayingAudio(false);
+        setIsPausedAudio(false);
+        setActiveSentenceIndex(-1);
+        activeSentenceIndexRef.current = -1;
+      }
+    };
+
+    audio.onerror = (e) => {
+      console.error("[Gemini Audio Player Error] Failed to play chunk:", index, e);
+      // Resilient fallback! Speak with system voices.
+      fallbackToBrowserSynthesis(index);
+    };
+
+    // Play!
+    audio.play().catch((playErr) => {
+      console.error("[Gemini Play Failure] Could not play audio:", playErr);
+      fallbackToBrowserSynthesis(index);
+    });
+
+    // 2. Pre-buffer the NEXT sentence (N + 1) in the background (Double-Buffering)
+    const nextIndex = index + 1;
+    if (nextIndex < chunks.length) {
+      if (bufferedIndexRef.current !== nextIndex) {
+        const nextAudio = new Audio();
+        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+        nextAudio.src = `/api/videos/speak?text=${encodeURIComponent(chunks[nextIndex])}&voice=${voiceName}`;
+        nextAudio.preload = "auto";
+        nextAudio.load(); // Start fetching in background
+
+        bufferedAudioRef.current = nextAudio;
+        bufferedIndexRef.current = nextIndex;
+        console.log(`[Double-Buffering] Pre-buffering sentence ${nextIndex} in background...`);
+      }
+    }
+  };
+
+  const fallbackToBrowserSynthesis = (startIndex: number) => {
+    stopGeminiAudio();
+    queueSpeechSynthesis(startIndex);
+  };
+
   // Multilingual states
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en"); // Default is English ("en")
   const [translationsCache, setTranslationsCache] = useState<Record<string, Record<string, {
@@ -2466,12 +2592,13 @@ export default function VideosPage() {
   }, [selectedLanguage]);
 
 
-  // Cancel any speech synthesis when active video changes or component unmounts
+  // Cancel any speech synthesis and stop Gemini audio when active video changes or component unmounts
   useEffect(() => {
     return () => {
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
+      stopGeminiAudio();
     };
   }, [activeStudyVideo]);
 
@@ -2572,48 +2699,80 @@ export default function VideosPage() {
   };
 
   const startAudioSummary = () => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    
     const chunks = sentenceChunksRef.current;
     if (chunks.length === 0) return;
 
-    // Stop anything before starting
-    window.speechSynthesis.cancel();
+    // Stop standard synthesis
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    // Stop any active audio
+    stopGeminiAudio();
 
     setIsPlayingAudio(true);
     setIsPausedAudio(false);
-    
-    // Resume from paused state if index is set, otherwise start from index 0
+
     const startIdx = activeSentenceIndexRef.current >= 0 && activeSentenceIndexRef.current < chunks.length
       ? activeSentenceIndexRef.current
       : 0;
-      
+
     setActiveSentenceIndex(startIdx);
-    queueSpeechSynthesis(startIdx);
+    activeSentenceIndexRef.current = startIdx;
+
+    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
+      playGeminiSentence(startIdx);
+    } else {
+      queueSpeechSynthesis(startIdx);
+    }
   };
 
   const pauseAudio = () => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.pause();
     setIsPausedAudio(true);
+    isPausedAudioRef.current = true;
+
+    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+      }
+    } else {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.pause();
+      }
+    }
   };
 
   const resumeAudio = () => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    
     setIsPausedAudio(false);
-    // Best practice fallback for webkit/Chrome:
-    // If we were paused inside Synthesis, resume it, otherwise trigger queueSpeechSynthesis
-    if (window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
+    isPausedAudioRef.current = false;
+
+    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.play().catch((err) => {
+          console.error("Failed to resume audio:", err);
+          fallbackToBrowserSynthesis(activeSentenceIndexRef.current);
+        });
+      } else {
+        playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      }
     } else {
-      queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        } else {
+          queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+        }
+      }
     }
   };
 
   const stopAudio = () => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
+    // Stop standard synthesis
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    // Stop any active audio
+    stopGeminiAudio();
+
     setIsPlayingAudio(false);
     setIsPausedAudio(false);
     setActiveSentenceIndex(-1);
@@ -2628,29 +2787,57 @@ export default function VideosPage() {
     setActiveSentenceIndex(targetIdx);
     activeSentenceIndexRef.current = targetIdx;
 
-    // If already playing and not paused, speak the selected chunk instantly
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
-      queueSpeechSynthesis(targetIdx);
+      if (selectedVoiceIdRef.current.startsWith("gemini-")) {
+        playGeminiSentence(targetIdx);
+      } else {
+        queueSpeechSynthesis(targetIdx);
+      }
     }
   };
 
   const handleRateChange = (newRate: number, immediateRestart = true) => {
     setPlaybackRate(newRate);
     playbackRateRef.current = newRate;
-    
-    if (immediateRestart && isPlayingAudioRef.current && !isPausedAudioRef.current) {
-      // Restart current sentence chunk at the new rate instantly
-      queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+
+    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.playbackRate = newRate;
+      }
+    } else {
+      if (immediateRestart && isPlayingAudioRef.current && !isPausedAudioRef.current) {
+        queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      }
     }
   };
 
-  const handleVoiceChange = (voice: SpeechSynthesisVoice) => {
-    setSelectedVoice(voice);
-    selectedVoiceRef.current = voice;
-    
-    if (isPlayingAudio && !isPausedAudio) {
-      // Restart current sentence chunk with the new voice instantly
-      queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+  const handleVoiceIdChange = (voiceId: string) => {
+    setSelectedVoiceId(voiceId);
+    selectedVoiceIdRef.current = voiceId;
+
+    if (voiceId.startsWith("browser-")) {
+      const browserVoiceName = voiceId.substring(8);
+      const voice = ttsVoices.find(v => v.name === browserVoiceName);
+      if (voice) {
+        setSelectedVoice(voice);
+        selectedVoiceRef.current = voice;
+      }
+    } else {
+      setSelectedVoice(null);
+      selectedVoiceRef.current = null;
+    }
+
+    // If already playing and not paused, apply change immediately
+    if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
+      if (voiceId.startsWith("gemini-")) {
+        if (typeof window !== "undefined" && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+        playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      } else {
+        stopGeminiAudio();
+        queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      }
     }
   };
 
@@ -4699,18 +4886,20 @@ export default function VideosPage() {
                               : selectedLanguage === "tr"
                               ? "Yapay Zeka Anlatımlı Sesli Özet"
                               : "AI-Narrated Audio Summary"}
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20">
-                              {t.maleVoice || "MASCULINO Premium"}
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20 uppercase">
+                              {selectedVoiceId.startsWith("gemini-") 
+                                ? (selectedLanguage === "es" ? "PREMIUM IA" : selectedLanguage === "de" ? "PREMIUM KI" : selectedLanguage === "tr" ? "PREMIUM YZ" : "PREMIUM AI")
+                                : (selectedLanguage === "es" ? "SISTEMA LOCAL" : selectedLanguage === "de" ? "SYSTEMSTIMME" : selectedLanguage === "tr" ? "SİSTEM SESİ" : "LOCAL SYSTEM")}
                             </span>
                           </h3>
                           <p className="text-[10px] text-zinc-500 font-medium">
                             {selectedLanguage === "es"
-                              ? "Navegación Interactiva de Locución Masculina Profesional"
+                              ? `Navegación Interactiva de Locución ${selectedVoiceId === "gemini-aoede" ? "Femenina" : "Masculina"} Profesional`
                               : selectedLanguage === "de"
-                              ? "Interaktive Navigation professioneller männlicher Sprecher"
+                              ? `Interaktive Navigation professioneller ${selectedVoiceId === "gemini-aoede" ? "weiblicher" : "männlicher"} Sprecher`
                               : selectedLanguage === "tr"
-                              ? "Profesyonel Erkek Seslendirme ile Etkileşimli Gezinti"
-                              : "Interactive Navigation of Professional Male Voiceover"}
+                              ? `Profesyonel ${selectedVoiceId === "gemini-aoede" ? "Kadın" : "Erkek"} Seslendirme ile Etkileşimli Gezinti`
+                              : `Interactive Navigation of Professional ${selectedVoiceId === "gemini-aoede" ? "Female" : "Male"} Voiceover`}
                           </p>
                         </div>
                       </div>
@@ -4718,27 +4907,53 @@ export default function VideosPage() {
                       {/* Speed & Voice Selection Options */}
                       <div className="flex flex-wrap items-center gap-3">
                         {/* Voice Selector */}
-                        {ttsVoices.length > 0 && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                              {selectedLanguage === "es" ? "Voz:" : selectedLanguage === "de" ? "Stimme:" : selectedLanguage === "tr" ? "Ses:" : "Voice:"}
-                            </span>
-                            <select
-                              value={selectedVoice?.name || ""}
-                              onChange={(e) => {
-                                const voice = ttsVoices.find(v => v.name === e.target.value);
-                                if (voice) handleVoiceChange(voice);
-                              }}
-                              className="bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800/80 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer outline-none focus:border-indigo-500/50 transition-all select-none"
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                            {selectedLanguage === "es" ? "Voz:" : selectedLanguage === "de" ? "Stimme:" : selectedLanguage === "tr" ? "Ses:" : "Voice:"}
+                          </span>
+                          <select
+                            value={selectedVoiceId}
+                            onChange={(e) => handleVoiceIdChange(e.target.value)}
+                            className="bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800/80 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer outline-none focus:border-indigo-500/50 transition-all select-none"
+                          >
+                            <optgroup 
+                              label={
+                                selectedLanguage === "es" ? "Gemini Premium (IA)" :
+                                selectedLanguage === "de" ? "Gemini Premium (KI)" :
+                                selectedLanguage === "tr" ? "Gemini Premium (YZ)" :
+                                "Gemini Premium (AI)"
+                              } 
+                              className="bg-zinc-950 text-zinc-300"
                             >
-                              {ttsVoices.map((v) => (
-                                <option key={v.name} value={v.name}>
-                                  {v.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
+                              <option value="gemini-charon">
+                                Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
+                              </option>
+                              <option value="gemini-aoede">
+                                Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzählerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
+                              </option>
+                              <option value="gemini-puck">
+                                Puck ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
+                              </option>
+                            </optgroup>
+                            {ttsVoices.length > 0 && (
+                              <optgroup 
+                                label={
+                                  selectedLanguage === "es" ? "Voces del Sistema (Local Fallback)" : 
+                                  selectedLanguage === "de" ? "Systemstimmen (Lokaler Fallback)" : 
+                                  selectedLanguage === "tr" ? "Sistem Sesleri (Yerel Geri Çekilme)" : 
+                                  "System Voices (Local Fallback)"
+                                } 
+                                className="bg-zinc-950 text-zinc-300"
+                              >
+                                {ttsVoices.map((v) => (
+                                  <option key={v.name} value={`browser-${v.name}`}>
+                                    {v.name} ({v.lang})
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+                        </div>
 
                         {/* Speed Slider Control */}
                         <div className="flex items-center gap-3 bg-zinc-950/40 border border-zinc-800/30 px-3 py-1.5 rounded-xl select-none">
