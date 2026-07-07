@@ -2011,20 +2011,15 @@ export default function VideosPage() {
   const [totalSentences, setTotalSentences] = useState<number>(0);
   const [sentenceChunks, setSentenceChunks] = useState<string[]>([]);
 
-  const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
-
-  // Voice selection states (unified list containing premium Gemini voices and standard browser fallback voices)
+  // Voice selection states (premium Gemini voices)
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>("gemini-charon");
   const selectedVoiceIdRef = useRef<string>("gemini-charon");
   useEffect(() => {
     selectedVoiceIdRef.current = selectedVoiceId;
   }, [selectedVoiceId]);
 
-  // Audio queue references for pre-buffering (Double-Buffering)
+  // Audio queue references for playing
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
-  const bufferedAudioRef = useRef<HTMLAudioElement | null>(null);
-  const bufferedIndexRef = useRef<number>(-1);
 
   const stopGeminiAudio = () => {
     if (activeAudioRef.current) {
@@ -2034,12 +2029,6 @@ export default function VideosPage() {
       activeAudioRef.current.src = "";
       activeAudioRef.current = null;
     }
-    if (bufferedAudioRef.current) {
-      bufferedAudioRef.current.pause();
-      bufferedAudioRef.current.src = "";
-      bufferedAudioRef.current = null;
-    }
-    bufferedIndexRef.current = -1;
   };
 
   const getVoiceNameFromId = (id: string): string => {
@@ -2070,23 +2059,11 @@ export default function VideosPage() {
     setActiveSentenceIndex(index);
     activeSentenceIndexRef.current = index;
 
-    let audio: HTMLAudioElement;
-
-    // 1. Check if we have pre-buffered this exact index
-    if (bufferedAudioRef.current && bufferedIndexRef.current === index) {
-      audio = bufferedAudioRef.current;
-      // Promote buffered to active
-      activeAudioRef.current = audio;
-      // Reset buffered reference
-      bufferedAudioRef.current = null;
-      bufferedIndexRef.current = -1;
-    } else {
-      // Create new Audio element
-      audio = new Audio();
-      const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-      audio.src = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
-      activeAudioRef.current = audio;
-    }
+    // Create new Audio element and play immediately
+    const audio = new Audio();
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    audio.src = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    activeAudioRef.current = audio;
 
     // Apply playback rate
     audio.playbackRate = playbackRateRef.current;
@@ -2108,36 +2085,26 @@ export default function VideosPage() {
 
     audio.onerror = (e) => {
       console.error("[Gemini Audio Player Error] Failed to play chunk:", index, e);
-      // Resilient fallback! Speak with system voices.
-      fallbackToBrowserSynthesis(index);
+      // Skip failed chunk to keep user experience pleasant
+      const nextIdx = index + 1;
+      if (nextIdx < chunks.length) {
+        playGeminiSentence(nextIdx);
+      } else {
+        setIsPlayingAudio(false);
+        setIsPausedAudio(false);
+        setActiveSentenceIndex(-1);
+        activeSentenceIndexRef.current = -1;
+      }
     };
 
     // Play!
     audio.play().catch((playErr) => {
       console.error("[Gemini Play Failure] Could not play audio:", playErr);
-      fallbackToBrowserSynthesis(index);
-    });
-
-    // 2. Pre-buffer the NEXT sentence (N + 1) in the background (Double-Buffering)
-    const nextIndex = index + 1;
-    if (nextIndex < chunks.length) {
-      if (bufferedIndexRef.current !== nextIndex) {
-        const nextAudio = new Audio();
-        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-        nextAudio.src = `/api/videos/speak?text=${encodeURIComponent(chunks[nextIndex])}&voice=${voiceName}`;
-        nextAudio.preload = "auto";
-        nextAudio.load(); // Start fetching in background
-
-        bufferedAudioRef.current = nextAudio;
-        bufferedIndexRef.current = nextIndex;
-        console.log(`[Double-Buffering] Pre-buffering sentence ${nextIndex} in background...`);
+      const nextIdx = index + 1;
+      if (nextIdx < chunks.length) {
+        playGeminiSentence(nextIdx);
       }
-    }
-  };
-
-  const fallbackToBrowserSynthesis = (startIndex: number) => {
-    stopGeminiAudio();
-    queueSpeechSynthesis(startIndex);
+    });
   };
 
   // Multilingual states
@@ -2156,7 +2123,6 @@ export default function VideosPage() {
   const isPausedAudioRef = useRef(false);
   const activeSentenceIndexRef = useRef<number>(-1);
   const playbackRateRef = useRef<number>(1.0);
-  const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const sentenceChunksRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -2174,10 +2140,6 @@ export default function VideosPage() {
   useEffect(() => {
     playbackRateRef.current = playbackRate;
   }, [playbackRate]);
-
-  useEffect(() => {
-    selectedVoiceRef.current = selectedVoice;
-  }, [selectedVoice]);
 
   // TTS playback tracking state and estimated duration calculations
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -2416,296 +2378,17 @@ export default function VideosPage() {
     }
   };
 
-  // Load browser Speech Synthesis voices and filter for premium male options matching the selected language
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-
-    const loadVoices = () => {
-      const allVoices = window.speechSynthesis.getVoices();
-      
-      // Filter voices matching the selected language code ("en", "tr", "de", "es")
-      const langPrefix = selectedLanguage;
-      const langVoices = allVoices.filter(v => v.lang.toLowerCase().startsWith(langPrefix));
-      
-      // Common female voice names to exclude across languages to ensure "sin ser femenina"
-      const femaleNames = [
-        "sara", "monica", "paulina", "marisol", "helena", "angelica", "elena", 
-        "carmen", "lucia", "sabina", "soledad", "sylvia", "lupita", "penelope", 
-        "valentina", "isabela", "marta", "siri voice 2", "voice 2", "zira",
-        "samantha", "victoria", "karen", "moira", "fiona", "tessa", "veena", 
-        "susan", "zari", "hazel", "filiz", "seda", "hedda", "katrin", "marlene", "anna",
-        "kyoko"
-      ];
-      
-      // Filter out female voices to keep it strictly male/neutral
-      const maleVoices = langVoices.filter(v => {
-        const nameLower = v.name.toLowerCase();
-        return !femaleNames.some(femaleName => nameLower.includes(femaleName));
-      });
-
-      const voicesToUse = maleVoices.length > 0 ? maleVoices : langVoices;
-      setTtsVoices(voicesToUse);
-
-      if (voicesToUse.length > 0) {
-        let bestVoice: SpeechSynthesisVoice | undefined = undefined;
-
-        // Custom search rules per language to ensure premium male quality
-        if (selectedLanguage === "en") {
-          // Priority 1: Apple Premium Offline Male (Nathan, Evan, Alex) or local service Siri
-          bestVoice = voicesToUse.find(v => 
-            v.localService === true &&
-            (v.name.toLowerCase().includes("nathan") || 
-             v.name.toLowerCase().includes("evan") || 
-             v.name.toLowerCase().includes("alex"))
-          );
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.localService === true &&
-              v.name.toLowerCase().includes("siri") && 
-              (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("voice 3"))
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.localService === true);
-          }
-          // Fallback to online/any
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("natural") && 
-              (v.name.toLowerCase().includes("guy") || v.name.toLowerCase().includes("andrew") || v.name.toLowerCase().includes("ryan") || v.name.toLowerCase().includes("brian"))
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("nathan") || 
-              v.name.toLowerCase().includes("evan") || 
-              v.name.toLowerCase().includes("alex")
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("david") || v.name.toLowerCase().includes("mark") || v.name.toLowerCase().includes("google"));
-          }
-        } else if (selectedLanguage === "tr") {
-          // Priority 1: Siri voice 1 / Male (localService)
-          bestVoice = voicesToUse.find(v => v.localService === true && v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.localService === true);
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online") || v.name.toLowerCase().includes("google"));
-          }
-        } else if (selectedLanguage === "de") {
-          // Priority 1: Siri Voice 1 / Male (localService)
-          bestVoice = voicesToUse.find(v => v.localService === true && v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.localService === true);
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")) && 
-              (v.name.toLowerCase().includes("stefan") || v.name.toLowerCase().includes("conrad"))
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri") && (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male")));
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google") || v.name.toLowerCase().includes("deutsch"));
-          }
-        } else if (selectedLanguage === "es") {
-          // Priority 1: Apple Siri Voices (extremely natural, human-sounding offline voices)
-          bestVoice = voicesToUse.find(v => 
-            v.name.toLowerCase().includes("siri") && 
-            (v.name.toLowerCase().includes("voice 1") || v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("españ"))
-          );
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("siri"));
-          }
-          
-          // Priority 2: Microsoft Natural/Online Voices (Edge, etc.) - extremely fluid
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              (v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")) && 
-              (v.name.toLowerCase().includes("alvaro") || v.name.toLowerCase().includes("yago"))
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("online")
-            );
-          }
-          
-          // Priority 3: Apple Premium Local Voices (jorge, juan, julio)
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("jorge") || 
-              v.name.toLowerCase().includes("juan") || 
-              v.name.toLowerCase().includes("julio")
-            );
-          }
-          
-          // Priority 4: Google Voices (Chrome fallback, as they sound more robotic/metallic)
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => 
-              v.name.toLowerCase().includes("google") && 
-              (v.name.toLowerCase().includes("espan") || v.name.toLowerCase().includes("españ") || v.name.toLowerCase().includes("spanish"))
-            );
-          }
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.name.toLowerCase().includes("google"));
-          }
-
-          // Priority 5: Any local service voice
-          if (!bestVoice) {
-            bestVoice = voicesToUse.find(v => v.localService === true);
-          }
-        }
-
-        // Fallback
-        if (!bestVoice) {
-          bestVoice = voicesToUse[0];
-        }
-
-        setSelectedVoice(bestVoice);
-      } else {
-        setSelectedVoice(null);
-      }
-    };
-
-    loadVoices();
-    if (window.speechSynthesis.addEventListener) {
-      window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
-    } else if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-
-    return () => {
-      if (window.speechSynthesis.removeEventListener) {
-        window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
-      } else if (window.speechSynthesis.onvoiceschanged !== undefined) {
-        window.speechSynthesis.onvoiceschanged = null;
-      }
-    };
-  }, [selectedLanguage]);
-
-
-  // Cancel any speech synthesis and stop Gemini audio when active video changes or component unmounts
+  // Stop Gemini audio when active video changes or component unmounts
   useEffect(() => {
     return () => {
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
       stopGeminiAudio();
     };
   }, [activeStudyVideo]);
-
-  const queueSpeechSynthesis = (startIndex: number) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-
-    // Clear any active queue/speaking
-    window.speechSynthesis.cancel();
-
-    const chunks = sentenceChunksRef.current;
-    if (startIndex < 0 || startIndex >= chunks.length) {
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      setActiveSentenceIndex(-1);
-      activeSentenceIndexRef.current = -1;
-      return;
-    }
-
-    // Set state
-    setIsPlayingAudio(true);
-    setIsPausedAudio(false);
-    setActiveSentenceIndex(startIndex);
-    activeSentenceIndexRef.current = startIndex;
-
-    // Maintain a local pointer to track what we have already sent to the browser
-    let nextIndexToQueue = startIndex;
-
-    const createUtterance = (index: number): SpeechSynthesisUtterance => {
-      const utterance = new SpeechSynthesisUtterance(chunks[index]);
-      
-      if (selectedVoiceRef.current) {
-        utterance.voice = selectedVoiceRef.current;
-      }
-      
-      utterance.rate = playbackRateRef.current;
-      utterance.pitch = 1.0; // Keep perfect natural tone (1.0 preserves the deep-learning neural voice models' excellent diction)
-
-      utterance.onstart = () => {
-        // Only update index if we are still actively playing
-        if (isPlayingAudioRef.current) {
-          setActiveSentenceIndex(index);
-          activeSentenceIndexRef.current = index;
-
-          // As soon as this utterance starts, pre-buffer the next one in the queue (Double-Buffering)
-          // to maintain gapless playback while ensuring Chrome never loses the high-quality voice select
-          if (nextIndexToQueue === index && index + 1 < chunks.length) {
-            nextIndexToQueue = index + 1;
-            const nextUtterance = createUtterance(nextIndexToQueue);
-            window.speechSynthesis.speak(nextUtterance);
-          }
-        }
-      };
-
-      utterance.onend = () => {
-        if (index === chunks.length - 1) {
-          if (isPlayingAudioRef.current) {
-            setIsPlayingAudio(false);
-            setIsPausedAudio(false);
-            setActiveSentenceIndex(-1);
-            activeSentenceIndexRef.current = -1;
-          }
-        }
-      };
-
-      utterance.onerror = (e) => {
-        const actualErrors = [
-          "audio-busy",
-          "audio-hardware",
-          "network",
-          "synthesis-unavailable",
-          "synthesis-failed",
-          "language-unavailable",
-          "voice-unavailable"
-        ];
-
-        if (actualErrors.includes(e.error)) {
-          console.error("SpeechSynthesisUtterance actual error:", e.error, e);
-          setIsPlayingAudio(false);
-          setIsPausedAudio(false);
-        } else {
-          console.log("SpeechSynthesis status event (ignored):", e.error || "no-error-code");
-        }
-      };
-
-      return utterance;
-    };
-
-    // Speak the current starting chunk
-    const firstUtterance = createUtterance(startIndex);
-    window.speechSynthesis.speak(firstUtterance);
-
-    // Immediately pre-queue the next chunk as a buffer so there's always one ready
-    if (startIndex + 1 < chunks.length) {
-      nextIndexToQueue = startIndex + 1;
-      const secondUtterance = createUtterance(nextIndexToQueue);
-      window.speechSynthesis.speak(secondUtterance);
-    }
-  };
 
   const startAudioSummary = () => {
     const chunks = sentenceChunksRef.current;
     if (chunks.length === 0) return;
 
-    // Stop standard synthesis
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
     // Stop any active audio
     stopGeminiAudio();
 
@@ -2719,25 +2402,15 @@ export default function VideosPage() {
     setActiveSentenceIndex(startIdx);
     activeSentenceIndexRef.current = startIdx;
 
-    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
-      playGeminiSentence(startIdx);
-    } else {
-      queueSpeechSynthesis(startIdx);
-    }
+    playGeminiSentence(startIdx);
   };
 
   const pauseAudio = () => {
     setIsPausedAudio(true);
     isPausedAudioRef.current = true;
 
-    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause();
-      }
-    } else {
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.pause();
-      }
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
     }
   };
 
@@ -2745,31 +2418,16 @@ export default function VideosPage() {
     setIsPausedAudio(false);
     isPausedAudioRef.current = false;
 
-    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
-      if (activeAudioRef.current) {
-        activeAudioRef.current.play().catch((err) => {
-          console.error("Failed to resume audio:", err);
-          fallbackToBrowserSynthesis(activeSentenceIndexRef.current);
-        });
-      } else {
-        playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
-      }
+    if (activeAudioRef.current) {
+      activeAudioRef.current.play().catch((err) => {
+        console.error("Failed to resume audio:", err);
+      });
     } else {
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        if (window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
-        } else {
-          queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
-        }
-      }
+      playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
     }
   };
 
   const stopAudio = () => {
-    // Stop standard synthesis
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
     // Stop any active audio
     stopGeminiAudio();
 
@@ -2788,11 +2446,7 @@ export default function VideosPage() {
     activeSentenceIndexRef.current = targetIdx;
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
-      if (selectedVoiceIdRef.current.startsWith("gemini-")) {
-        playGeminiSentence(targetIdx);
-      } else {
-        queueSpeechSynthesis(targetIdx);
-      }
+      playGeminiSentence(targetIdx);
     }
   };
 
@@ -2800,14 +2454,8 @@ export default function VideosPage() {
     setPlaybackRate(newRate);
     playbackRateRef.current = newRate;
 
-    if (selectedVoiceIdRef.current.startsWith("gemini-")) {
-      if (activeAudioRef.current) {
-        activeAudioRef.current.playbackRate = newRate;
-      }
-    } else {
-      if (immediateRestart && isPlayingAudioRef.current && !isPausedAudioRef.current) {
-        queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
-      }
+    if (activeAudioRef.current) {
+      activeAudioRef.current.playbackRate = newRate;
     }
   };
 
@@ -2815,29 +2463,9 @@ export default function VideosPage() {
     setSelectedVoiceId(voiceId);
     selectedVoiceIdRef.current = voiceId;
 
-    if (voiceId.startsWith("browser-")) {
-      const browserVoiceName = voiceId.substring(8);
-      const voice = ttsVoices.find(v => v.name === browserVoiceName);
-      if (voice) {
-        setSelectedVoice(voice);
-        selectedVoiceRef.current = voice;
-      }
-    } else {
-      setSelectedVoice(null);
-      selectedVoiceRef.current = null;
-    }
-
     // If already playing and not paused, apply change immediately
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
-      if (voiceId.startsWith("gemini-")) {
-        if (typeof window !== "undefined" && window.speechSynthesis) {
-          window.speechSynthesis.cancel();
-        }
-        playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
-      } else {
-        stopGeminiAudio();
-        queueSpeechSynthesis(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
-      }
+      playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
     }
   };
 
@@ -4887,14 +4515,12 @@ export default function VideosPage() {
                               ? "Yapay Zeka Anlatımlı Sesli Özet"
                               : "AI-Narrated Audio Summary"}
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20 uppercase">
-                              {selectedVoiceId.startsWith("gemini-") 
-                                ? (selectedLanguage === "es" ? "PREMIUM IA" : selectedLanguage === "de" ? "PREMIUM KI" : selectedLanguage === "tr" ? "PREMIUM YZ" : "PREMIUM AI")
-                                : (selectedLanguage === "es" ? "SISTEMA LOCAL" : selectedLanguage === "de" ? "SYSTEMSTIMME" : selectedLanguage === "tr" ? "SİSTEM SESİ" : "LOCAL SYSTEM")}
+                              {selectedLanguage === "es" ? "PREMIUM IA" : selectedLanguage === "de" ? "PREMIUM KI" : selectedLanguage === "tr" ? "PREMIUM YZ" : "PREMIUM AI"}
                             </span>
                           </h3>
                           <p className="text-[10px] text-zinc-500 font-medium">
                             {selectedLanguage === "es"
-                              ? `Navegación Interactiva de Locución ${selectedVoiceId === "gemini-aoede" ? "Femenina" : "Masculina"} Profesional`
+                              ? `Navegación Interactive de Locución ${selectedVoiceId === "gemini-aoede" ? "Femenina" : "Masculina"} Profesional`
                               : selectedLanguage === "de"
                               ? `Interaktive Navigation professioneller ${selectedVoiceId === "gemini-aoede" ? "weiblicher" : "männlicher"} Sprecher`
                               : selectedLanguage === "tr"
@@ -4916,42 +4542,15 @@ export default function VideosPage() {
                             onChange={(e) => handleVoiceIdChange(e.target.value)}
                             className="bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800/80 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer outline-none focus:border-indigo-500/50 transition-all select-none"
                           >
-                            <optgroup 
-                              label={
-                                selectedLanguage === "es" ? "Gemini Premium (IA)" :
-                                selectedLanguage === "de" ? "Gemini Premium (KI)" :
-                                selectedLanguage === "tr" ? "Gemini Premium (YZ)" :
-                                "Gemini Premium (AI)"
-                              } 
-                              className="bg-zinc-950 text-zinc-300"
-                            >
-                              <option value="gemini-charon">
-                                Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
-                              </option>
-                              <option value="gemini-aoede">
-                                Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzählerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
-                              </option>
-                              <option value="gemini-puck">
-                                Puck ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
-                              </option>
-                            </optgroup>
-                            {ttsVoices.length > 0 && (
-                              <optgroup 
-                                label={
-                                  selectedLanguage === "es" ? "Voces del Sistema (Local Fallback)" : 
-                                  selectedLanguage === "de" ? "Systemstimmen (Lokaler Fallback)" : 
-                                  selectedLanguage === "tr" ? "Sistem Sesleri (Yerel Geri Çekilme)" : 
-                                  "System Voices (Local Fallback)"
-                                } 
-                                className="bg-zinc-950 text-zinc-300"
-                              >
-                                {ttsVoices.map((v) => (
-                                  <option key={v.name} value={`browser-${v.name}`}>
-                                    {v.name} ({v.lang})
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
+                            <option value="gemini-charon">
+                              Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
+                            </option>
+                            <option value="gemini-aoede">
+                              Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzälerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
+                            </option>
+                            <option value="gemini-puck">
+                              Puck ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
+                            </option>
                           </select>
                         </div>
 
