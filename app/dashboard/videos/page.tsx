@@ -2022,6 +2022,7 @@ export default function VideosPage() {
   // Audio queue references for playing
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
+  const prefetchedAudioRef = useRef<{ index: number; audio: HTMLAudioElement } | null>(null);
 
   const stopGeminiAudio = () => {
     if (activeAudioRef.current) {
@@ -2030,6 +2031,11 @@ export default function VideosPage() {
       activeAudioRef.current.onerror = null;
       activeAudioRef.current.src = "";
       activeAudioRef.current = null;
+    }
+    if (prefetchedAudioRef.current) {
+      prefetchedAudioRef.current.audio.pause();
+      prefetchedAudioRef.current.audio.src = "";
+      prefetchedAudioRef.current = null;
     }
     if (activeObjectUrlRef.current) {
       URL.revokeObjectURL(activeObjectUrlRef.current);
@@ -2054,19 +2060,35 @@ export default function VideosPage() {
       return;
     }
 
-    // Stop active audio if any
-    stopGeminiAudio();
+    // Stop active audio if any (but do NOT pause or delete the prefetch if it matches the current index)
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current.onended = null;
+      activeAudioRef.current.onerror = null;
+      activeAudioRef.current.src = "";
+      activeAudioRef.current = null;
+    }
 
     setIsPlayingAudio(true);
     setIsPausedAudio(false);
     setActiveSentenceIndex(index);
     activeSentenceIndexRef.current = index;
 
-    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-    const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    let audio: HTMLAudioElement;
 
-    const audio = new Audio();
-    audio.src = audioSrc;
+    // Use prefetched audio if it exists for this sentence to achieve instantaneous transition
+    if (prefetchedAudioRef.current && prefetchedAudioRef.current.index === index) {
+      console.log(`[Gemini Audio Queue] Using prefetched audio for sentence ${index}`);
+      audio = prefetchedAudioRef.current.audio;
+      prefetchedAudioRef.current = null; // Clear since it is now active
+    } else {
+      console.log(`[Gemini Audio Queue] No prefetch found for sentence ${index}, loading on-demand`);
+      const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+      const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+      audio = new Audio();
+      audio.src = audioSrc;
+    }
+
     activeAudioRef.current = audio;
 
     // Apply playback rate
@@ -2094,7 +2116,7 @@ export default function VideosPage() {
       setAudioError(`Error al reproducir el fragmento de audio (Código ${audio.error?.code || 'desconocido'}).`);
     };
 
-    // Play!
+    // Play current sentence immediately
     audio.play().catch((playErr: any) => {
       if (playErr.name === "AbortError") {
         console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
@@ -2109,6 +2131,22 @@ export default function VideosPage() {
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
     });
+
+    // Prefetch the NEXT sentence in the background to hide the Gemini API synthesis latency
+    const nextIdx = index + 1;
+    if (nextIdx < chunks.length) {
+      const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+      const nextAudioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[nextIdx])}&voice=${voiceName}`;
+      
+      console.log(`[Gemini Audio Queue] Prefetching sentence ${nextIdx} in background...`);
+      const nextAudio = new Audio();
+      nextAudio.src = nextAudioSrc;
+      nextAudio.load(); // Triggers the network request and buffers content
+      prefetchedAudioRef.current = {
+        index: nextIdx,
+        audio: nextAudio
+      };
+    }
   };
 
   // Multilingual states
