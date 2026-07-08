@@ -335,10 +335,19 @@ export async function transcribeVideoCore(params: {
           throw new Error("Supadata response body does not contain a valid content array.");
         }
       } catch (supaErr: unknown) {
-        console.warn(`[Transcript] Supadata API failed: ${supaErr instanceof Error ? supaErr.message : String(supaErr)}. Falling back to local scraper...`);
+        const errMessage = supaErr instanceof Error ? supaErr.message : String(supaErr);
+        if (process.env.VERCEL) {
+          console.error(`[Transcript] Supadata API failed on Vercel: ${errMessage}. Local scraper fallback disabled (Fail-Fast).`);
+          throw new Error(`Supadata API failed on Vercel: ${errMessage}. Local scraper fallback disabled.`);
+        }
+        console.warn(`[Transcript] Supadata API failed: ${errMessage}. Falling back to local scraper...`);
         transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
       }
     } else {
+      if (process.env.VERCEL) {
+        console.error("[Transcript] SUPADATA_API_KEY not set on Vercel. Local scraper fallback disabled (Fail-Fast).");
+        throw new Error("SUPADATA_API_KEY not configured. Local scraper fallback disabled on Vercel.");
+      }
       console.log(`[Transcript] SUPADATA_API_KEY not set. Using local youtube-transcript scraper for ID: ${actualYtId}...`);
       transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
     }
