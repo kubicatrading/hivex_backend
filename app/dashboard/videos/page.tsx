@@ -2020,6 +2020,7 @@ export default function VideosPage() {
   }, [selectedVoiceId]);
 
   // Audio queue references for playing
+  const domAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
   const prefetchedAudioRef = useRef<{ index: number; audio: HTMLAudioElement } | null>(null);
@@ -2057,13 +2058,15 @@ export default function VideosPage() {
   };
 
   const stopGeminiAudio = () => {
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current.onended = null;
-      activeAudioRef.current.onerror = null;
-      activeAudioRef.current.src = "";
-      activeAudioRef.current = null;
+    const audio = activeAudioRef.current || domAudioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.onended = null;
+      audio.onerror = null;
+      audio.src = "";
     }
+    activeAudioRef.current = null;
+
     if (prefetchedAudioRef.current) {
       prefetchedAudioRef.current.audio.pause();
       prefetchedAudioRef.current.audio.src = "";
@@ -2102,10 +2105,14 @@ export default function VideosPage() {
     activeSentenceIndexRef.current = index;
 
     // Retrieve or initialize the single, persistent Audio element (unlocked by user gesture on Play)
-    if (!activeAudioRef.current) {
-      activeAudioRef.current = new Audio();
+    if (!activeAudioRef.current && domAudioRef.current) {
+      activeAudioRef.current = domAudioRef.current;
     }
-    const audio = activeAudioRef.current;
+    const audio = activeAudioRef.current || domAudioRef.current;
+    if (!audio) {
+      console.warn("[Gemini Audio Queue] DOM audio element is not yet loaded.");
+      return;
+    }
 
     // Temporarily clear event handlers to prevent ghost triggers during source change
     audio.onended = null;
@@ -4850,7 +4857,8 @@ export default function VideosPage() {
                             </div>
                           )}
                           <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4 w-full bg-zinc-950/40 border border-zinc-900/60 p-3.5 md:p-4 rounded-xl md:rounded-2xl select-none">
-                            
+                            {/* Hidden DOM Audio Player to prevent iOS Safari background execution suspension */}
+                            <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
                             {/* Controls: Play/Pause, Reset */}
                             <div className="flex items-center gap-2 md:gap-3 shrink-0 w-full md:w-auto justify-center md:justify-start">
                               {isPlayingAudio && !isPausedAudio ? (
