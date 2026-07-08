@@ -150,7 +150,13 @@ async function handleSync(request: Request) {
 
         // Fetch actual duration from YouTube watch page
         console.log(`Fetching real duration for YouTube video ${videoId} (${title})...`);
-        let durationSecs = await fetchRealYoutubeDuration(videoId);
+        const { duration: durationSecsResult, isLive } = await fetchRealYoutubeDuration(videoId);
+        let durationSecs = durationSecsResult;
+
+        if (isLive) {
+          console.log(`[Sync] Skipping video because it is classified as a Live Stream: ${title}`);
+          continue;
+        }
 
         if (durationSecs === 0) {
           console.warn(`[Sync] Failed to scrape duration for video ${videoId} (${title}). Likely blocked by YouTube. Applying smart fallback.`);
@@ -315,7 +321,7 @@ function formatSecondsToDuration(totalSeconds: number): string {
 }
 
 // Helper to fetch and extract actual YouTube video duration
-async function fetchRealYoutubeDuration(videoId: string): Promise<number> {
+async function fetchRealYoutubeDuration(videoId: string): Promise<{ duration: number; isLive: boolean }> {
   try {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const response = await fetch(url, {
@@ -326,9 +332,20 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<number> {
     });
     if (!response.ok) {
       console.warn(`Failed to fetch watch page for video ${videoId}: status ${response.status}`);
-      return 0;
+      return { duration: 0, isLive: false };
     }
     const html = await response.text();
+
+    // Check for live stream indicators
+    const hasLiveContent = html.includes('"isLiveContent":true');
+    const hasLiveBroadcast = html.includes('itemprop="isLiveBroadcast"');
+    const hasLiveStream = html.includes('"isLiveStream":true');
+    const hasIsLive = html.includes('"isLive":true');
+    const isLive = hasLiveContent || hasLiveBroadcast || hasLiveStream || hasIsLive;
+
+    if (isLive) {
+      return { duration: 0, isLive: true };
+    }
 
     // 1. Try meta tag itemprop="duration"
     const metaMatch = /itemprop="duration"\s+content="([^"]+)"/i.exec(html) ||
@@ -338,7 +355,7 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<number> {
       const isoDuration = metaMatch[1];
       const seconds = parseISO8601Duration(isoDuration);
       if (seconds > 0) {
-        return seconds;
+        return { duration: seconds, isLive: false };
       }
     }
 
@@ -350,11 +367,11 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<number> {
         const jsonStr = playerResponseMatch[1];
         const lengthMatch = /"lengthSeconds"\s*:\s*"(\d+)"/.exec(jsonStr);
         if (lengthMatch) {
-          return parseInt(lengthMatch[1], 10);
+          return { duration: parseInt(lengthMatch[1], 10), isLive: false };
         }
         const obj = JSON.parse(jsonStr);
         if (obj?.videoDetails?.lengthSeconds) {
-          return parseInt(obj.videoDetails.lengthSeconds, 10);
+          return { duration: parseInt(obj.videoDetails.lengthSeconds, 10), isLive: false };
         }
       } catch (e) {
         console.warn(`Failed to parse ytInitialPlayerResponse JSON for ${videoId}:`, e);
@@ -364,13 +381,13 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<number> {
     // 3. Fallback direct regex on entire HTML
     const directMatch = /"lengthSeconds"\s*:\s*"(\d+)"/.exec(html);
     if (directMatch) {
-      return parseInt(directMatch[1], 10);
+      return { duration: parseInt(directMatch[1], 10), isLive: false };
     }
 
-    return 0;
+    return { duration: 0, isLive: false };
   } catch (error) {
     console.error(`Error in fetchRealYoutubeDuration for ${videoId}:`, error);
-    return 0;
+    return { duration: 0, isLive: false };
   }
 }
 

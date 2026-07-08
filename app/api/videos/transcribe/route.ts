@@ -380,9 +380,36 @@ export async function transcribeVideoCore(params: {
     }
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.log(`[Transcript Fallback] Fetching transcript failed for ID ${actualYtId}: ${errMsg}. Falling back to lightweight metadata analysis (Option 1)...`);
-    isLightweightFallback = true;
-    cleanRealTranscript = "Este vídeo es una transmisión en vivo y no tiene transcripción disponible.";
+    console.log(`[Transcript Fallback] Fetching transcript failed for ID ${actualYtId}: ${errMsg}. Checking if it is a Live stream...`);
+    
+    // Check if it is a live stream by fetching the watch page HTML
+    let isLive = false;
+    try {
+      const url = `https://www.youtube.com/watch?v=${actualYtId}`;
+      const watchResponse = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      });
+      if (watchResponse.ok) {
+        const html = await watchResponse.text();
+        const hasLiveContent = html.includes('"isLiveContent":true');
+        const hasLiveBroadcast = html.includes('itemprop="isLiveBroadcast"');
+        const hasLiveStream = html.includes('"isLiveStream":true');
+        const hasIsLive = html.includes('"isLive":true');
+        isLive = hasLiveContent || hasLiveBroadcast || hasLiveStream || hasIsLive;
+      }
+    } catch (checkErr) {
+      console.error(`[Transcript Fallback] Failed to fetch watch page to check live status:`, checkErr);
+    }
+
+    if (isLive) {
+      throw new Error(`DISCARD_VIDEO: Live stream detected for video ID ${actualYtId}`);
+    }
+
+    // If not a live stream, throw a normal error indicating subtitles/transcript failed
+    throw new Error(`Subtitles download failed for standard video ${actualYtId}: ${errMsg}`);
   }
 
   if (isLightweightFallback) {

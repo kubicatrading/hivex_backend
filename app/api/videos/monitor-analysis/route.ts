@@ -414,6 +414,28 @@ export async function GET(request: NextRequest) {
         const errorMsg = err?.message || String(err);
         console.error(`[Monitor Cron] Failed to analyze video "${video.title}":`, errorMsg);
         
+        if (errorMsg.includes("DISCARD_VIDEO")) {
+          console.log(`[Monitor Cron] Discarding live video from database: ${video.title} (${video.id})`);
+          const { error: deleteErr } = await supabaseAdmin
+            .from("documents")
+            .delete()
+            .eq("id", video.id);
+          
+          if (deleteErr) {
+            console.error(`[Monitor Cron] Failed to delete video ${video.title} from Supabase:`, deleteErr);
+          } else {
+            console.log(`[Monitor Cron] Discarded video ${video.title} successfully.`);
+          }
+
+          results.push({
+            id: video.id,
+            title: video.title,
+            status: "discarded",
+            reason: errorMsg
+          });
+          continue;
+        }
+
         const failedAttempts = (video.metadata?.analysis_failed_attempts || 0) + 1;
         const updatedMetadata = {
           ...(video.metadata || {}),
