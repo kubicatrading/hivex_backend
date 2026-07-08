@@ -1992,6 +1992,11 @@ export default function VideosPage() {
   const [activeStudyVideo, setActiveStudyVideo] = useState<VideoDocument | null>(null);
   const [playerTime, setPlayerTime] = useState<number | null>(null);
   const [playingChartIdx, setPlayingChartIdx] = useState<number | null>(null);
+  
+  // Custom deep-linked video segment states
+  const [urlStartSeconds, setUrlStartSeconds] = useState<number | null>(null);
+  const [urlEndSeconds, setUrlEndSeconds] = useState<number | null>(null);
+  const [mainPlayerPlaying, setMainPlayerPlaying] = useState<boolean>(false);
 
   // Reset playing chart index when active video changes
   useEffect(() => {
@@ -3123,11 +3128,32 @@ export default function VideosPage() {
       if (matched) {
         console.log(`[Deep Link] Direct URL deep-link matched video: ${matched.title}. Setting as active study video.`);
         setActiveStudyVideo(matched);
+        
+        // Parse start and end parameters for the deep-linked video clip
+        const startVal = searchParams.get("start") || searchParams.get("t");
+        const endVal = searchParams.get("end");
+        if (startVal) {
+          const parsedStart = parseInt(startVal, 10);
+          if (!isNaN(parsedStart)) {
+            setUrlStartSeconds(parsedStart);
+            setPlayerTime(parsedStart); // Instantly seek original player to the target start time
+          }
+        } else {
+          setUrlStartSeconds(null);
+        }
+        if (endVal) {
+          const parsedEnd = parseInt(endVal, 10);
+          if (!isNaN(parsedEnd)) {
+            setUrlEndSeconds(parsedEnd);
+          }
+        } else {
+          setUrlEndSeconds(null);
+        }
       } else {
         console.warn(`[Deep Link] Video with ID/URL-snippet "${videoIdParam}" not found in videos list.`);
       }
     }
-  }, [videos, videoIdParam]);
+  }, [videos, videoIdParam, searchParams]);
 
   const filteredVideos = videos.filter((v: VideoDocument) => {
     const ch = v.metadata?.channel_title || "";
@@ -3990,14 +4016,35 @@ export default function VideosPage() {
     }
   }, [selectedVideo]);
 
+  const lastActiveVideoIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     // Reset player time and expansion flags when changing study video
-    setPlayerTime(null);
+    if (activeStudyVideo) {
+      if (lastActiveVideoIdRef.current !== activeStudyVideo.id) {
+        lastActiveVideoIdRef.current = activeStudyVideo.id;
+        
+        // Only reset if it is not the deep-linked video
+        const deepLinkId = searchParams.get("id") || searchParams.get("video");
+        if (activeStudyVideo.id !== deepLinkId) {
+          setPlayerTime(null);
+          setUrlStartSeconds(null);
+          setUrlEndSeconds(null);
+          setMainPlayerPlaying(false);
+        }
+      }
+    } else {
+      lastActiveVideoIdRef.current = null;
+      setPlayerTime(null);
+      setUrlStartSeconds(null);
+      setUrlEndSeconds(null);
+      setMainPlayerPlaying(false);
+    }
     setTranscriptionExpanded(false);
     setSummaryExpanded(true);
     setChartsExpanded(false);
     setReportExpanded(false);
-  }, [activeStudyVideo]);
+  }, [activeStudyVideo, searchParams]);
 
   const handleCreateVideo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4185,14 +4232,26 @@ export default function VideosPage() {
               </div>
               <div className="relative w-full aspect-video bg-zinc-950">
                 {isYt ? (
-                  <iframe
-                    src={getEmbedUrl(activeStudyVideo.file_url, playerTime)}
-                    title={`${activeStudyVideo.title} (Original)`}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                    className="w-full h-full"
-                  />
+                  urlStartSeconds !== null && urlEndSeconds !== null ? (
+                    <YouTubeSnapshotPlayer
+                      ytId={getYoutubeId(activeStudyVideo.file_url) || ""}
+                      targetTime={urlStartSeconds}
+                      endSeconds={urlEndSeconds}
+                      selectedLanguage={selectedLanguage}
+                      isPlaying={mainPlayerPlaying}
+                      onEnded={() => setMainPlayerPlaying(false)}
+                      onPlayingStateChange={(playing) => setMainPlayerPlaying(playing)}
+                    />
+                  ) : (
+                    <iframe
+                      src={getEmbedUrl(activeStudyVideo.file_url, playerTime)}
+                      title={`${activeStudyVideo.title} (Original)`}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                      className="w-full h-full"
+                    />
+                  )
                 ) : (
                   <video
                     ref={studyVideoRef}
