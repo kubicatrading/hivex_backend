@@ -308,6 +308,8 @@ export async function transcribeVideoCore(params: {
 
   // Fetch real YouTube transcript using Supadata API (Primary in production) or local library (Local development fallback)
   let rawTranscriptText = "";
+  let isLightweightFallback = false;
+
   try {
     let transcriptLines: { text: string; offset: number; duration: number }[] = [];
 
@@ -374,14 +376,31 @@ export async function transcribeVideoCore(params: {
 
       console.log(`Successfully fetched ${transcriptLines.length} transcript lines from YouTube with injected timestamps!`);
     } else {
-      throw new Error(`La descarga de subtítulos para el vídeo con ID ${actualYtId} retornó un conjunto vacío. Por favor, asegúrate de que el vídeo cuenta con subtítulos en YouTube.`);
+      throw new Error(`La descarga de subtítulos para el vídeo con ID ${actualYtId} retornó un conjunto vacío.`);
     }
   } catch (err: unknown) {
-    throw new Error(`Error al intentar descargar subtítulos para el vídeo con ID ${actualYtId}: ${err instanceof Error ? err.message : String(err)}`);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.log(`[Transcript Fallback] Fetching transcript failed for ID ${actualYtId}: ${errMsg}. Falling back to lightweight metadata analysis (Option 1)...`);
+    isLightweightFallback = true;
+    cleanRealTranscript = "Este vídeo es una transmisión en vivo y no tiene transcripción disponible.";
   }
 
-  // Build high-fidelity unified refinement and summary prompt focusing strictly on analysis output to prevent token limits truncation
-  promptText = `Below is the raw, auto-generated transcript of a YouTube video titled "${title}". Every spoken line is prefixed with its starting timestamp in brackets like [MM:SS] or [HH:MM:SS].
+  if (isLightweightFallback) {
+    promptText = `You are processing a YouTube video where subtitles/transcription are unavailable (e.g., because it is a live stream or transcripts are disabled).
+You must perform a high-fidelity meta-analysis based ONLY on the video's Title and Description:
+- Title: "${title}"
+- Description: "${description || "No description provided."}"
+- Duration: ${duration}
+
+The "analysis" property MUST be written entirely in English with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
+
+You MUST return a JSON object with exactly the following structure:
+{
+  "analysis": "### 📝 Detailed Content Summary\\n\\n*Este vídeo es una transmisión en vivo y no tiene transcripción disponible.*\\n\\nProvide a comprehensive summary and thematic breakdown of what the video covers based on its title and description. Structure your overview with clear paragraphs and bullet points detailing the expected topics, concepts, and market context.\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\n*No se detectaron gráficos en este vídeo al tratarse de una transmisión en vivo sin transcripción temporalizada.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points in English using hyphens (-) and bold text to highlight key concepts and strategic insights based on the available title and description metadata:\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+}`;
+  } else {
+    // Build high-fidelity unified refinement and summary prompt focusing strictly on analysis output to prevent token limits truncation
+    promptText = `Below is the raw, auto-generated transcript of a YouTube video titled "${title}". Every spoken line is prefixed with its starting timestamp in brackets like [MM:SS] or [HH:MM:SS].
 Your task is to analyze it and generate an objective summary, detected charts, and a detailed investment analysis report in English.
 
 The "analysis" property MUST be written entirely in English with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
@@ -393,6 +412,7 @@ You MUST return a JSON object with exactly the following structure:
 
 Raw transcript text:
 ${rawTranscriptText}`;
+  }
 
   // Query Gemini with a highly resilient sequential fallback mechanism
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "558326121700-ufp44b64pdnb0cisl7nu3c2dqc3vu82k.apps.googleusercontent.com";
@@ -550,9 +570,13 @@ ${rawTranscriptText}`;
   }
 
   if (finalOutput && finalOutput.length > 0) {
+    let finalModelName = successfulModel;
+    if (isLightweightFallback) {
+      finalModelName = `${successfulModel}\nEste vídeo es una transmisión en vivo y no tiene transcripción disponible.`;
+    }
     return {
       transcription: finalOutput,
-      modelUsed: successfulModel
+      modelUsed: finalModelName
     };
   } else {
     throw new Error(

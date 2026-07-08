@@ -3971,6 +3971,9 @@ export default function VideosPage() {
     const transcriptionModel = activeStudyVideo.metadata?.transcription
       ? (activeStudyVideo.metadata.transcription_model || "Google Gemini (Cached)")
       : (activeState?.model ?? null);
+    const modelParts = transcriptionModel ? String(transcriptionModel).split("\n") : [];
+    const displayModelName = modelParts[0] || null;
+    const liveStreamWarning = modelParts[1] || null;
     const transcriptionErrorFinal = translationError || (activeStudyVideo.metadata?.transcription ? null : (activeState?.error ?? null));
 
     return (
@@ -4121,7 +4124,7 @@ export default function VideosPage() {
                                   {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
                                 </span>
                                 <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                  {transcribing ? (selectedLanguage === "es" ? "Google Gemini 3.5 Flash (Llamando...)" : selectedLanguage === "de" ? "Google Gemini 3.5 Flash (Wird aufgerufen...)" : selectedLanguage === "tr" ? "Google Gemini 3.5 Flash (Aranıyor...)" : "Google Gemini 3.5 Flash (Calling...)") : transcriptionModel}
+                                  {transcribing ? (selectedLanguage === "es" ? "Google Gemini 3.5 Flash (Llamando...)" : selectedLanguage === "de" ? "Google Gemini 3.5 Flash (Wird aufgerufen...)" : selectedLanguage === "tr" ? "Google Gemini 3.5 Flash (Aranıyor...)" : "Google Gemini 3.5 Flash (Calling...)") : displayModelName}
                                 </span>
                               </div>
                               <div>
@@ -4133,6 +4136,12 @@ export default function VideosPage() {
                                   {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
                                 </span>
                               </div>
+                            </div>
+                          )}
+                          {!transcribing && liveStreamWarning && (
+                            <div className="mt-1 text-xs font-semibold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-3 py-2 rounded-lg flex items-center gap-2">
+                              <span>⚠️</span>
+                              <span>{liveStreamWarning}</span>
                             </div>
                           )}
 
@@ -4284,28 +4293,36 @@ export default function VideosPage() {
                             <>
                               {/* Model Consumption Banner */}
                               {transcriptionModel && (
-                                <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between flex-wrap gap-2 pb-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="relative flex h-2 w-2">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                    </div>
-                                    <span className="text-xs font-bold text-zinc-400">
-                                      {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
-                                    </span>
-                                    <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                      {transcriptionModel}
-                                    </span>
-                                  </div>
-                                  <div>
-                                    <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
-                                      <span className="relative flex h-1.5 w-1.5">
+                                <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex flex-col gap-3 pb-3">
+                                  <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="relative flex h-2 w-2">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                      </div>
+                                      <span className="text-xs font-bold text-zinc-400">
+                                        {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
                                       </span>
-                                      {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
-                                    </span>
+                                      <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
+                                        {displayModelName}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                        <span className="relative flex h-1.5 w-1.5">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                        </span>
+                                        {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
+                                      </span>
+                                    </div>
                                   </div>
+                                  {liveStreamWarning && (
+                                    <div className="mt-1 text-xs font-semibold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-3 py-2 rounded-lg flex items-center gap-2">
+                                      <span>⚠️</span>
+                                      <span>{liveStreamWarning}</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               <MarkdownRenderer 
@@ -4378,28 +4395,36 @@ export default function VideosPage() {
                               <>
                                 {/* Model Consumption Banner */}
                                 {transcriptionModel && (
-                                  <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between flex-wrap gap-2 pb-3">
-                                    <div className="flex items-center gap-2">
-                                      <div className="relative flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                      </div>
-                                      <span className="text-xs font-bold text-zinc-400">
-                                        {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
-                                      </span>
-                                      <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                        {transcriptionModel}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
-                                        <span className="relative flex h-1.5 w-1.5">
+                                  <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex flex-col gap-3 pb-3">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <div className="relative flex h-2 w-2">
                                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                        </div>
+                                        <span className="text-xs font-bold text-zinc-400">
+                                          {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
                                         </span>
-                                        {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
-                                      </span>
+                                        <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
+                                          {displayModelName}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                          <span className="relative flex h-1.5 w-1.5">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                          </span>
+                                          {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
+                                        </span>
+                                      </div>
                                     </div>
+                                    {liveStreamWarning && (
+                                      <div className="mt-1 text-xs font-semibold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-3 py-2 rounded-lg flex items-center gap-2">
+                                        <span>⚠️</span>
+                                        <span>{liveStreamWarning}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
@@ -4893,28 +4918,36 @@ export default function VideosPage() {
                             <>
                               {/* Model Consumption Banner */}
                               {transcriptionModel && (
-                                <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex items-center justify-between flex-wrap gap-2 pb-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="relative flex h-2 w-2">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                    </div>
-                                    <span className="text-xs font-bold text-zinc-400">
-                                      {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
-                                    </span>
-                                    <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                      {transcriptionModel}
-                                    </span>
-                                  </div>
-                                  <div>
-                                    <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
-                                      <span className="relative flex h-1.5 w-1.5">
+                                <div className="mb-4 p-4 rounded-xl border border-zinc-900/60 bg-zinc-950/40 backdrop-blur-md flex flex-col gap-3 pb-3">
+                                  <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="relative flex h-2 w-2">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                      </div>
+                                      <span className="text-xs font-bold text-zinc-400">
+                                        {selectedLanguage === "es" ? "Consumo de Modelos:" : selectedLanguage === "de" ? "Modellverbrauch:" : selectedLanguage === "tr" ? "Model Tüketimi:" : "Model Consumption:"}
                                       </span>
-                                      {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
-                                    </span>
+                                      <span className="text-xs font-mono text-zinc-100 bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
+                                        {displayModelName}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full tracking-wider uppercase flex items-center gap-1.5">
+                                        <span className="relative flex h-1.5 w-1.5">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                                        </span>
+                                        {selectedLanguage === "es" ? "Conexión en Vivo Activa" : selectedLanguage === "de" ? "Aktive Live-Verbindung" : selectedLanguage === "tr" ? "Aktif Canlı Bağlantı" : "Active Live Connection"}
+                                      </span>
+                                    </div>
                                   </div>
+                                  {liveStreamWarning && (
+                                    <div className="mt-1 text-xs font-semibold text-amber-400/90 bg-amber-500/5 border border-amber-500/10 px-3 py-2 rounded-lg flex items-center gap-2">
+                                      <span>⚠️</span>
+                                      <span>{liveStreamWarning}</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               <MarkdownRenderer 
