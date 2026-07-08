@@ -2057,16 +2057,10 @@ export default function VideosPage() {
       setIsPausedAudio(false);
       setActiveSentenceIndex(-1);
       activeSentenceIndexRef.current = -1;
+      if (typeof window !== "undefined" && "mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "none";
+      }
       return;
-    }
-
-    // Stop active audio if any (but do NOT pause or delete the prefetch if it matches the current index)
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current.onended = null;
-      activeAudioRef.current.onerror = null;
-      activeAudioRef.current.src = "";
-      activeAudioRef.current = null;
     }
 
     setIsPlayingAudio(true);
@@ -2074,23 +2068,22 @@ export default function VideosPage() {
     setActiveSentenceIndex(index);
     activeSentenceIndexRef.current = index;
 
-    let audio: HTMLAudioElement;
-
-    // Use prefetched audio if it exists for this sentence to achieve instantaneous transition
-    if (prefetchedAudioRef.current && prefetchedAudioRef.current.index === index) {
-      console.log(`[Gemini Audio Queue] Using prefetched audio for sentence ${index}`);
-      audio = prefetchedAudioRef.current.audio;
-      prefetchedAudioRef.current = null; // Clear since it is now active
-    } else {
-      console.log(`[Gemini Audio Queue] No prefetch found for sentence ${index}, loading on-demand`);
-      const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-      const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
-      audio = new Audio();
-      audio.preload = "auto";
-      audio.src = audioSrc;
+    // Retrieve or initialize the single, persistent Audio element (unlocked by user gesture on Play)
+    if (!activeAudioRef.current) {
+      activeAudioRef.current = new Audio();
     }
+    const audio = activeAudioRef.current;
 
-    activeAudioRef.current = audio;
+    // Temporarily clear event handlers to prevent ghost triggers during source change
+    audio.onended = null;
+    audio.onerror = null;
+
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    
+    // Set the source on our persistent element
+    audio.src = audioSrc;
+    audio.preload = "auto";
 
     // Apply playback rate
     audio.playbackRate = playbackRateRef.current;
@@ -2107,6 +2100,9 @@ export default function VideosPage() {
         setIsPausedAudio(false);
         setActiveSentenceIndex(-1);
         activeSentenceIndexRef.current = -1;
+        if (typeof window !== "undefined" && "mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = "none";
+        }
       }
     };
 
@@ -2115,6 +2111,9 @@ export default function VideosPage() {
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
       setAudioError(`Error al reproducir el fragmento de audio (Código ${audio.error?.code || 'desconocido'}).`);
+      if (typeof window !== "undefined" && "mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "none";
+      }
     };
 
     // Play current sentence immediately
@@ -2131,10 +2130,61 @@ export default function VideosPage() {
       }
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
+      if (typeof window !== "undefined" && "mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "none";
+      }
     });
 
-    // Prefetch the NEXT sentences in the background to hide the Gemini API synthesis latency (especially at higher playback rates)
-    // We prefetch a rolling window of 3 sentences ahead.
+    // Update Media Session API for Lock Screen metadata and controls
+    if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: selectedVideo.title,
+          artist: selectedLanguage === "es" 
+            ? `Frase ${index + 1} de ${chunks.length}` 
+            : selectedLanguage === "de"
+            ? `Satz ${index + 1} von ${chunks.length}`
+            : selectedLanguage === "tr"
+            ? `Cümle ${index + 1} / ${chunks.length}`
+            : `Sentence ${index + 1} of ${chunks.length}`,
+          album: selectedLanguage === "es" ? "Narración Inteligente HIVEX" : "HIVEX Intelligent Narration",
+          artwork: selectedVideo.metadata.thumbnail ? [
+            { src: selectedVideo.metadata.thumbnail, sizes: "512x512", type: "image/jpeg" }
+          ] : [
+            { src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&h=512&q=80", sizes: "512x512", type: "image/jpeg" }
+          ]
+        });
+
+        navigator.mediaSession.playbackState = "playing";
+
+        // Lock screen media controls
+        navigator.mediaSession.setActionHandler("play", () => {
+          resumeAudio();
+        });
+
+        navigator.mediaSession.setActionHandler("pause", () => {
+          pauseAudio();
+        });
+
+        navigator.mediaSession.setActionHandler("previoustrack", () => {
+          const prevIdx = activeSentenceIndexRef.current - 1;
+          if (prevIdx >= 0) {
+            playGeminiSentence(prevIdx);
+          }
+        });
+
+        navigator.mediaSession.setActionHandler("nexttrack", () => {
+          const nextIdx = activeSentenceIndexRef.current + 1;
+          if (nextIdx < chunks.length) {
+            playGeminiSentence(nextIdx);
+          }
+        });
+      } catch (mediaSessionErr) {
+        console.warn("[Media Session] Failed to register metadata/handlers:", mediaSessionErr);
+      }
+    }
+
+    // Prefetch subsequent sentences in the background to warm up browser HTTP cache
     const prefetchWindowSize = 3;
     for (let w = 1; w <= prefetchWindowSize; w++) {
       const nextIdx = index + w;
@@ -2142,24 +2192,11 @@ export default function VideosPage() {
         const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
         const nextAudioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[nextIdx])}&voice=${voiceName}`;
         
-        console.log(`[Gemini Audio Queue] Prefetching sentence ${nextIdx} (cushion +${w}) in background...`);
+        console.log(`[Gemini Audio Queue] Prefetching sentence ${nextIdx} (cushion +${w}) in background cache...`);
         
-        // Warm up the browser's HTTP cache with a background fetch
         fetch(nextAudioSrc).catch(err => {
           console.warn("[Gemini Audio Prefetch Fetch Error]:", err);
         });
-
-        // Store the immediate next sentence (w === 1) as the active preloaded Audio object
-        if (w === 1) {
-          const nextAudio = new Audio();
-          nextAudio.preload = "auto";
-          nextAudio.src = nextAudioSrc;
-          nextAudio.load(); // Triggers the network request and buffers content
-          prefetchedAudioRef.current = {
-            index: nextIdx,
-            audio: nextAudio
-          };
-        }
       }
     }
   };
@@ -2470,6 +2507,9 @@ export default function VideosPage() {
     if (activeAudioRef.current) {
       activeAudioRef.current.pause();
     }
+    if (typeof window !== "undefined" && "mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+    }
   };
 
   const resumeAudio = () => {
@@ -2483,6 +2523,9 @@ export default function VideosPage() {
     } else {
       playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
     }
+    if (typeof window !== "undefined" && "mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "playing";
+    }
   };
 
   const stopAudio = () => {
@@ -2494,6 +2537,9 @@ export default function VideosPage() {
     setIsPausedAudio(false);
     setActiveSentenceIndex(-1);
     activeSentenceIndexRef.current = -1;
+    if (typeof window !== "undefined" && "mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "none";
+    }
   };
 
   const handleSeek = (index: number) => {
