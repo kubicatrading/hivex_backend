@@ -2011,7 +2011,6 @@ export default function VideosPage() {
   const [totalSentences, setTotalSentences] = useState<number>(0);
   const [sentenceChunks, setSentenceChunks] = useState<string[]>([]);
   const [audioError, setAudioError] = useState<string | null>(null);
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState<boolean>(false);
 
   // Voice selection states (premium Gemini voices)
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>("gemini-charon");
@@ -2040,22 +2039,6 @@ export default function VideosPage() {
     preloadedBlobUrlsRef.current = {};
   };
 
-  // References and cleanup for single-track, screen-lock resistant merged audio
-  const mergedAudioUrlRef = useRef<string | null>(null);
-  const mergedAudioTimestampsRef = useRef<Array<{ text: string; startTime: number; duration: number }>>([]);
-
-  const clearMergedAudio = () => {
-    if (mergedAudioUrlRef.current) {
-      try {
-        URL.revokeObjectURL(mergedAudioUrlRef.current);
-      } catch (err) {
-        console.warn("Error revoking merged audio blob URL:", err);
-      }
-      mergedAudioUrlRef.current = null;
-    }
-    mergedAudioTimestampsRef.current = [];
-  };
-
   const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string) => {
     if (index < 0 || index >= chunks.length) return;
     if (preloadedBlobUrlsRef.current[index]) return; // Already preloaded!
@@ -2080,7 +2063,6 @@ export default function VideosPage() {
       audio.pause();
       audio.onended = null;
       audio.onerror = null;
-      audio.ontimeupdate = null;
       audio.src = "";
     }
     activeAudioRef.current = null;
@@ -2095,7 +2077,6 @@ export default function VideosPage() {
       activeObjectUrlRef.current = null;
     }
     clearPreloadedBlobUrls();
-    clearMergedAudio();
   };
 
   const getVoiceNameFromId = (id: string): string => {
@@ -2104,11 +2085,9 @@ export default function VideosPage() {
     return "Charon"; // Default
   };
 
-  const playGeminiSentence = async (index: number) => {
+  const playGeminiSentence = (index: number) => {
     setAudioError(null); // Reset audio error on any new sentence attempt
     const chunks = sentenceChunksRef.current;
-    if (chunks.length === 0) return;
-
     if (index < 0 || index >= chunks.length) {
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
@@ -2135,136 +2114,60 @@ export default function VideosPage() {
       return;
     }
 
-    // Temporarily clear event handlers to prevent ghost triggers during source change or generation
+    // Temporarily clear event handlers to prevent ghost triggers during source change
     audio.onended = null;
     audio.onerror = null;
-    audio.ontimeupdate = null;
 
-    // 1. Synthesize and cache the single continuous audio file if it is not yet available
-    if (!mergedAudioUrlRef.current) {
-      setIsGeneratingAudio(true);
-      try {
-        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-        console.log(`[Gemini Audio] Fetching single merged audio file for ${chunks.length} sentences with voice ${voiceName}`);
-        
-        const res = await fetch("/api/videos/speak-merged", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            chunks,
-            voice: voiceName
-          })
-        });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error);
-
-        // Decode the base64 audio response to a local binary Blob URL
-        const binaryString = atob(data.base64Audio);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: "audio/wav" });
-        const blobUrl = URL.createObjectURL(blob);
-
-        mergedAudioUrlRef.current = blobUrl;
-        mergedAudioTimestampsRef.current = data.timestamps;
-        console.log(`[Gemini Audio] Successfully precompiled and loaded merged audio. Duration: ${(binaryString.length / 48000).toFixed(2)}s`);
-      } catch (err: any) {
-        console.error("[Gemini Audio] Failed to synthesize merged audio:", err);
-        setAudioError(err.message || "Error al sintetizar el audio unificado.");
-        setIsPlayingAudio(false);
-        setIsPausedAudio(false);
-        return;
-      } finally {
-        setIsGeneratingAudio(false);
-      }
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    
+    // Check if we have a preloaded Blob URL for this sentence
+    let audioSrc = preloadedBlobUrlsRef.current[index];
+    if (!audioSrc) {
+      console.log(`[Gemini Audio Queue] No preloaded Blob URL found for sentence ${index}, loading on-demand`);
+      audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    } else {
+      console.log(`[Gemini Audio Queue] Using preloaded local Blob URL for sentence ${index} (Zero network request!)`);
     }
-
-    const audioSrc = mergedAudioUrlRef.current;
-    if (!audioSrc) return;
-
-    // Bind source if it changed
-    if (audio.src !== audioSrc) {
-      audio.src = audioSrc;
-      audio.preload = "auto";
-    }
+    
+    // Set the source on our persistent element
+    audio.src = audioSrc;
+    audio.preload = "auto";
 
     // Apply playback rate
     audio.playbackRate = playbackRateRef.current;
 
-    // Seek to the target sentence starting timestamp
-    const timestamps = mergedAudioTimestampsRef.current;
-    if (timestamps[index]) {
-      const targetTime = timestamps[index].startTime;
-      if (Math.abs(audio.currentTime - targetTime) > 0.25) {
-        audio.currentTime = targetTime;
-      }
-    }
-
-    // Setup seamless lock-screen and browser lifecycle events
+    // Setup events
     audio.onended = () => {
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      setActiveSentenceIndex(-1);
-      activeSentenceIndexRef.current = -1;
-      if (typeof window !== "undefined" && "mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "none";
-      }
-    };
-
-    audio.onerror = (e) => {
-      console.error("[Gemini Audio Player Error] Failed to play merged audio:", e);
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      setAudioError("Error al reproducir la narración unificada.");
-      if (typeof window !== "undefined" && "mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "none";
-      }
-    };
-
-    // Keep active highlighted sentence completely in sync using native HTML5 events
-    audio.ontimeupdate = () => {
-      const currentTime = audio.currentTime;
-      const tsList = mergedAudioTimestampsRef.current;
-      const matchingIndex = tsList.findIndex(
-        (ts) => currentTime >= ts.startTime && currentTime < ts.startTime + ts.duration
-      );
-
-      if (matchingIndex !== -1 && matchingIndex !== activeSentenceIndexRef.current) {
-        setActiveSentenceIndex(matchingIndex);
-        activeSentenceIndexRef.current = matchingIndex;
-
-        // Dynamically update iOS Lock Screen metadata on sentence changes!
-        if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: selectedVideo.title,
-            artist: selectedLanguage === "es" 
-              ? `Frase ${matchingIndex + 1} de ${tsList.length}` 
-              : selectedLanguage === "de"
-              ? `Satz ${matchingIndex + 1} von ${tsList.length}`
-              : selectedLanguage === "tr"
-              ? `Cümle ${matchingIndex + 1} / ${tsList.length}`
-              : `Sentence ${matchingIndex + 1} of ${tsList.length}`,
-            album: selectedLanguage === "es" ? "Narración Inteligente HIVEX" : "HIVEX Intelligent Narration",
-            artwork: selectedVideo.metadata.thumbnail ? [
-              { src: selectedVideo.metadata.thumbnail, sizes: "512x512", type: "image/jpeg" }
-            ] : [
-              { src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&h=512&q=80", sizes: "512x512", type: "image/jpeg" }
-            ]
-          });
+      if (!isPlayingAudioRef.current) return;
+      
+      const nextIdx = index + 1;
+      if (nextIdx < chunks.length) {
+        playGeminiSentence(nextIdx);
+      } else {
+        setIsPlayingAudio(false);
+        setIsPausedAudio(false);
+        setActiveSentenceIndex(-1);
+        activeSentenceIndexRef.current = -1;
+        if (typeof window !== "undefined" && "mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = "none";
         }
       }
     };
 
-    // Play immediately
+    audio.onerror = (e) => {
+      console.error("[Gemini Audio Player Error] Failed to play audio URL:", index, e);
+      setIsPlayingAudio(false);
+      setIsPausedAudio(false);
+      setAudioError(`Error al reproducir el fragmento de audio (Código ${audio.error?.code || 'desconocido'}).`);
+      if (typeof window !== "undefined" && "mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "none";
+      }
+    };
+
+    // Play current sentence immediately
     audio.play().catch((playErr: any) => {
       if (playErr.name === "AbortError") {
-        console.log("[Gemini Audio Player] Playback was aborted/paused.");
+        console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
         return;
       }
       console.error("[Gemini Play Failure] Could not play audio:", playErr);
@@ -2280,11 +2183,29 @@ export default function VideosPage() {
       }
     });
 
-    // Configure system media session action handlers (Lock Screen buttons)
+    // Update Media Session API for Lock Screen metadata and controls
     if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
       try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: selectedVideo.title,
+          artist: selectedLanguage === "es" 
+            ? `Frase ${index + 1} de ${chunks.length}` 
+            : selectedLanguage === "de"
+            ? `Satz ${index + 1} von ${chunks.length}`
+            : selectedLanguage === "tr"
+            ? `Cümle ${index + 1} / ${chunks.length}`
+            : `Sentence ${index + 1} of ${chunks.length}`,
+          album: selectedLanguage === "es" ? "Narración Inteligente HIVEX" : "HIVEX Intelligent Narration",
+          artwork: selectedVideo.metadata.thumbnail ? [
+            { src: selectedVideo.metadata.thumbnail, sizes: "512x512", type: "image/jpeg" }
+          ] : [
+            { src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&h=512&q=80", sizes: "512x512", type: "image/jpeg" }
+          ]
+        });
+
         navigator.mediaSession.playbackState = "playing";
 
+        // Lock screen media controls
         navigator.mediaSession.setActionHandler("play", () => {
           resumeAudio();
         });
@@ -2308,6 +2229,17 @@ export default function VideosPage() {
         });
       } catch (mediaSessionErr) {
         console.warn("[Media Session] Failed to register metadata/handlers:", mediaSessionErr);
+      }
+    }
+
+    // Prefetch subsequent sentences in the background as local Blob URLs.
+    // By preloading future chunks as Blobs, we bypass Safari's background network block,
+    // allowing flawless, uninterrupted track-to-track transitions when the screen is locked/black.
+    const prefetchWindowSize = 5;
+    for (let w = 1; w <= prefetchWindowSize; w++) {
+      const nextIdx = index + w;
+      if (nextIdx < chunks.length) {
+        preloadSentenceBlob(nextIdx, chunks, voiceName);
       }
     }
   };
@@ -2661,12 +2593,6 @@ export default function VideosPage() {
     setActiveSentenceIndex(targetIdx);
     activeSentenceIndexRef.current = targetIdx;
 
-    // Instantly seek the underlying single continuous audio track to the matching sentence timestamp
-    const audio = activeAudioRef.current || domAudioRef.current;
-    if (audio && mergedAudioTimestampsRef.current[targetIdx]) {
-      audio.currentTime = mergedAudioTimestampsRef.current[targetIdx].startTime;
-    }
-
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
     }
@@ -2692,7 +2618,6 @@ export default function VideosPage() {
       prefetchedAudioRef.current = null;
     }
     clearPreloadedBlobUrls();
-    clearMergedAudio();
 
     // Pre-warm the first three sentences for the new voice!
     const chunks = sentenceChunksRef.current;
@@ -2752,7 +2677,6 @@ export default function VideosPage() {
   // Pre-populate audio chunks and total sentences whenever the study video, selected language, or its transcription text changes
   useEffect(() => {
     setAudioError(null); // Reset audio error state when content changes
-    clearMergedAudio();
 
     if (!activeStudyVideo) {
       sentenceChunksRef.current = [];
@@ -4937,15 +4861,7 @@ export default function VideosPage() {
                             <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
                             {/* Controls: Play/Pause, Reset */}
                             <div className="flex items-center gap-2 md:gap-3 shrink-0 w-full md:w-auto justify-center md:justify-start">
-                              {isGeneratingAudio ? (
-                                <button
-                                  disabled
-                                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 cursor-not-allowed opacity-80"
-                                  title="Sintetizando voz inteligente..."
-                                >
-                                  <Loader2 className="w-4 h-4 md:w-4.5 md:h-4.5 animate-spin" />
-                                </button>
-                              ) : isPlayingAudio && !isPausedAudio ? (
+                              {isPlayingAudio && !isPausedAudio ? (
                                 <button
                                   onClick={pauseAudio}
                                   className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
