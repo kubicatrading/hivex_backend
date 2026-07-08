@@ -2023,6 +2023,38 @@ export default function VideosPage() {
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeObjectUrlRef = useRef<string | null>(null);
   const prefetchedAudioRef = useRef<{ index: number; audio: HTMLAudioElement } | null>(null);
+  
+  // Store preloaded Blob URLs to enable background playback without network requests
+  const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
+
+  const clearPreloadedBlobUrls = () => {
+    Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn("Error revoking blob URL:", err);
+      }
+    });
+    preloadedBlobUrlsRef.current = {};
+  };
+
+  const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string) => {
+    if (index < 0 || index >= chunks.length) return;
+    if (preloadedBlobUrlsRef.current[index]) return; // Already preloaded!
+
+    try {
+      const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+      console.log(`[Gemini Audio Preloader] Prefetching sentence ${index} as local Blob...`);
+      const res = await fetch(audioSrc);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      preloadedBlobUrlsRef.current[index] = blobUrl;
+      console.log(`[Gemini Audio Preloader] Sentence ${index} successfully preloaded as local Blob URL.`);
+    } catch (err) {
+      console.warn(`[Gemini Audio Preloader] Failed to preload sentence ${index}:`, err);
+    }
+  };
 
   const stopGeminiAudio = () => {
     if (activeAudioRef.current) {
@@ -2041,6 +2073,7 @@ export default function VideosPage() {
       URL.revokeObjectURL(activeObjectUrlRef.current);
       activeObjectUrlRef.current = null;
     }
+    clearPreloadedBlobUrls();
   };
 
   const getVoiceNameFromId = (id: string): string => {
@@ -2079,7 +2112,15 @@ export default function VideosPage() {
     audio.onerror = null;
 
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-    const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    
+    // Check if we have a preloaded Blob URL for this sentence
+    let audioSrc = preloadedBlobUrlsRef.current[index];
+    if (!audioSrc) {
+      console.log(`[Gemini Audio Queue] No preloaded Blob URL found for sentence ${index}, loading on-demand`);
+      audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+    } else {
+      console.log(`[Gemini Audio Queue] Using preloaded local Blob URL for sentence ${index} (Zero network request!)`);
+    }
     
     // Set the source on our persistent element
     audio.src = audioSrc;
@@ -2184,19 +2225,14 @@ export default function VideosPage() {
       }
     }
 
-    // Prefetch subsequent sentences in the background to warm up browser HTTP cache
-    const prefetchWindowSize = 3;
+    // Prefetch subsequent sentences in the background as local Blob URLs.
+    // By preloading future chunks as Blobs, we bypass Safari's background network block,
+    // allowing flawless, uninterrupted track-to-track transitions when the screen is locked/black.
+    const prefetchWindowSize = 5;
     for (let w = 1; w <= prefetchWindowSize; w++) {
       const nextIdx = index + w;
       if (nextIdx < chunks.length) {
-        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-        const nextAudioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[nextIdx])}&voice=${voiceName}`;
-        
-        console.log(`[Gemini Audio Queue] Prefetching sentence ${nextIdx} (cushion +${w}) in background cache...`);
-        
-        fetch(nextAudioSrc).catch(err => {
-          console.warn("[Gemini Audio Prefetch Fetch Error]:", err);
-        });
+        preloadSentenceBlob(nextIdx, chunks, voiceName);
       }
     }
   };
@@ -2574,6 +2610,7 @@ export default function VideosPage() {
       prefetchedAudioRef.current.audio.src = "";
       prefetchedAudioRef.current = null;
     }
+    clearPreloadedBlobUrls();
 
     // Pre-warm the first three sentences for the new voice!
     const chunks = sentenceChunksRef.current;
