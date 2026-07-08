@@ -4766,48 +4766,48 @@ export default function VideosPage() {
                               </button>
                             </div>
                           )}
-                          <div className="flex flex-col md:flex-row items-center gap-4 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-2xl select-none">
+                          <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4 w-full bg-zinc-950/40 border border-zinc-900/60 p-3.5 md:p-4 rounded-xl md:rounded-2xl select-none">
                             
                             {/* Controls: Play/Pause, Reset */}
-                            <div className="flex items-center gap-3 shrink-0 w-full md:w-auto justify-center md:justify-start">
+                            <div className="flex items-center gap-2 md:gap-3 shrink-0 w-full md:w-auto justify-center md:justify-start">
                               {isPlayingAudio && !isPausedAudio ? (
                                 <button
                                   onClick={pauseAudio}
-                                  className="w-12 h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
+                                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
                                   title={t.pauseAudio || "Pausar Narración"}
                                 >
-                                  <Pause className="w-4.5 h-4.5 fill-current" />
+                                  <Pause className="w-4 h-4 md:w-4.5 md:h-4.5 fill-current" />
                                 </button>
                               ) : (
                                 <button
                                   onClick={isPausedAudio ? resumeAudio : startAudioSummary}
-                                  className="w-12 h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
+                                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
                                   title={t.playTranslatedAudio || "Iniciar Narración"}
                                 >
-                                  <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
+                                  <Play className="w-4 h-4 md:w-4.5 md:h-4.5 fill-current ml-0.5" />
                                 </button>
                               )}
 
                               <button
                                 onClick={stopAudio}
                                 disabled={!isPlayingAudio && activeSentenceIndex === -1}
-                                className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all ${
+                                className={`w-8 h-8 md:w-9 md:h-9 rounded-xl border flex items-center justify-center transition-all ${
                                   isPlayingAudio || activeSentenceIndex >= 0
                                     ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800"
                                     : "bg-zinc-950/20 border-zinc-900/20 text-zinc-600 cursor-not-allowed"
                                 }`}
                                 title={selectedLanguage === "es" ? "Reiniciar Narración" : selectedLanguage === "de" ? "Erzählung zurücksetzen" : selectedLanguage === "tr" ? "Anlatımı Sıfırla" : "Reset Narration"}
                               >
-                                <RotateCcw className="w-4 h-4" />
+                                <RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4" />
                               </button>
                             </div>
 
                             {/* Progress Scrubber and Metadata Area */}
-                            <div className="w-full flex-grow flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                            <div className="w-full flex-grow flex flex-col gap-1.5 md:flex-row md:items-center md:gap-4">
                               {/* Metadata Line (Only separate above scrubber on mobile, inline on desktop) */}
-                              <div className="flex md:hidden items-center justify-between w-full">
+                              <div className="flex md:hidden items-center justify-between w-full px-1">
                                 {/* Estimated Playback Timer (Mobile) */}
-                                <div className="flex items-center gap-1 text-[11px] font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
+                                <div className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-400">
                                   <span className="text-violet-400">
                                     {formatElapsed(elapsedSeconds)}
                                   </span>
@@ -4816,7 +4816,7 @@ export default function VideosPage() {
                                 </div>
 
                                 {/* Percentage Badge (Mobile) */}
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                <span className="text-xs font-mono font-bold text-violet-400">
                                   {(() => {
                                     const percent = totalSentences > 0 
                                       ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
