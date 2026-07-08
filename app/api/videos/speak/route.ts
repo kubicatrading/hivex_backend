@@ -48,7 +48,7 @@ function addWavHeader(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, bi
 /**
  * Core speech synthesis handler supporting both GET and POST requests.
  */
-async function synthesizeSpeech(text: string, voice: string) {
+async function synthesizeSpeech(text: string, voice: string, request?: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -143,11 +143,60 @@ async function synthesizeSpeech(text: string, voice: string) {
   // Package the raw signed 16-bit 24kHz linear PCM data with a 44-byte standard RIFF/WAV header
   const wavBuffer = addWavHeader(pcmBuffer, 24000, 1, 16);
 
+  const rangeHeader = request?.headers?.get("range");
+  if (rangeHeader) {
+    const totalLength = wavBuffer.length;
+    // Format: "bytes=start-end"
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      const startStr = match[1];
+      const endStr = match[2];
+
+      let start = startStr ? parseInt(startStr, 10) : 0;
+      let end = endStr ? parseInt(endStr, 10) : totalLength - 1;
+
+      if (start >= totalLength) {
+        return new Response("", {
+          status: 416,
+          headers: {
+            "Content-Range": `bytes */${totalLength}`,
+            "Accept-Ranges": "bytes"
+          }
+        });
+      }
+
+      if (end >= totalLength) {
+        end = totalLength - 1;
+      }
+
+      if (start > end) {
+        start = end;
+      }
+
+      const chunkSize = (end - start) + 1;
+      const slicedBuffer = wavBuffer.subarray(start, end + 1);
+
+      return new Response(new Uint8Array(slicedBuffer), {
+        status: 206,
+        headers: {
+          "Content-Type": "audio/wav",
+          "Content-Range": `bytes ${start}-${end}/${totalLength}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": String(chunkSize),
+          "X-Generated-By-Model": successfulModel,
+          "Cache-Control": "public, max-age=31536000, immutable"
+        }
+      });
+    }
+  }
+
   // Return the response as binary stream playable natively by browser Audio element
   return new Response(new Uint8Array(wavBuffer), {
     status: 200,
     headers: {
       "Content-Type": "audio/wav",
+      "Accept-Ranges": "bytes",
+      "Content-Length": String(wavBuffer.length),
       "X-Generated-By-Model": successfulModel,
       "Cache-Control": "public, max-age=31536000, immutable" // Highly cacheable summaries
     }
@@ -166,7 +215,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return await synthesizeSpeech(text, voice);
+    return await synthesizeSpeech(text, voice, request);
   } catch (error: any) {
     const errMsg = error?.message || "Ocurrió un error inesperado en la ruta de síntesis de voz POST.";
     console.error("[Speak API POST Error]:", error);
@@ -190,7 +239,7 @@ export async function GET(request: Request) {
       );
     }
 
-    return await synthesizeSpeech(text, voice);
+    return await synthesizeSpeech(text, voice, request);
   } catch (error: any) {
     const errMsg = error?.message || "Ocurrió un error inesperado en la ruta de síntesis de voz GET.";
     console.error("[Speak API GET Error]:", error);

@@ -2065,95 +2065,50 @@ export default function VideosPage() {
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
     const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
 
-    // Load dynamic audio as blob first to completely avoid Safari/iOS range-request issues
-    // and provide high-fidelity server diagnostics before instantiating HTML5 audio.
-    fetch(audioSrc)
-      .then(async (res) => {
-        if (!res.ok) {
-          const contentType = res.headers.get("content-type") || "";
-          if (contentType.includes("application/json")) {
-            const errData = await res.json();
-            const errMsg = errData.error || errData.message || JSON.stringify(errData);
-            throw new Error(`Error del servidor (${res.status}): ${errMsg}`);
-          } else {
-            const errText = await res.text();
-            throw new Error(`Error del servidor (${res.status}): ${errText.slice(0, 100)}`);
-          }
-        }
-        return res.blob();
-      })
-      .then((blob) => {
-        // Ensure that we are still playing the same sentence after the asynchronous fetch completes
-        if (activeSentenceIndexRef.current !== index) {
-          return;
-        }
+    const audio = new Audio();
+    audio.src = audioSrc;
+    activeAudioRef.current = audio;
 
-        const objectUrl = URL.createObjectURL(blob);
-        activeObjectUrlRef.current = objectUrl;
+    // Apply playback rate
+    audio.playbackRate = playbackRateRef.current;
 
-        const audio = new Audio();
-        audio.src = objectUrl;
-        activeAudioRef.current = audio;
-
-        // Apply playback rate
-        audio.playbackRate = playbackRateRef.current;
-
-        // Setup events
-        audio.onended = () => {
-          URL.revokeObjectURL(objectUrl);
-          if (activeObjectUrlRef.current === objectUrl) {
-            activeObjectUrlRef.current = null;
-          }
-          if (!isPlayingAudioRef.current) return;
-          
-          const nextIdx = index + 1;
-          if (nextIdx < chunks.length) {
-            playGeminiSentence(nextIdx);
-          } else {
-            setIsPlayingAudio(false);
-            setIsPausedAudio(false);
-            setActiveSentenceIndex(-1);
-            activeSentenceIndexRef.current = -1;
-          }
-        };
-
-        audio.onerror = (e) => {
-          console.error("[Gemini Audio Player Error] Failed to play Object URL:", index, e);
-          URL.revokeObjectURL(objectUrl);
-          if (activeObjectUrlRef.current === objectUrl) {
-            activeObjectUrlRef.current = null;
-          }
-          setIsPlayingAudio(false);
-          setIsPausedAudio(false);
-          setAudioError(`Error del navegador al reproducir el formato de audio (Código ${audio.error?.code || 'desconocido'}).`);
-        };
-
-        // Play!
-        audio.play().catch((playErr: any) => {
-          URL.revokeObjectURL(objectUrl);
-          if (activeObjectUrlRef.current === objectUrl) {
-            activeObjectUrlRef.current = null;
-          }
-          if (playErr.name === "AbortError") {
-            console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
-            return;
-          }
-          console.error("[Gemini Play Failure] Could not play audio:", playErr);
-          if (playErr.name === "NotAllowedError") {
-            setAudioError("El navegador bloqueó la reproducción automática. Por favor haga clic en el botón de reproducción.");
-          } else {
-            setAudioError(`Bloqueo de reproducción en el navegador: ${playErr.message || "Por favor haga clic de nuevo para interactuar."}`);
-          }
-          setIsPlayingAudio(false);
-          setIsPausedAudio(false);
-        });
-      })
-      .catch((err) => {
-        console.error("[Gemini Load Failure] Failed to load audio chunk:", index, err);
-        setAudioError(err.message || "Error de red o conexión al servidor de voz. Verifique su conexión.");
+    // Setup events
+    audio.onended = () => {
+      if (!isPlayingAudioRef.current) return;
+      
+      const nextIdx = index + 1;
+      if (nextIdx < chunks.length) {
+        playGeminiSentence(nextIdx);
+      } else {
         setIsPlayingAudio(false);
         setIsPausedAudio(false);
-      });
+        setActiveSentenceIndex(-1);
+        activeSentenceIndexRef.current = -1;
+      }
+    };
+
+    audio.onerror = (e) => {
+      console.error("[Gemini Audio Player Error] Failed to play audio URL:", index, e);
+      setIsPlayingAudio(false);
+      setIsPausedAudio(false);
+      setAudioError(`Error al reproducir el fragmento de audio (Código ${audio.error?.code || 'desconocido'}).`);
+    };
+
+    // Play!
+    audio.play().catch((playErr: any) => {
+      if (playErr.name === "AbortError") {
+        console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
+        return;
+      }
+      console.error("[Gemini Play Failure] Could not play audio:", playErr);
+      if (playErr.name === "NotAllowedError") {
+        setAudioError("El navegador bloqueó la reproducción automática. Por favor haga clic en el botón de reproducción.");
+      } else {
+        setAudioError(`Bloqueo de reproducción en el navegador: ${playErr.message || "Por favor haga clic de nuevo para interactuar."}`);
+      }
+      setIsPlayingAudio(false);
+      setIsPausedAudio(false);
+    });
   };
 
   // Multilingual states
