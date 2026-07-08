@@ -2134,8 +2134,8 @@ export default function VideosPage() {
     });
 
     // Prefetch the NEXT sentences in the background to hide the Gemini API synthesis latency (especially at higher playback rates)
-    // We prefetch a rolling window of 2 sentences ahead.
-    const prefetchWindowSize = 2;
+    // We prefetch a rolling window of 3 sentences ahead.
+    const prefetchWindowSize = 3;
     for (let w = 1; w <= prefetchWindowSize; w++) {
       const nextIdx = index + w;
       if (nextIdx < chunks.length) {
@@ -2529,7 +2529,7 @@ export default function VideosPage() {
       prefetchedAudioRef.current = null;
     }
 
-    // Pre-warm the first two sentences for the new voice!
+    // Pre-warm the first three sentences for the new voice!
     const chunks = sentenceChunksRef.current;
     const voiceName = getVoiceNameFromId(voiceId);
     if (chunks.length > 0) {
@@ -2539,6 +2539,10 @@ export default function VideosPage() {
     if (chunks.length > 1) {
       const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
       fetch(src1).catch(() => {});
+    }
+    if (chunks.length > 2) {
+      const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
+      fetch(src2).catch(() => {});
     }
 
     // If already playing and not paused, apply change immediately
@@ -2615,7 +2619,7 @@ export default function VideosPage() {
       setSentenceChunks(chunks);
       setTotalSentences(chunks.length);
 
-      // Pre-warm the first two sentences to make the very first Play click instant!
+      // Pre-warm the first three sentences to make the very first Play click instant!
       const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
       if (chunks.length > 0) {
         const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
@@ -2624,6 +2628,10 @@ export default function VideosPage() {
       if (chunks.length > 1) {
         const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
         fetch(src1).catch(() => {});
+      }
+      if (chunks.length > 2) {
+        const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
+        fetch(src2).catch(() => {});
       }
     } else {
       sentenceChunksRef.current = [];
