@@ -2086,6 +2086,7 @@ export default function VideosPage() {
       const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
       const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
       audio = new Audio();
+      audio.preload = "auto";
       audio.src = audioSrc;
     }
 
@@ -2139,7 +2140,15 @@ export default function VideosPage() {
       const nextAudioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[nextIdx])}&voice=${voiceName}`;
       
       console.log(`[Gemini Audio Queue] Prefetching sentence ${nextIdx} in background...`);
+      
+      // Warm up the browser's HTTP cache with a background fetch
+      fetch(nextAudioSrc).catch(err => {
+        console.warn("[Gemini Audio Prefetch Fetch Error]:", err);
+      });
+
+      // Preload using native Audio element with explicit preload="auto" to force background buffering in Safari
       const nextAudio = new Audio();
+      nextAudio.preload = "auto";
       nextAudio.src = nextAudioSrc;
       nextAudio.load(); // Triggers the network request and buffers content
       prefetchedAudioRef.current = {
@@ -2506,6 +2515,13 @@ export default function VideosPage() {
   const handleVoiceIdChange = (voiceId: string) => {
     setSelectedVoiceId(voiceId);
     selectedVoiceIdRef.current = voiceId;
+
+    // Clear any active prefetch since the voice has changed!
+    if (prefetchedAudioRef.current) {
+      prefetchedAudioRef.current.audio.pause();
+      prefetchedAudioRef.current.audio.src = "";
+      prefetchedAudioRef.current = null;
+    }
 
     // If already playing and not paused, apply change immediately
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
