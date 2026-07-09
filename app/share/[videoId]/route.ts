@@ -108,7 +108,7 @@ export async function GET(
     const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
     const absoluteOrigin = `${protocol}://${host}`;
 
-    const redirectUrl = `${absoluteOrigin}/dashboard/videos?id=${finalVideoUuid}&start=${start}${end ? `&end=${end}` : ""}&from=telegram`;
+    const redirectUrl = `https://youtu.be/${youtubeId}?t=${start}`;
     const shareUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}`;
     const coverImageUrl = `${absoluteOrigin}/snapshots/${finalVideoUuid}/${start}.jpg`;
 
@@ -156,7 +156,7 @@ export async function GET(
   <meta name="twitter:player:height" content="720" />
   <meta name="twitter:image" content="${coverImageUrl}" />
 
-  <!-- Meta Refresh and Script for Instant Redirection to Web Study Cabin -->
+  <!-- Meta Refresh and Script for Instant Redirection to Native Video Player -->
   <meta http-equiv="refresh" content="0;url=${redirectUrl}" />
   <script>
     window.location.href = ${JSON.stringify(redirectUrl)};
@@ -164,11 +164,11 @@ export async function GET(
 </head>
 <body style="background-color: #0b0f19; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
   <div style="text-align: center; padding: 24px; max-width: 480px; border-radius: 12px; background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);">
-    <div style="font-size: 48px; margin-bottom: 16px;">⚡</div>
-    <h1 style="color: #3b82f6; font-size: 24px; font-weight: 700; margin: 0 0 12px 0;">Redirección Segura</h1>
-    <p style="color: #9ca3af; font-size: 15px; margin: 0 0 24px 0; line-height: 1.5;">Redirigiendo de forma segura a la Cabina de Estudio interactiva de HIVEX...</p>
+    <div style="font-size: 48px; margin-bottom: 16px;">🎬</div>
+    <h1 style="color: #3b82f6; font-size: 24px; font-weight: 700; margin: 0 0 12px 0;">Reproductor de Escena</h1>
+    <p style="color: #9ca3af; font-size: 15px; margin: 0 0 24px 0; line-height: 1.5;">Abriendo la escena acotada directamente en el reproductor integrado...</p>
     <a href="${redirectUrl}" style="display: inline-block; background-color: #3b82f6; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; transition: background-color 0.2s;">
-      Entrar a la Cabina
+      Abrir Reproductor
     </a>
   </div>
 </body>
