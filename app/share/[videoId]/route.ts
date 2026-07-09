@@ -29,6 +29,7 @@ export async function GET(
 
     const start = searchParams.get("start") || searchParams.get("t") || "0";
     const end = searchParams.get("end") || "";
+    const isEmbed = searchParams.get("embed") === "true";
 
     if (!videoId) {
       return new NextResponse("Missing videoId parameter", { status: 400 });
@@ -108,6 +109,47 @@ export async function GET(
     const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
     const absoluteOrigin = `${protocol}://${host}`;
 
+    // 3.1 Serve full HTML5 video player page when loaded in Telegram's inline webview iframe (embed=true)
+    if (isEmbed) {
+      const videoClipUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${youtubeId || finalVideoUuid || videoId}/${start}.mp4`;
+      
+      const embedHtml = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Reproductor HIVEX</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #000000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <video src="${videoClipUrl}" autoplay controls playsinline loop></video>
+</body>
+</html>`;
+
+      return new NextResponse(embedHtml, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    }
+
     const userAgent = request.headers.get("user-agent") || "";
     const isBot = /telegrambot|twitterbot|facebookexternalhit|slackbot|discordbot|googlebot|bingbot|baiduspider/i.test(userAgent);
 
@@ -115,11 +157,10 @@ export async function GET(
     const shareUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}`;
     const coverImageUrl = `${absoluteOrigin}/snapshots/${finalVideoUuid}/${start}.jpg`;
 
-    // 4. Construct direct MP4 video clip URL hosted on Supabase Storage (documents bucket)
-    // Since snapshots/clips are generated automatically during ingestion, we can point directly to it.
-    // This gives a 100% physically locked-and-blocked video player experience inline inside Telegram.
-    const activeVideoUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${youtubeId || finalVideoUuid || videoId}/${start}.mp4`;
-    const ogVideoType = "video/mp4";
+    // 4. Point the embedded video players (og:video and twitter:player) to our custom responsive iframe player URL
+    // Pointing to a text/html iframe URL guarantees Telegram UI will show a Play button on the cover image!
+    const activeVideoUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}&embed=true`;
+    const ogVideoType = "text/html";
 
     // 5. Only inject redirection headers for real human browsers to prevent crawlers from following the redirect
     // and losing the Open Graph metadata cards.
