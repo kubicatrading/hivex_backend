@@ -781,21 +781,37 @@ export async function sendTelegramMessageWithPhotos(
       const explanation = explanations[i];
 
       // Format caption
-      const captionMarkdown = explanation
+      let captionMarkdown = explanation
         ? `${heading}\n\n${explanation}`
         : heading;
 
+      // Extract share link and strip it from the caption to trigger a clean video and separate cover card
+      let extractedShareUrl = "";
+      const shareUrlRegex = /(https?:\/\/[^\s]+?\/share\/[a-zA-Z0-9_\-]+[^\s]*)/i;
+      const shareUrlMatch = captionMarkdown.match(shareUrlRegex);
+
+      if (shareUrlMatch && isVideo) {
+        extractedShareUrl = shareUrlMatch[1];
+        // Strip out any lines that contain the share link
+        const lines = captionMarkdown.split("\n");
+        const filteredLines = lines.filter(line => !line.includes("/share/"));
+        captionMarkdown = filteredLines.join("\n").trim();
+      }
+
       const captionHtml = markdownToTelegramHtml(captionMarkdown);
+      let mediaSentSuccessfully = false;
 
       if (captionHtml.length <= 950) {
         // Send media with full description as caption
         if (isVideo) {
           const videoResult = await sendTelegramVideo(mediaUrl, captionHtml, chatId, captionMarkdown);
+          mediaSentSuccessfully = videoResult.success;
           if (!videoResult.success) {
             console.warn(`[Telegram Service] Failed to send video ${i}:`, videoResult.error);
           }
         } else {
           const photoResult = await sendTelegramPhoto(mediaUrl, captionHtml, chatId, captionMarkdown);
+          mediaSentSuccessfully = photoResult.success;
           if (!photoResult.success) {
             console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
           }
@@ -808,12 +824,14 @@ export async function sendTelegramMessageWithPhotos(
         if (isVideo) {
           const videoResult = await sendTelegramVideo(mediaUrl, headingHtml, chatId, captionMarkdown);
           mediaSent = videoResult.videoSent;
+          mediaSentSuccessfully = videoResult.success;
           if (!videoResult.success) {
             console.warn(`[Telegram Service] Failed to send video ${i} with heading:`, videoResult.error);
           }
         } else {
           const photoResult = await sendTelegramPhoto(mediaUrl, headingHtml, chatId, captionMarkdown);
           mediaSent = photoResult.photoSent;
+          mediaSentSuccessfully = photoResult.success;
           if (!photoResult.success) {
             console.warn(`[Telegram Service] Failed to send photo ${i} with heading:`, photoResult.error);
           }
@@ -827,6 +845,24 @@ export async function sendTelegramMessageWithPhotos(
             await sendTelegramMessage(chunkHtml, chatId);
           }
         }
+      }
+
+      // Coordinated Full Video Cover Card: If a video was sent and we extracted a share URL,
+      // send a separate text message containing the /share/ link without constraints (start=0, no end)
+      // to trigger a premium, clickable webpage cover image card on Telegram!
+      if (mediaSentSuccessfully && isVideo && extractedShareUrl) {
+        let cleanShareUrl = extractedShareUrl;
+        try {
+          const urlObj = new URL(extractedShareUrl);
+          urlObj.searchParams.set("start", "0");
+          urlObj.searchParams.delete("end");
+          cleanShareUrl = urlObj.toString();
+        } catch (e) {
+          cleanShareUrl = extractedShareUrl.split("?")[0] + "?start=0";
+        }
+
+        const cardText = `🎬 <b>CABINA DE ESTUDIO COMPLETA (HIVEX)</b>\n\nPresiona la carátula debajo para abrir el vídeo completo en alta definición, sin bloqueos de segmento ni restricciones de tiempo:\n\n🔗 ${cleanShareUrl}`;
+        await sendTelegramMessage(cardText, chatId);
       }
     }
 
