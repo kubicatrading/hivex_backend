@@ -785,33 +785,70 @@ export async function sendTelegramMessageWithPhotos(
         ? `${heading}\n\n${explanation}`
         : heading;
 
-      // Extract share link and strip it from the caption to trigger a clean video and separate cover card
-      let extractedShareUrl = "";
-      const shareUrlRegex = /(https?:\/\/[^\s]+?\/share\/[a-zA-Z0-9_\-]+[^\s]*)/i;
-      const shareUrlMatch = captionMarkdown.match(shareUrlRegex);
+      // Extract share or video link and replace it with the dynamic clickable title of the full video
+      const hivexVideoLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*)/i;
+      const linkMatch = captionMarkdown.match(hivexVideoLinkRegex);
 
-      if (shareUrlMatch && isVideo) {
-        extractedShareUrl = shareUrlMatch[1];
-        // Strip out any lines that contain the share link
+      if (linkMatch && isVideo) {
+        const videoId = linkMatch[2];
+
+        // Fetch the video's actual title from the database
+        let videoTitle = "Cabina de Estudio (HIVEX)";
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
+        const supabaseAdmin = getSupabaseAdmin();
+        if (supabaseAdmin) {
+          try {
+            if (isUuid) {
+              const { data } = await supabaseAdmin
+                .from("documents")
+                .select("title")
+                .eq("id", videoId)
+                .single();
+              if (data && data.title) {
+                videoTitle = data.title;
+              }
+            } else {
+              const { data } = await supabaseAdmin
+                .from("documents")
+                .select("title")
+                .eq("type", "video")
+                .ilike("file_url", `%${videoId}%`)
+                .limit(1);
+              if (data && data.length > 0 && data[0].title) {
+                videoTitle = data[0].title;
+              }
+            }
+          } catch (err) {
+            console.error("[Telegram Service] Failed to fetch video title for caption link replacement:", err);
+          }
+        }
+
+        // Construct the clean, unrestricted full video link
+        const cleanFullShareUrl = `https://hivex-backend.vercel.app/share/${videoId}?start=0`;
+        const replacementLinkHtml = `🎬 <a href="${cleanFullShareUrl}"><b>${escapeHtml(videoTitle)}</b></a>`;
+
+        // Replace any Markdown link, HTML link, or raw URL in the caption with our clickable title link
         const lines = captionMarkdown.split("\n");
-        const filteredLines = lines.filter(line => !line.includes("/share/"));
-        captionMarkdown = filteredLines.join("\n").trim();
+        const updatedLines = lines.map(line => {
+          if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena")) {
+            return replacementLinkHtml;
+          }
+          return line;
+        });
+        captionMarkdown = updatedLines.join("\n").trim();
       }
 
       const captionHtml = markdownToTelegramHtml(captionMarkdown);
-      let mediaSentSuccessfully = false;
 
       if (captionHtml.length <= 950) {
         // Send media with full description as caption
         if (isVideo) {
           const videoResult = await sendTelegramVideo(mediaUrl, captionHtml, chatId, captionMarkdown);
-          mediaSentSuccessfully = videoResult.success;
           if (!videoResult.success) {
             console.warn(`[Telegram Service] Failed to send video ${i}:`, videoResult.error);
           }
         } else {
           const photoResult = await sendTelegramPhoto(mediaUrl, captionHtml, chatId, captionMarkdown);
-          mediaSentSuccessfully = photoResult.success;
           if (!photoResult.success) {
             console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
           }
@@ -824,14 +861,12 @@ export async function sendTelegramMessageWithPhotos(
         if (isVideo) {
           const videoResult = await sendTelegramVideo(mediaUrl, headingHtml, chatId, captionMarkdown);
           mediaSent = videoResult.videoSent;
-          mediaSentSuccessfully = videoResult.success;
           if (!videoResult.success) {
             console.warn(`[Telegram Service] Failed to send video ${i} with heading:`, videoResult.error);
           }
         } else {
           const photoResult = await sendTelegramPhoto(mediaUrl, headingHtml, chatId, captionMarkdown);
           mediaSent = photoResult.photoSent;
-          mediaSentSuccessfully = photoResult.success;
           if (!photoResult.success) {
             console.warn(`[Telegram Service] Failed to send photo ${i} with heading:`, photoResult.error);
           }
@@ -845,24 +880,6 @@ export async function sendTelegramMessageWithPhotos(
             await sendTelegramMessage(chunkHtml, chatId);
           }
         }
-      }
-
-      // Coordinated Full Video Cover Card: If a video was sent and we extracted a share URL,
-      // send a separate text message containing the /share/ link without constraints (start=0, no end)
-      // to trigger a premium, clickable webpage cover image card on Telegram!
-      if (mediaSentSuccessfully && isVideo && extractedShareUrl) {
-        let cleanShareUrl = extractedShareUrl;
-        try {
-          const urlObj = new URL(extractedShareUrl);
-          urlObj.searchParams.set("start", "0");
-          urlObj.searchParams.delete("end");
-          cleanShareUrl = urlObj.toString();
-        } catch (e) {
-          cleanShareUrl = extractedShareUrl.split("?")[0] + "?start=0";
-        }
-
-        const cardText = `🎬 <b>CABINA DE ESTUDIO COMPLETA (HIVEX)</b>\n\nPresiona la carátula debajo para abrir el vídeo completo en alta definición, sin bloqueos de segmento ni restricciones de tiempo:\n\n🔗 ${cleanShareUrl}`;
-        await sendTelegramMessage(cardText, chatId);
       }
     }
 
