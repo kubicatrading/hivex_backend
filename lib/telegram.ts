@@ -874,10 +874,16 @@ export async function sendTelegramMessageWithPhotos(
         // Create the premium access link named after the exact clean chart's title
         const replacementLinkMarkdown = `🔗 [**${cleanChartName}**](${cleanFullShareUrl})`;
 
+        // Separate bounded link (chart) and complete video link (strictly without start/end parameters)
+        const cleanFullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
+
         // Replace any Markdown link, HTML link, or raw URL in the caption with our clickable title link
         const lines = captionMarkdown.split("\n");
         const updatedLines = lines.map(line => {
-          if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena")) {
+          if (line.toLowerCase().includes("completo")) {
+            return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
+          }
+          if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.includes(cleanChartName)) {
             return replacementLinkMarkdown;
           }
           return line;
@@ -888,7 +894,10 @@ export async function sendTelegramMessageWithPhotos(
         if (explanation) {
           const expLines = explanation.split("\n");
           const updatedExpLines = expLines.map(line => {
-            if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena")) {
+            if (line.toLowerCase().includes("completo")) {
+              return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
+            }
+            if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.includes(cleanChartName)) {
               return replacementLinkMarkdown;
             }
             return line;

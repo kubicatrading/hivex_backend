@@ -244,11 +244,11 @@ export async function extractSnapshotsInBackground(
           console.log(`[Snapshot Extractor] Snapshot at ${chart.timestamp} (${chart.seconds}s) already exists, skipping extraction.`);
           extracted = true;
         } else {
-          console.log(`[Snapshot Extractor] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s) to: ${outputPath}`);
+          console.log(`[Snapshot Extractor] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s with +5s offset) to: ${outputPath}`);
 
           try {
-            // Input seeking (-ss before -i) is incredibly fast and avoids downloading the whole stream
-            const ffmpegCmd = `ffmpeg -y -ss ${chart.seconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+            // Seek 5 seconds after the start of the chart timestamp to capture actual charts and avoid the presenter's face
+            const ffmpegCmd = `ffmpeg -y -ss ${chart.seconds + 5} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
             await runCmd(ffmpegCmd);
             console.log(`[Snapshot Extractor] Successfully saved snapshot: ${chart.seconds}.jpg`);
             extracted = true;
