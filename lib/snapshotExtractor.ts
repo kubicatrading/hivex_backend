@@ -294,6 +294,8 @@ export async function extractSnapshotsInBackground(
         }
 
         // Extract and upload native mobile-optimized MP4 video clip if it is a valid chart
+        // DESACTIVADO POR COSTE Y SEGURIDAD: Ya no copiamos ni guardamos clips de video mp4 en el storage.
+        /*
         if (extracted && isChart && supabaseAdmin) {
           const clipOutputPath = path.join(snapshotsDir, `${chart.seconds}.mp4`);
           let clipExtracted = false;
@@ -335,6 +337,7 @@ export async function extractSnapshotsInBackground(
             }
           }
         }
+        */
       }
 
       console.log(`[Snapshot Extractor] Background snapshot extraction job completed for video ID: ${resolvedVideoId}`);

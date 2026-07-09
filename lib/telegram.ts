@@ -775,7 +775,15 @@ export async function sendTelegramMessageWithPhotos(
 
     // 4.2. Send each media file with its accompanying explanation as caption
     for (let i = 0; i < matches.length; i++) {
-      const mediaUrl = resolveUrl(matches[i].url);
+      let mediaUrl = resolveUrl(matches[i].url);
+      
+      // Convert any mp4 clips to high-quality static snapshots (.jpg) to save storage cost and enhance security
+      if (mediaUrl.includes("/clips/")) {
+        mediaUrl = mediaUrl
+          .replace("/public/documents/clips/", "/public/snapshots/")
+          .replace(".mp4", ".jpg");
+      }
+
       const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") || mediaUrl.includes("/clips/");
       let heading = headings[i];
       let explanation = explanations[i];
@@ -790,8 +798,23 @@ export async function sendTelegramMessageWithPhotos(
       const hivexVideoLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*)/i;
       const linkMatch = captionMarkdown.match(hivexVideoLinkRegex);
 
-      if (linkMatch && isVideo) {
+      if (linkMatch) {
+        const originalUrl = linkMatch[1];
         const videoId = linkMatch[2];
+
+        // Extract start and end parameters from the original deep-link to preserve them in the premium access link
+        let startParam = "";
+        let endParam = "";
+        try {
+          const parsedUrl = new URL(originalUrl);
+          startParam = parsedUrl.searchParams.get("start") || "";
+          endParam = parsedUrl.searchParams.get("end") || "";
+        } catch (e) {
+          const startM = originalUrl.match(/[?&]start=(\d+)/i);
+          const endM = originalUrl.match(/[?&]end=(\d+)/i);
+          if (startM) startParam = startM[1];
+          if (endM) endParam = endM[1];
+        }
 
         // Fetch the video's actual title from the database
         let videoTitle = "Cabina de Estudio (HIVEX)";
@@ -828,14 +851,28 @@ export async function sendTelegramMessageWithPhotos(
         const finalHeading = isFormalHeading ? heading : videoTitle;
         heading = finalHeading;
 
-        // Re-construct the captionMarkdown with the real database video title at the top
+        // Clean up the heading to extract ONLY the clean chart name (e.g., removing ####, [12:27] timestamps, and bold asterisks)
+        let cleanChartName = finalHeading;
+        cleanChartName = cleanChartName.replace(/^#+\s*/, ""); // Remove markdown hashes (e.g., ####)
+        cleanChartName = cleanChartName.replace(/^\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, ""); // Remove timestamps (e.g., [12:27])
+        cleanChartName = cleanChartName.replace(/\*\*/g, "").replace(/\*/g, "").trim(); // Strip all bold/italic asterisks
+
+        if (!cleanChartName) {
+          cleanChartName = "Gráfico de Análisis";
+        }
+
+        // Re-construct the captionMarkdown with the real database video title or formal heading at the top
         captionMarkdown = (explanation)
           ? `**${finalHeading}**\n\n${explanation}`
           : `**${finalHeading}**`;
 
-        // Construct the clean, unrestricted full video link pointing directly to the Cabina de Estudio
-        const cleanFullShareUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
-        const replacementLinkMarkdown = `🔗 [**${videoTitle}**](${cleanFullShareUrl})`;
+        // Construct the clean, unrestricted full video link pointing directly to the Cabina de Estudio with start and end params
+        let cleanFullShareUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
+        if (startParam) cleanFullShareUrl += `&start=${startParam}`;
+        if (endParam) cleanFullShareUrl += `&end=${endParam}`;
+
+        // Create the premium access link named after the exact clean chart's title
+        const replacementLinkMarkdown = `🔗 [**${cleanChartName}**](${cleanFullShareUrl})`;
 
         // Replace any Markdown link, HTML link, or raw URL in the caption with our clickable title link
         const lines = captionMarkdown.split("\n");
