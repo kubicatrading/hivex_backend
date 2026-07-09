@@ -288,6 +288,7 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
 🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera recomendación, el título "🚨 HIVEX Investors - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 DECISIÓN 1:".
@@ -299,6 +300,7 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
   1. Para los vídeos que sustentan la decisión, busca cualquier marca de tiempo de gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) y conviértela a segundos enteros. Si no hay marcas, usa 0. Ese es {startSeconds}.
   2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 740, end es 800).
 - Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera el enlace de compartir público apuntando a la escena del vídeo de origen relevante inyectando el {videoId} real y los segundos calculados.
+- Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
 
 3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Investors - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -382,7 +384,8 @@ function generateDeterministicInvestors(priorityVideos: any[]): string {
     output += `▫️ **Acción Recomendada**: Priorizar la asignación defensiva en activos tangibles o sectores con flujos de caja predecibles libres de deuda de corto plazo.\n`;
     output += `▫️ **Fronteras y Soporte**: Niveles técnicos clave bajo estudio activo en la cabina. Vigilar la velocidad de la rotación sectorial.\n\n`;
     output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-    output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n\n`;
+    output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n`;
+    output += `🔗 [Vídeo Completo: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
   });
 
   return output.trim();

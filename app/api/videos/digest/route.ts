@@ -308,6 +308,7 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
 🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 ALERTA 1:".
@@ -319,6 +320,7 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
   1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
   2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
 - Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera un link markdown directo apuntando a la ruta de compartir de HIVEX inyectando el {videoId} real (su UUID en HIVEX) y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) calculados en la URL de "/share/".
+- Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
 
 3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Alerts - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -345,6 +347,7 @@ STRICTLY follow the formatting and style rules below:
 
 🎬 **INTEGRATED PLAYER (STUDY CABIN)**
 🔗 [Open Chart Scene in HIVEX Study Cabin](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
+🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - In the first alert, the main title "🚨 HIVEX Alerts - 24H" must be followed immediately by the line "---", and a blank space before "🚨 ALERT 1:".
@@ -356,6 +359,7 @@ CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
   1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255). If none, use 0. This is {startSeconds}.
   2. Always add 60 seconds to get {endSeconds} (e.g. if start is 255, end is 315).
 - For "🔗 [Open Chart Scene in HIVEX Study Cabin](...)": Generate a direct markdown link pointing to the HIVEX share route by injecting the real {videoId} (its UUID in HIVEX) and the start ({startSeconds}) and end ({endSeconds}) parameters in the "/share/" URL.
+- For "🔗 [Full Video: {videoTitle}](...)": Generate a direct markdown link pointing to the full video without time parameters by using the real title of the video (property "title" of the data object) as the link text {videoTitle} and "/share/{videoId}" as URL.
 
 3. NO NOTES, AI COMMENTARY OR TABLES: Do not output any draft table, ID list, or final notes. Start immediately with "🚨 HIVEX Alerts - 24H" and follow immediately with the line "---".
 4. Generate ONLY standard Markdown. Do not use HTML tags at all.
@@ -548,14 +552,16 @@ function generateDeterministicDigest(videoContexts: any[], lang: string): string
       output += `▫️ Implicación táctica: Se aconseja revisar detenidamente la liquidez del mercado y el panel en la cabina.\n\n`;
 
       output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-      output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n\n`;
+      output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n`;
+      output += `🔗 [Vídeo Completo: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
     } else {
       output += `High-impact market analysis detected on the ${video.channel} channel. A comprehensive study on recent financial asset trends and global capital flows is detailed inside.\n\n`;
       output += `▫️ Key detail: ${keyAnalysisText.slice(0, 160)}...\n`;
       output += `▫️ Tactical implication: Careful review of market liquidity and the dashboard in the cabin is highly advised.\n\n`;
 
       output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
-      output += `🔗 [Open Chart Scene in HIVEX Study Cabin](${shareUrl})\n\n`;
+      output += `🔗 [Open Chart Scene in HIVEX Study Cabin](${shareUrl})\n`;
+      output += `🔗 [Full Video: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
     }
   });
 

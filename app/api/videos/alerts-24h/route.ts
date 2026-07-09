@@ -270,6 +270,7 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
 🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 ALERTA 1:".
@@ -281,6 +282,7 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
   1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
   2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
 - Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera un link markdown directo apuntando a la ruta de compartir de HIVEX inyectando el {videoId} real (su UUID en HIVEX) y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) calculados en la URL de "/share/".
+- Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
 
 3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Alerts - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -364,7 +366,8 @@ function generateDeterministicAlerts(videoContexts: any[]): string {
     output += `▫️ **El Incidente**: Movimientos de volumen atípicos o catalizadores geopolíticos bajo análisis activo en la cabina de estudio.\n`;
     output += `▫️ **Ventaja Inversora**: Se aconseja revisar los flujos de liquidez y realizar seguimiento de los niveles marcados en el gráfico para capturar ventajas operativas.\n\n`;
     output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-    output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n\n`;
+    output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n`;
+    output += `🔗 [Vídeo Completo: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
   });
 
   return output.trim();
