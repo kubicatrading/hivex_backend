@@ -306,23 +306,19 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 ▫️ [Punto clave 1: un dato numérico preciso, porcentaje, precio, o un nivel de soporte o resistencia relevante.]
 ▫️ [Punto clave 2: una implicación táctica directa para el inversor, flujo de liquidez o riesgo sistémico.]
 
-🎬 **REPRODUCTOR INTEGRADO (ESCENA ACOTADA)**
-👉 [Ver Escena del Gráfico en Telegram (Minuto MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})
-
-🔗 [Abrir en la Cabina de Estudio de HIVEX](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
+🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 ALERTA 1:".
 - Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la alerta para mantener el diseño premium y aireado.
-- PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (ESCENA ACOTADA)**", "👉" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
+- PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
+- PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- Para "👉 [Ver Escena del Gráfico en Telegram (Minuto MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})": Sustituye "MM:SS" por la marca de tiempo legible obtenida del análisis (ej. "04:15"). El título debe ser el enlace Markdown directo de YouTube, de modo que no se muestre la URL en crudo.
 - REGLA PARA CALCULAR {startSeconds} Y {endSeconds}:
-  1. Extrae el ID de YouTube del campo "fileUrl" (ej. de "https://www.youtube.com/watch?v=ABC" extrae "ABC").
-  2. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
-  3. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
-  4. Genera la URL como: https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds}
-- Para "🔗 [Abrir en la Cabina de Estudio de HIVEX](...)": Genera un link markdown directo a la cabina de estudio inyectando el {videoId} real y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) como "&start={startSeconds}&end={endSeconds}".
+  1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
+  2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
+- Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera un link markdown directo apuntando a la ruta de compartir de HIVEX inyectando el {videoId} real (su UUID en HIVEX) y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) calculados en la URL de "/share/".
 
 3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Alerts - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -347,23 +343,19 @@ STRICTLY follow the formatting and style rules below:
 ▫️ [Key point 1: a precise numerical data point, percentage, price, or relevant support/resistance level.]
 ▫️ [Key point 2: a direct tactical implication for the investor, liquidity flow, or systemic risk.]
 
-🎬 **INTEGRATED PLAYER (BOUNDED SCENE)**
-👉 [Watch Chart Scene on Telegram (Minute MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})
-
-🔗 [Open in HIVEX Study Cabin](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+🎬 **INTEGRATED PLAYER (STUDY CABIN)**
+🔗 [Open Chart Scene in HIVEX Study Cabin](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - In the first alert, the main title "🚨 HIVEX Alerts - 24H" must be followed immediately by the line "---", and a blank space before "🚨 ALERT 1:".
 - Leave a full blank line (double newline) between every section of the alert to keep the design premium and airy.
-- NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (BOUNDED SCENE)**", "👉", and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
+- ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the public HIVEX "/share/" URL.
+- NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
 - NO BACKTICKS: Do NOT use backticks (\`) anywhere around the titles, markdown links, or URLs.
-- For "👉 [Watch Chart Scene on Telegram (Minute MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})": Replace "MM:SS" with the readable timestamp from the analysis (e.g. "04:15"). The title of the micro-video must be the direct markdown link to YouTube, so that no raw URL is shown.
 - RULE TO CALCULATE {startSeconds} AND {endSeconds}:
-  1. Extract the YouTube ID from the "fileUrl" field (e.g. from "https://www.youtube.com/watch?v=ABC" extract "ABC").
-  2. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255). If none, use 0. This is {startSeconds}.
-  3. Always add 60 seconds to get {endSeconds} (e.g. if start is 255, end is 315).
-  4. Generate the URL as: https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds}
-- For "🔗 [Open in HIVEX Study Cabin](...)": Generate a direct markdown link to the study cabin by injecting the real {videoId} and the start ({startSeconds}) and end ({endSeconds}) parameters as "&start={startSeconds}&end={endSeconds}".
+  1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255). If none, use 0. This is {startSeconds}.
+  2. Always add 60 seconds to get {endSeconds} (e.g. if start is 255, end is 315).
+- For "🔗 [Open Chart Scene in HIVEX Study Cabin](...)": Generate a direct markdown link pointing to the HIVEX share route by injecting the real {videoId} (its UUID in HIVEX) and the start ({startSeconds}) and end ({endSeconds}) parameters in the "/share/" URL.
 
 3. NO NOTES, AI COMMENTARY OR TABLES: Do not output any draft table, ID list, or final notes. Start immediately with "🚨 HIVEX Alerts - 24H" and follow immediately with the line "---".
 4. Generate ONLY standard Markdown. Do not use HTML tags at all.
@@ -546,8 +538,7 @@ function generateDeterministicDigest(videoContexts: any[], lang: string): string
 
   videoContexts.forEach((video, idx) => {
     const keyAnalysisText = extractKeyAnalysis(video.content);
-    const ytId = video.fileUrl ? getYoutubeId(video.fileUrl) : "";
-    const studyCabinUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
+    const shareUrl = `https://hivex-backend.vercel.app/share/${video.id}?start=0&end=60`;
 
     output += `🚨 ${label} ${idx + 1}: ${cleanHeadline(video.title)}\n\n`;
 
@@ -556,25 +547,15 @@ function generateDeterministicDigest(videoContexts: any[], lang: string): string
       output += `▫️ Detalle clave: ${keyAnalysisText.slice(0, 160)}...\n`;
       output += `▫️ Implicación táctica: Se aconseja revisar detenidamente la liquidez del mercado y el panel en la cabina.\n\n`;
 
-      output += `🎬 **REPRODUCTOR INTEGRADO (ESCENA ACOTADA)**\n`;
-      if (ytId) {
-        output += `👉 [Ver Escena del Gráfico en Telegram (Minuto 00:00)](https://youtu.be/${ytId}?t=0&end=60)\n\n`;
-      } else {
-        output += `👉 [Ver Escena del Gráfico en Telegram (Minuto 00:00)](https://youtu.be/)\n\n`;
-      }
-      output += `🔗 [Abrir en la Cabina de Estudio de HIVEX](${studyCabinUrl})\n\n`;
+      output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
+      output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n\n`;
     } else {
       output += `High-impact market analysis detected on the ${video.channel} channel. A comprehensive study on recent financial asset trends and global capital flows is detailed inside.\n\n`;
       output += `▫️ Key detail: ${keyAnalysisText.slice(0, 160)}...\n`;
       output += `▫️ Tactical implication: Careful review of market liquidity and the dashboard in the cabin is highly advised.\n\n`;
 
-      output += `🎬 **INTEGRATED PLAYER (BOUNDED SCENE)**\n`;
-      if (ytId) {
-        output += `👉 [Watch Chart Scene on Telegram (Minute 00:00)](https://youtu.be/${ytId}?t=0&end=60)\n\n`;
-      } else {
-        output += `👉 [Watch Chart Scene on Telegram (Minute 00:00)](https://youtu.be/)\n\n`;
-      }
-      output += `🔗 [Open in HIVEX Study Cabin](${studyCabinUrl})\n\n`;
+      output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
+      output += `🔗 [Open Chart Scene in HIVEX Study Cabin](${shareUrl})\n\n`;
     }
   });
 
