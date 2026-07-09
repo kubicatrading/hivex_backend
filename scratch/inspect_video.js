@@ -7,11 +7,11 @@ const key = envText.match(/SUPABASE_PRODUCTION_SERVICE_ROLE_KEY=([^\r\n]+)/)?.[1
 const supabase = createClient(url, key);
 
 async function run() {
-  const targetId = '15c513a0-81bf-4880-b3e9-9524c7c0624f';
+  const targetId = '42b52e60-3045-4110-b8b3-23196e708643';
   
   const { data, error } = await supabase
     .from('documents')
-    .select('id, title, type, file_url')
+    .select('*')
     .eq('id', targetId);
     
   if (error) {
@@ -24,6 +24,7 @@ async function run() {
     console.log("RESULT_ID:", doc.id);
     console.log("RESULT_TITLE:", doc.title);
     console.log("RESULT_URL:", doc.file_url);
+    console.log("ALL_DATA:", JSON.stringify(doc, null, 2));
   } else {
     console.log("No document found");
   }

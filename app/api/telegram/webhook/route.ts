@@ -205,7 +205,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 1. Handle Slash Commands (/start or /help)
-    if (userText === "/start" || userText === "/help") {
+    let commandText = userText;
+    if (commandText.startsWith("/")) {
+      commandText = commandText.replace(/@\w+/, "");
+    }
+
+    if (commandText === "/start" || commandText === "/help") {
       const welcomeMarkdown = `**🤖 ASISTENTE BURSÁTIL HIVEX**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -238,7 +243,7 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
 
     // 2. Fetch all documents from Supabase to construct the prompt knowledge base
     let allDocs: any[] = [];
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_PRODUCTION_URL;
     const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
     let supabaseClient = defaultSupabase;
@@ -250,9 +255,14 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
     }
 
     try {
+      // Optimize query to avoid loading heavy columns (like full transcriptions)
+      // and limit context size to the last 100 entries to prevent Telegram webhook timeouts.
       const { data, error } = await supabaseClient
         .from("documents")
-        .select("*");
+        .select("id, title, type, file_url, created_at, metadata, description")
+        .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"])
+        .order("created_at", { ascending: false })
+        .limit(100);
       if (!error && data) {
         allDocs = data;
       } else if (error) {
@@ -400,10 +410,16 @@ Tienes dos propósitos de servicio principales:
     let geminiResponseText = "";
     let successfulModel = "";
 
+    // Clean any bot username references (e.g. @HivexBot) from the query so Gemini gets a clean question
+    let cleanedUserQuery = userText;
+    if (cleanedUserQuery.includes("@")) {
+      cleanedUserQuery = cleanedUserQuery.replace(/@\w+/g, "").trim();
+    }
+
     const contentsPayload = [
       {
         role: "user",
-        parts: [{ text: userText }]
+        parts: [{ text: cleanedUserQuery || userText }]
       }
     ];
 
