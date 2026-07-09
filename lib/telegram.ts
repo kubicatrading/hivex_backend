@@ -780,10 +780,11 @@ export async function sendTelegramMessageWithPhotos(
       const heading = headings[i];
       const explanation = explanations[i];
 
-      // Format caption
-      let captionMarkdown = explanation
+      // Format caption (only prepend heading if it was parsed as a formal heading from the markdown text)
+      const isFormalHeading = heading !== matches[i].alt && heading !== "Gráfico de Análisis";
+      let captionMarkdown = (isFormalHeading && explanation)
         ? `${heading}\n\n${explanation}`
-        : heading;
+        : (explanation || heading);
 
       // Extract share or video link and replace it with the dynamic clickable title of the full video
       const hivexVideoLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*)/i;
@@ -823,9 +824,9 @@ export async function sendTelegramMessageWithPhotos(
           }
         }
 
-        // Construct the clean, unrestricted full video link
-        const cleanFullShareUrl = `https://hivex-backend.vercel.app/share/${videoId}?start=0`;
-        const replacementLinkHtml = `🎬 <a href="${cleanFullShareUrl}"><b>${escapeHtml(videoTitle)}</b></a>`;
+        // Construct the clean, unrestricted full video link pointing directly to the Cabina de Estudio
+        const cleanFullShareUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
+        const replacementLinkHtml = `🔗 <a href="${cleanFullShareUrl}"><b>${escapeHtml(videoTitle)}</b></a>`;
 
         // Replace any Markdown link, HTML link, or raw URL in the caption with our clickable title link
         const lines = captionMarkdown.split("\n");
