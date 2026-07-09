@@ -504,6 +504,126 @@ export async function sendTelegramPhoto(
 }
 
 /**
+ * Helper to send a video to Telegram with HTML caption and auto-fallback to text.
+ * Since Telegram downloads the video and hosts it internally, it bypasses domain whitelists
+ * and guarantees native, inline playback across all Telegram clients (iOS, Android, Desktop).
+ */
+export async function sendTelegramVideo(
+  videoUrl: string,
+  caption?: string,
+  customChatId?: string,
+  fallbackText?: string
+): Promise<{
+  success: boolean;
+  simulated: boolean;
+  videoSent: boolean;
+  error?: string;
+}> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = customChatId || process.env.TELEGRAM_CHAT_ID;
+
+  // Try to extract videoId from videoUrl to build a direct link to the HIVEX study cabin in the fallback
+  const videoIdMatch = videoUrl.match(/\/clips\/([a-zA-Z0-9\-]+)/) || videoUrl.match(/\/snapshots\/([a-zA-Z0-9\-]+)/);
+  const videoId = videoIdMatch ? videoIdMatch[1] : null;
+  const cabinLink = videoId 
+    ? `\n🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram">Acceder a la Cabina de Estudio en HIVEX</a>` 
+    : "";
+
+  if (!botToken || !chatId) {
+    console.log("================ TELEGRAM VIDEO SIMULATION MODE ================");
+    console.log(`URL: ${videoUrl}`);
+    console.log(`Caption: ${caption || "[Ninguno]"}`);
+    if (fallbackText) {
+      console.log(`Fallback Text (would be used if sendVideo failed):`);
+      console.log(fallbackText);
+    }
+    console.log("=========================================================");
+    return { success: true, simulated: true, videoSent: true };
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendVideo`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        video: videoUrl,
+        caption: caption,
+        parse_mode: "HTML",
+        supports_streaming: true
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      const errorMsg = data.description || `HTTP status ${response.status}`;
+      console.warn("[Telegram Service] Failed to send video, falling back to message text. Error:", errorMsg);
+      
+      // Determine what text to send as fallback
+      let finalFallbackText = "";
+      if (fallbackText) {
+        let truncatedMarkdown = fallbackText;
+        if (truncatedMarkdown.length > 3500) {
+          truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
+        }
+        const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
+        finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: No se pudo reproducir el vídeo adjunto: ${videoUrl}]</i>${cabinLink}`;
+      } else if (caption) {
+        finalFallbackText = `${caption}\n\n<i>[Nota: No se pudo reproducir el vídeo adjunto: ${videoUrl}]</i>${cabinLink}`;
+        if (finalFallbackText.length > 4000) {
+          finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
+        }
+      } else {
+        finalFallbackText = `<i>[Nota: No se pudo reproducir el vídeo adjunto: ${videoUrl}]</i>${cabinLink}`;
+      }
+
+      console.log("[Telegram Fallback Debug] finalFallbackText constructed (API fail):", finalFallbackText);
+      
+      const msgResult = await sendTelegramMessage(finalFallbackText, chatId);
+      return { 
+        success: msgResult.success, 
+        simulated: msgResult.simulated, 
+        videoSent: false,
+        error: `Video failed (${errorMsg}), fallback success: ${msgResult.success}` 
+      };
+    }
+
+    console.log("[Telegram Service] Video dispatched successfully to chat:", chatId);
+    return { success: true, simulated: false, videoSent: true };
+  } catch (error: any) {
+    console.error("[Telegram Service] Video fetch error:", error);
+    let finalFallbackText = "";
+    if (fallbackText) {
+      let truncatedMarkdown = fallbackText;
+      if (truncatedMarkdown.length > 3500) {
+        truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
+      }
+      const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
+      finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: Error de red al reproducir el vídeo adjunto: ${videoUrl}]</i>${cabinLink}`;
+    } else if (caption) {
+      finalFallbackText = `${caption}\n\n<i>[Nota: Error de red al reproducir el vídeo adjunto: ${videoUrl}]</i>${cabinLink}`;
+      if (finalFallbackText.length > 4000) {
+        finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
+      }
+    } else {
+      finalFallbackText = `<i>[Nota: Error de red al reproducir el vídeo adjunto: ${videoUrl}]</i>${cabinLink}`;
+    }
+    
+    const msgResult = await sendTelegramMessage(finalFallbackText, chatId);
+    return { 
+      success: msgResult.success, 
+      simulated: msgResult.simulated, 
+      videoSent: false,
+      error: `Video crashed (${error?.message}), fallback success: ${msgResult.success}` 
+    };
+  }
+}
+
+
+/**
  * Parses markdown text, intercepts images (e.g. ![alt](url)), formats HTML,
  * and distributes them appropriately via /sendPhoto and /sendMessage.
  */
@@ -653,9 +773,10 @@ export async function sendTelegramMessageWithPhotos(
       }
     }
 
-    // 4.2. Send each image with its accompanying explanation as caption
+    // 4.2. Send each media file with its accompanying explanation as caption
     for (let i = 0; i < matches.length; i++) {
-      const imgUrl = resolveUrl(matches[i].url);
+      const mediaUrl = resolveUrl(matches[i].url);
+      const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") || mediaUrl.includes("/clips/");
       const heading = headings[i];
       const explanation = explanations[i];
 
@@ -667,25 +788,39 @@ export async function sendTelegramMessageWithPhotos(
       const captionHtml = markdownToTelegramHtml(captionMarkdown);
 
       if (captionHtml.length <= 950) {
-        // Send image with full description as caption
-        // Pass captionMarkdown as the fallbackText to ensure complete, tag-safe markdown truncation on failure
-        const photoResult = await sendTelegramPhoto(imgUrl, captionHtml, chatId, captionMarkdown);
-        if (!photoResult.success) {
-          console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
+        // Send media with full description as caption
+        if (isVideo) {
+          const videoResult = await sendTelegramVideo(mediaUrl, captionHtml, chatId, captionMarkdown);
+          if (!videoResult.success) {
+            console.warn(`[Telegram Service] Failed to send video ${i}:`, videoResult.error);
+          }
+        } else {
+          const photoResult = await sendTelegramPhoto(mediaUrl, captionHtml, chatId, captionMarkdown);
+          if (!photoResult.success) {
+            console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
+          }
         }
       } else {
-        // Caption exceeds 950 characters: send image with just the title/heading as caption
+        // Caption exceeds 950 characters: send media with just the title/heading as caption
         const headingHtml = markdownToTelegramHtml(heading);
-        // Pass captionMarkdown as fallbackText to send full explanation as text if sending photo fails
-        const photoResult = await sendTelegramPhoto(imgUrl, headingHtml, chatId, captionMarkdown);
-        if (!photoResult.success) {
-          console.warn(`[Telegram Service] Failed to send photo ${i} with heading:`, photoResult.error);
+        let mediaSent = false;
+
+        if (isVideo) {
+          const videoResult = await sendTelegramVideo(mediaUrl, headingHtml, chatId, captionMarkdown);
+          mediaSent = videoResult.videoSent;
+          if (!videoResult.success) {
+            console.warn(`[Telegram Service] Failed to send video ${i} with heading:`, videoResult.error);
+          }
+        } else {
+          const photoResult = await sendTelegramPhoto(mediaUrl, headingHtml, chatId, captionMarkdown);
+          mediaSent = photoResult.photoSent;
+          if (!photoResult.success) {
+            console.warn(`[Telegram Service] Failed to send photo ${i} with heading:`, photoResult.error);
+          }
         }
 
-        // If the photo was successfully sent, we must send the detailed explanation as separate message(s)
-        // If the photo failed, sendTelegramPhoto already fallback-sent the full unified explanation (via captionMarkdown),
-        // so we must skip sending the explanation separately to prevent duplicate messages.
-        if (photoResult.photoSent && explanation) {
+        // If the media was successfully sent, we must send the detailed explanation as separate message(s)
+        if (mediaSent && explanation) {
           const chunks = splitMarkdown(explanation, 3000);
           for (const chunk of chunks) {
             const chunkHtml = markdownToTelegramHtml(chunk);
