@@ -153,7 +153,7 @@ export async function GET(
     const userAgent = request.headers.get("user-agent") || "";
     const isBot = /telegrambot|twitterbot|facebookexternalhit|slackbot|discordbot|googlebot|bingbot|baiduspider/i.test(userAgent);
 
-    const redirectUrl = `${absoluteOrigin}/dashboard/videos?id=${finalVideoUuid}&start=${start}${end ? `&end=${end}` : ""}&from=telegram`;
+    const redirectUrl = `${absoluteOrigin}/dashboard/videos?id=${finalVideoUuid}&from=telegram`;
     const shareUrl = request.url;
     const coverImageUrl = `${absoluteOrigin}/snapshots/${finalVideoUuid}/${start}.jpg`;
 

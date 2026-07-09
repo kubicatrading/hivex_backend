@@ -777,7 +777,7 @@ export async function sendTelegramMessageWithPhotos(
     for (let i = 0; i < matches.length; i++) {
       const mediaUrl = resolveUrl(matches[i].url);
       const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") || mediaUrl.includes("/clips/");
-      const heading = headings[i];
+      let heading = headings[i];
       let explanation = explanations[i];
 
       // Format caption (only prepend heading if it was parsed as a formal heading from the markdown text)
@@ -823,6 +823,15 @@ export async function sendTelegramMessageWithPhotos(
             console.error("[Telegram Service] Failed to fetch video title for caption link replacement:", err);
           }
         }
+
+        // Use the real database video title for the heading if no custom markdown title is given
+        const finalHeading = isFormalHeading ? heading : videoTitle;
+        heading = finalHeading;
+
+        // Re-construct the captionMarkdown with the real database video title at the top
+        captionMarkdown = (explanation)
+          ? `**${finalHeading}**\n\n${explanation}`
+          : `**${finalHeading}**`;
 
         // Construct the clean, unrestricted full video link pointing directly to the Cabina de Estudio
         const cleanFullShareUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
