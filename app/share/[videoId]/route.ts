@@ -157,10 +157,12 @@ export async function GET(
     const shareUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}`;
     const coverImageUrl = `${absoluteOrigin}/snapshots/${finalVideoUuid}/${start}.jpg`;
 
-    // 4. Point the embedded video players (og:video and twitter:player) to our custom responsive iframe player URL
-    // Pointing to a text/html iframe URL guarantees Telegram UI will show a Play button on the cover image!
-    const activeVideoUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}&embed=true`;
-    const ogVideoType = "text/html";
+    // 4. Point the embedded video players directly to our pre-generated MP4 clip hosted on Supabase Storage.
+    // Since direct video files have no domain whitelist restrictions in Telegram clients, pointing og:video
+    // directly to the MP4 file and specifying "video/mp4" guarantees that Telegram will show a Play button on the card,
+    // and play it natively inline in the chat!
+    const activeVideoUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${youtubeId || finalVideoUuid || videoId}/${start}.mp4`;
+    const ogVideoType = "video/mp4";
 
     // 5. Only inject redirection headers for real human browsers to prevent crawlers from following the redirect
     // and losing the Open Graph metadata cards.
