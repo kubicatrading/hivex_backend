@@ -108,50 +108,30 @@ export async function GET(
     const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
     const absoluteOrigin = `${protocol}://${host}`;
 
+    const userAgent = request.headers.get("user-agent") || "";
+    const isBot = /telegrambot|twitterbot|facebookexternalhit|slackbot|discordbot|googlebot|bingbot|baiduspider/i.test(userAgent);
+
     const redirectUrl = `${absoluteOrigin}/dashboard/videos?id=${finalVideoUuid}&start=${start}${end ? `&end=${end}` : ""}&from=telegram`;
     const shareUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}`;
     const coverImageUrl = `${absoluteOrigin}/snapshots/${finalVideoUuid}/${start}.jpg`;
 
-    // 4. Construct direct YouTube Embed with bounds
-    // YouTube embed requires start and end to be integers
-    const startInt = parseInt(start, 10) || 0;
-    const endInt = parseInt(end, 10) || 0;
-    const embedUrl = `https://www.youtube.com/embed/${youtubeId}?start=${startInt}${endInt ? `&end=${endInt}` : ""}&autoplay=1`;
+    // 4. Construct direct MP4 video clip URL hosted on Supabase Storage (documents bucket)
+    // Since snapshots/clips are generated automatically during ingestion, we can point directly to it.
+    // This gives a 100% physically locked-and-blocked video player experience inline inside Telegram.
+    const activeVideoUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${youtubeId || finalVideoUuid || videoId}/${start}.mp4`;
+    const ogVideoType = "video/mp4";
 
-    // 4.1 Check if a pre-generated MP4 clip exists in Supabase Storage documents/clips/ folder
-    let videoClipUrl = "";
-    let ogVideoType = "text/html";
-    let activeVideoUrl = embedUrl;
+    // 5. Only inject redirection headers for real human browsers to prevent crawlers from following the redirect
+    // and losing the Open Graph metadata cards.
+    const redirectTags = !isBot ? `
+  <!-- Meta Refresh and Script for Instant Redirection to Native Video Player for Humans -->
+  <meta http-equiv="refresh" content="0;url=${redirectUrl}" />
+  <script>
+    window.location.href = ${JSON.stringify(redirectUrl)};
+  </script>
+` : "";
 
-    if (youtubeId) {
-      const ytClipUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${youtubeId}/${start}.mp4`;
-      try {
-        const headRes = await fetch(ytClipUrl, { method: "HEAD" });
-        if (headRes.ok) {
-          videoClipUrl = ytClipUrl;
-        }
-      } catch (_) {}
-    }
-
-    if (!videoClipUrl && finalVideoUuid) {
-      const uuidClipUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${finalVideoUuid}/${start}.mp4`;
-      try {
-        const headRes = await fetch(uuidClipUrl, { method: "HEAD" });
-        if (headRes.ok) {
-          videoClipUrl = uuidClipUrl;
-        }
-      } catch (_) {}
-    }
-
-    if (videoClipUrl) {
-      console.log(`[Share Route] Pre-generated MP4 clip detected at: ${videoClipUrl}. Enabling native Telegram block-and-lock playback.`);
-      activeVideoUrl = videoClipUrl;
-      ogVideoType = "video/mp4";
-    } else {
-      console.log(`[Share Route] Pre-generated MP4 clip not found. Falling back to bounded YouTube embed player.`);
-    }
-
-    // 5. Generate and return the HTML template containing the Open Graph & Twitter Cards headers for crawlers,
+    // 6. Generate and return the HTML template containing the Open Graph & Twitter Cards headers for crawlers,
     // and the Meta Refresh + JS Redirects for real users.
     const html = `<!DOCTYPE html>
 <html lang="es">
@@ -188,12 +168,7 @@ export async function GET(
   <meta name="twitter:player:width" content="1280" />
   <meta name="twitter:player:height" content="720" />
   <meta name="twitter:image" content="${coverImageUrl}" />
-
-  <!-- Meta Refresh and Script for Instant Redirection to Native Video Player -->
-  <meta http-equiv="refresh" content="0;url=${redirectUrl}" />
-  <script>
-    window.location.href = ${JSON.stringify(redirectUrl)};
-  </script>
+  ${redirectTags}
 </head>
 <body style="background-color: #0b0f19; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
   <div style="text-align: center; padding: 24px; max-width: 480px; border-radius: 12px; background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);">
