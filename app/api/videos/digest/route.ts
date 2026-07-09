@@ -283,102 +283,89 @@ async function generateSynthesizedDigest(videoContexts: any[], lang: string): Pr
   if (!apiKey) {
     throw new Error("Missing GEMINI_API_KEY environment variable. Unable to proceed with AI synthesis.");
   }
-
   const isSpanish = lang === "es";
 
-  const systemInstruction = isSpanish
-    ? `You are an elite financial news editor and investment analyst. Your task is to synthesize a daily premium investment news digest in Spanish based on analyzed video materials, replicating a specific high-fidelity format. Always output standard Markdown without HTML tags.`
-    : `You are an elite financial news editor and investment analyst. Your task is to synthesize a daily premium investment news digest in English based on analyzed video materials, replicating a specific high-fidelity format. Always output standard Markdown without HTML tags.`;
+   const systemInstruction = isSpanish
+    ? `You are an elite financial news editor and investment analyst. Your task is to synthesize a daily premium investment news digest in Spanish based on analyzed video materials, replicating a clean, high-impact, narrative-driven format. Always output standard Markdown without HTML tags.`
+    : `You are an elite financial news editor and investment analyst. Your task is to synthesize a daily premium investment news digest in English based on analyzed video materials, replicating a clean, high-impact, narrative-driven format. Always output standard Markdown without HTML tags.`;
 
   const promptText = isSpanish
-    ? `Eres un editor de noticias financieras de élite. Tu tarea es generar un informe unificado en español titulado "🚨 HIVEX Alerts - 24H" que sintetice las ideas clave de los vídeos analizados recientemente en HIVEX.
+    ? `Eres un editor de noticias financieras de élite. Tu tarea es generar un informe unificado en español titulado "🚨 HIVEX Alerts - 24H" que sintetice las ideas clave de los vídeos analizados recientemente en HIVEX de forma extremadamente premium, limpia y asertiva.
 
-Sigue ESTRICTAMENTE las siguientes reglas de formato y estilo:
-1. El título principal debe ser exactamente:
+Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
+1. El título principal del boletín debe ser exactamente:
 🚨 HIVEX Alerts - 24H
 ---
 
-2. Cada vídeo analizado debe presentarse con la estructura de ALERTA premium descrita a continuación (mantén el delimitador de alerta EXACTO para que nuestro fraccionador pueda dividir los mensajes). Asegúrate de dejar una línea en blanco (doble salto de línea) entre cada apartado para mejorar la legibilidad:
+2. Cada vídeo analizado debe presentarse con la estructura de ALERTA premium descrita a continuación. Asegúrate de dejar una línea en blanco completa (doble salto de línea) entre cada apartado para una legibilidad óptima en móviles:
 
 🚨 ALERTA [Número]: [Título de Impacto]
 
-[Breve gancho / párrafo introductorio de 2-3 líneas resumiendo de forma contundente la urgencia de la situación]
+[Párrafo narrativo integrado de 3 a 5 líneas. Debe ser un flujo editorial fluido, asertivo y de muy alto nivel, resumiendo de forma contundente la tesis central, la urgencia de la situación y la idea macroeconómica del ponente, sin usar subtítulos rígidos.]
 
-• El Incidente: [Síntesis precisa del suceso clave o tesis del ponente en base al material provisto.]
+▫️ [Punto clave 1: un dato numérico preciso, porcentaje, precio, o un nivel de soporte o resistencia relevante.]
+▫️ [Punto clave 2: una implicación táctica directa para el inversor, flujo de liquidez o riesgo sistémico.]
 
-• Implicaciones Financieras: [Flujos de capital, mercados de deuda, activos, liquidez, etc.]
+🎬 **REPRODUCTOR INTEGRADO (ESCENA ACOTADA)**
+👉 [Ver Escena del Gráfico en Telegram (Minuto MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})
 
-• Reacción de los Mercados / Niveles Técnicos: [Soportes bursátiles, Nasdaq, Brent, oro, etc.]
+🔗 [Abrir en la Cabina de Estudio de HIVEX](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
 
-🎬 Micro-vídeo del Gráfico: [Título_MicroVideo](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})
-
-🔗 Acceder a la Cabina de Estudio en HIVEX: [{videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-
-REGLAS CRÍTICAS DE MAQUETACIÓN Y ENLACES (CUMPLIMIENTO OBLIGATORIO):
+REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 ALERTA 1:".
-- Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la alerta:
-  - Entre el párrafo introductorio y la viñeta de "• El Incidente:".
-  - Entre cada viñeta "• El Incidente:", "• Implicaciones Financieras:", "• Reacción de los Mercados:".
-  - Entre la última viñeta y la sección "🎬 Micro-vídeo del Gráfico".
-  - Entre el enlace de YouTube y la sección "🔗 Acceder a la Cabina de Estudio".
-- PROHIBICIÓN DE VIÑETAS (BULLETS) EN ENLACES: Las líneas que comienzan con "🎬 Micro-vídeo del Gráfico:" y "🔗 Acceder a la Cabina de Estudio en HIVEX:" NO DEBEN LLEVAR VIÑETAS, ni puntos, ni asteriscos (*, -, •). Deben ser líneas de texto independientes y limpias.
+- Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la alerta para mantener el diseño premium y aireado.
+- PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (ESCENA ACOTADA)**", "👉" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- Para "🎬 Micro-vídeo del Gráfico: [Título_MicroVideo](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})": Sustituye "[Título_MicroVideo]" por un título breve, descriptivo e impactante de ese gráfico o escena específica analizada (por ejemplo: "S&P 500 CAPE Ratio Chart", "Hyperscalers Capex Curve", o en su defecto "Escena Clave de Análisis"). El título del micro-vídeo debe ser el enlace Markdown directo de YouTube, de modo que no se muestre la URL en crudo.
+- Para "👉 [Ver Escena del Gráfico en Telegram (Minuto MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})": Sustituye "MM:SS" por la marca de tiempo legible obtenida del análisis (ej. "04:15"). El título debe ser el enlace Markdown directo de YouTube, de modo que no se muestre la URL en crudo.
 - REGLA PARA CALCULAR {startSeconds} Y {endSeconds}:
   1. Extrae el ID de YouTube del campo "fileUrl" (ej. de "https://www.youtube.com/watch?v=ABC" extrae "ABC").
-  2. Busca cualquier marca de tiempo en el campo "charts" (ej. "04:15") y conviértela a segundos (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
+  2. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
   3. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
   4. Genera la URL como: https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds}
-- Para "🔗 Acceder a la Cabina de Estudio en HIVEX: [{videoTitle}]": Reemplaza "{videoTitle}" por el título original completo del vídeo, y haz que sea un link markdown directo a la cabina de estudio inyectando el {videoId} real y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) como "&start={startSeconds}&end={endSeconds}".
+- Para "🔗 [Abrir en la Cabina de Estudio de HIVEX](...)": Genera un link markdown directo a la cabina de estudio inyectando el {videoId} real y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) como "&start={startSeconds}&end={endSeconds}".
 
-3. PROHIBICIÓN DE NOTAS, RAZONAMIENTOS O TABLAS: No escribas ningún tipo de borrador, tabla de conversión de IDs, explicaciones previas ni notas al final. Comienza directamente con "🚨 HIVEX Alerts - 24H" y continúa inmediatamente con la línea de separación "---".
+3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Alerts - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
-5. Redacta el informe completo en español.
+5. Redacta todo el informe en español.
 
 Aquí tienes los datos de los vídeos recién analizados para sintetizar:
 ${JSON.stringify(videoContexts, null, 2)}
 `
-    : `You are an elite financial news editor. Your task is to generate a unified English report titled "🚨 HIVEX Alerts - 24H" that synthesizes the key insights from the videos recently analyzed on HIVEX.
+    : `You are an elite financial news editor. Your task is to generate a unified English report titled "🚨 HIVEX Alerts - 24H" that synthesizes the key insights from the videos recently analyzed on HIVEX in an extremely premium, clean, and assertive manner.
 
 STRICTLY follow the formatting and style rules below:
 1. The main title must be exactly:
 🚨 HIVEX Alerts - 24H
 ---
 
-2. Each analyzed video must be presented with the premium ALERT structure described below (maintain the EXACT alert delimiter so our message splitter can separate the messages). Make sure to leave a blank line (double newline) between each section for easy readability:
+2. Each analyzed video must be presented with the premium ALERT structure described below. Make sure to leave a full blank line (double newline) between each section for easy readability on mobile:
 
 🚨 ALERT [Number]: [Impact Title]
 
-[Short hook / introductory paragraph of 2-3 lines summarizing the urgency of the situation in a strong, compelling way]
+[Narrative integrated paragraph of 3 to 5 lines. It must be a fluid, high-level, and assertive editorial flow, summarizing the central thesis, the urgency of the situation, and the speaker's macroeconomic insight without rigid subheaders.]
 
-• The Incident: [Precise synthesis of the key event or speaker's thesis based on the provided material.]
+▫️ [Key point 1: a precise numerical data point, percentage, price, or relevant support/resistance level.]
+▫️ [Key point 2: a direct tactical implication for the investor, liquidity flow, or systemic risk.]
 
-• Financial Implications: [Capital flows, debt markets, assets, liquidity, etc.]
+🎬 **INTEGRATED PLAYER (BOUNDED SCENE)**
+👉 [Watch Chart Scene on Telegram (Minute MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})
 
-• Market Reaction / Technical Levels: [Stock supports, Nasdaq, Brent, gold, etc.]
-
-🎬 Micro-video of Chart: [Título_MicroVideo](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})
-
-🔗 Access Study Cabin in HIVEX: [{videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+🔗 [Open in HIVEX Study Cabin](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - In the first alert, the main title "🚨 HIVEX Alerts - 24H" must be followed immediately by the line "---", and a blank space before "🚨 ALERT 1:".
-- Leave a full blank line (double newline) between every section of the alert:
-  - Between the introductory paragraph and the "• The Incident:" bullet.
-  - Between each of the bullets: "• The Incident:", "• Financial Implications:", and "• Market Reaction:".
-  - Between the last bullet and the "🎬 Micro-video of Chart:" section.
-  - Between the YouTube link and the "🔗 Access Study Cabin in HIVEX:" section.
-- NO BULLETS ON LINKS: The lines starting with "🎬 Micro-video of Chart:" and "🔗 Access Study Cabin in HIVEX:" MUST NOT be bullet points! Do NOT prefix them with asterisks, hyphens, or "•". They must be clean, top-level text paragraphs.
+- Leave a full blank line (double newline) between every section of the alert to keep the design premium and airy.
+- NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (BOUNDED SCENE)**", "👉", and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
 - NO BACKTICKS: Do NOT use backticks (\`) anywhere around the titles, markdown links, or URLs.
-- For "🎬 Micro-video of Chart: [Título_MicroVideo](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})": Replace "[Título_MicroVideo]" with a brief, highly descriptive and impactful title of that specific chart or scene analyzed (e.g. "S&P 500 CAPE Ratio Chart", "Hyperscalers Capex Curve" or fallback to "Key Analysis Scene"). The title of the micro-video must be the direct markdown link to YouTube, so that no raw URL is shown.
+- For "👉 [Watch Chart Scene on Telegram (Minute MM:SS)](https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds})": Replace "MM:SS" with the readable timestamp from the analysis (e.g. "04:15"). The title of the micro-video must be the direct markdown link to YouTube, so that no raw URL is shown.
 - RULE TO CALCULATE {startSeconds} AND {endSeconds}:
   1. Extract the YouTube ID from the "fileUrl" field (e.g. from "https://www.youtube.com/watch?v=ABC" extract "ABC").
-  2. Find any timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255). If none, use 0. This is {startSeconds}.
+  2. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255). If none, use 0. This is {startSeconds}.
   3. Always add 60 seconds to get {endSeconds} (e.g. if start is 255, end is 315).
   4. Generate the URL as: https://youtu.be/{youtubeId}?t={startSeconds}&end={endSeconds}
-- For "🔗 Access Study Cabin in HIVEX: [{videoTitle}]": Replace "{videoTitle}" with the complete original title of the video, making it a direct markdown link to the study cabin by injecting the real {videoId} and the start ({startSeconds}) and end ({endSeconds}) parameters as "&start={startSeconds}&end={endSeconds}".
+- For "🔗 [Open in HIVEX Study Cabin](...)": Generate a direct markdown link to the study cabin by injecting the real {videoId} and the start ({startSeconds}) and end ({endSeconds}) parameters as "&start={startSeconds}&end={endSeconds}".
 
-3. NO NOTES, REASONING OR TABLES: Do not output any draft table, ID conversion list, intermediate math, or final notes. Start immediately with "🚨 HIVEX Alerts - 24H" and follow immediately with the line "---".
+3. NO NOTES, AI COMMENTARY OR TABLES: Do not output any draft table, ID list, or final notes. Start immediately with "🚨 HIVEX Alerts - 24H" and follow immediately with the line "---".
 4. Generate ONLY standard Markdown. Do not use HTML tags at all.
 5. Write the entire report in English.
 
@@ -558,34 +545,36 @@ function generateDeterministicDigest(videoContexts: any[], lang: string): string
   const label = isSpanish ? "ALERTA" : "ALERT";
 
   videoContexts.forEach((video, idx) => {
-    const studyCabinUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
     const keyAnalysisText = extractKeyAnalysis(video.content);
-    
-    // Parse YouTube ID
     const ytId = video.fileUrl ? getYoutubeId(video.fileUrl) : "";
-    
+    const studyCabinUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
+
     output += `🚨 ${label} ${idx + 1}: ${cleanHeadline(video.title)}\n\n`;
-    
+
     if (isSpanish) {
-      output += `Análisis de mercado de alto impacto detectado en el canal de ${video.channel}.\n\n`;
-      output += `• El Incidente: Síntesis de la tesis del ponente sobre activos financieros y tendencias recientes. Detalle: ${keyAnalysisText.slice(0, 200)}...\n\n`;
-      output += `• Implicaciones Financieras: Requiere revisión detenida del flujo de liquidez y mercado de deuda en la plataforma.\n\n`;
-      output += `• Reacción de los Mercados / Niveles Técnicos: Verifique niveles críticos en el panel completo.\n\n`;
-      
+      output += `Análisis de mercado de alto impacto detectado en el canal de ${video.channel}. Se detalla un estudio exhaustivo sobre las tendencias recientes de los activos financieros y flujos de capital globales.\n\n`;
+      output += `▫️ Detalle clave: ${keyAnalysisText.slice(0, 160)}...\n`;
+      output += `▫️ Implicación táctica: Se aconseja revisar detenidamente la liquidez del mercado y el panel en la cabina.\n\n`;
+
+      output += `🎬 **REPRODUCTOR INTEGRADO (ESCENA ACOTADA)**\n`;
       if (ytId) {
-        output += `🎬 Micro-vídeo del Gráfico: [Escena Clave de Análisis](https://youtu.be/${ytId}?t=0&end=60)\n\n`;
+        output += `👉 [Ver Escena del Gráfico en Telegram (Minuto 00:00)](https://youtu.be/${ytId}?t=0&end=60)\n\n`;
+      } else {
+        output += `👉 [Ver Escena del Gráfico en Telegram (Minuto 00:00)](https://youtu.be/)\n\n`;
       }
-      output += `🔗 Acceder a la Cabina de Estudio en HIVEX: [${video.title}](${studyCabinUrl})\n\n`;
+      output += `🔗 [Abrir en la Cabina de Estudio de HIVEX](${studyCabinUrl})\n\n`;
     } else {
-      output += `High-impact market analysis detected on the ${video.channel} channel.\n\n`;
-      output += `• The Incident: Synthesis of the speaker's thesis on financial assets and recent trends. Detail: ${keyAnalysisText.slice(0, 200)}...\n\n`;
-      output += `• Financial Implications: Requires careful review of liquidity flow and debt market on the platform.\n\n`;
-      output += `• Market Reaction / Technical Levels: Verify critical levels in the full study cabin dashboard.\n\n`;
-      
+      output += `High-impact market analysis detected on the ${video.channel} channel. A comprehensive study on recent financial asset trends and global capital flows is detailed inside.\n\n`;
+      output += `▫️ Key detail: ${keyAnalysisText.slice(0, 160)}...\n`;
+      output += `▫️ Tactical implication: Careful review of market liquidity and the dashboard in the cabin is highly advised.\n\n`;
+
+      output += `🎬 **INTEGRATED PLAYER (BOUNDED SCENE)**\n`;
       if (ytId) {
-        output += `🎬 Micro-video of Chart: [Key Analysis Scene](https://youtu.be/${ytId}?t=0&end=60)\n\n`;
+        output += `👉 [Watch Chart Scene on Telegram (Minute 00:00)](https://youtu.be/${ytId}?t=0&end=60)\n\n`;
+      } else {
+        output += `👉 [Watch Chart Scene on Telegram (Minute 00:00)](https://youtu.be/)\n\n`;
       }
-      output += `🔗 Access Study Cabin in HIVEX: [${video.title}](${studyCabinUrl})\n\n`;
+      output += `🔗 [Open in HIVEX Study Cabin](${studyCabinUrl})\n\n`;
     }
   });
 
