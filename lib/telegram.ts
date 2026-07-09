@@ -826,13 +826,13 @@ export async function sendTelegramMessageWithPhotos(
 
         // Construct the clean, unrestricted full video link pointing directly to the Cabina de Estudio
         const cleanFullShareUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
-        const replacementLinkHtml = `🔗 <a href="${cleanFullShareUrl}"><b>${escapeHtml(videoTitle)}</b></a>`;
+        const replacementLinkMarkdown = `🔗 [**${videoTitle}**](${cleanFullShareUrl})`;
 
         // Replace any Markdown link, HTML link, or raw URL in the caption with our clickable title link
         const lines = captionMarkdown.split("\n");
         const updatedLines = lines.map(line => {
           if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena")) {
-            return replacementLinkHtml;
+            return replacementLinkMarkdown;
           }
           return line;
         });
@@ -843,7 +843,7 @@ export async function sendTelegramMessageWithPhotos(
           const expLines = explanation.split("\n");
           const updatedExpLines = expLines.map(line => {
             if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena")) {
-              return replacementLinkHtml;
+              return replacementLinkMarkdown;
             }
             return line;
           });
