@@ -9,7 +9,17 @@ const YT_CHANNELS: Record<string, string> = {
   "The Rich Dad Channel": "UCuifm5ns5SRG8LZJ6gCfKyw",
   "Trends Journal": "UCKNT8BDOkXegtCD9OghepWA",
   "Integral Forextv": "UCU1l_gWfDhmvG2TgLMuK2ag",
-  "Kanal Finans": "UCGBytjbMXiF1nbe6HD7iORQ"
+  "Kanal Finans": "UCGBytjbMXiF1nbe6HD7iORQ",
+  "Norgesbank Investment Management": "UCRhQsN8AVIfZuBNeRV1A37w",
+  "George Gammon": "UCpvyOqtEc86X8w8_Se0t4-w",
+  "Clive Thompson": "UCrlFUp4OtXJSiDfiPMFnk3A",
+  "ITM Trading": "UCom1i7_NVeSUNyJyuR_NbMQ",
+  "Spegtacular": "UCTkDDZaijqu0QzUOsDMk56g",
+  "Soar Financially": "UCiq8gIFmHOAWjVoQPzJWwng",
+  "Rebel Capitalist": "UCNjyEXSvYUUCzagFAKmaJ1Q",
+  "Okan Yorganci": "UCi6gOcW2KfRyUCO4ox-AaLQ",
+  "Prof. Dr. Emre Alkin": "UCq3M_HY-fZWJ_U_QnegqmbA",
+  "Smart Silverstacker": "UC1FUQYPxrtVt8bd0516Pjbw"
 };
 
 function isFreedomChannel(channelName: string | null | undefined): boolean {
@@ -86,8 +96,6 @@ async function handleSync(request: Request) {
     }
 
     const now = Date.now();
-    // Allow syncing any video published on or after June 24, 2026 (including historical test videos)
-    const CUTOFF_TIMESTAMP = Date.parse("2026-06-24T00:00:00Z");
     const syncedVideos: AnalysedVideo[] = [];
 
     for (const channelTitle of channelsToSync) {
@@ -97,7 +105,25 @@ async function handleSync(request: Request) {
         continue;
       }
 
-      console.log(`[Sync] Synchronizing channel: "${channelTitle}" (${channelId})...`);
+      // July 1st, 2026 cutoff for new channels, June 24th, 2026 for original channels
+      const isNewChannel = [
+        "Norgesbank Investment Management",
+        "George Gammon",
+        "Clive Thompson",
+        "ITM Trading",
+        "Spegtacular",
+        "Soar Financially",
+        "Rebel Capitalist",
+        "Okan Yorganci",
+        "Prof. Dr. Emre Alkin",
+        "Smart Silverstacker"
+      ].includes(channelTitle);
+
+      const CUTOFF_TIMESTAMP = isNewChannel
+        ? Date.parse("2026-07-01T00:00:00Z")
+        : Date.parse("2026-06-24T00:00:00Z");
+
+      console.log(`[Sync] Synchronizing channel: "${channelTitle}" (${channelId}) with cutoff ${isNewChannel ? "2026-07-01" : "2026-06-24"}...`);
       const ytRssFeed = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
 
       let xmlText = "";

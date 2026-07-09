@@ -65,7 +65,17 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     "The Rich Dad Channel",
     "Trends Journal",
     "Integral Forextv",
-    "Kanal Finans"
+    "Kanal Finans",
+    "Norgesbank Investment Management",
+    "George Gammon",
+    "Clive Thompson",
+    "ITM Trading",
+    "Spegtacular",
+    "Soar Financially",
+    "Rebel Capitalist",
+    "Okan Yorganci",
+    "Prof. Dr. Emre Alkin",
+    "Smart Silverstacker"
   ];
 
   const [canalesOpen, setCanalesOpen] = useState(true);

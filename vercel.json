@@ -40,6 +40,14 @@
     {
       "path": "/api/videos/monitor-analysis",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/videos/alerts-24h",
+      "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/videos/investors-24h",
+      "schedule": "0 7 * * *"
     }
   ]
 }
