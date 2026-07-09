@@ -144,8 +144,127 @@ export async function GET(
     }
 
     if (isNotFound) {
-      console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Returning instant YouTube thumbnail redirect fallback.`);
-      return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+      console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Checking for dynamic extraction support...`);
+      
+      // Parse seconds to integer
+      const secondsInt = parseInt(fileKey.replace(".jpg", ""), 10);
+      if (isNaN(secondsInt)) {
+        return new NextResponse("Invalid seconds parameter", { status: 400 });
+      }
+
+      // Reconstruct the YouTube URL
+      let youtubeUrl = rawFileUrl;
+      if (!youtubeUrl) {
+        youtubeUrl = `https://www.youtube.com/watch?v=${resolvedVideoId}`;
+      }
+
+      // Check if yt-dlp and ffmpeg are available on the host machine
+      let ytdlpPath: string;
+      let ffmpegPath: string;
+      try {
+        ytdlpPath = await findExecutable("yt-dlp");
+        ffmpegPath = await findExecutable("ffmpeg");
+        
+        // Basic execution check
+        await execAsync(`"${ytdlpPath}" --version`);
+        await execAsync(`"${ffmpegPath}" -version`);
+      } catch (err: any) {
+        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Gracefully redirecting to YouTube cover to prevent Vercel block/timeout.`);
+        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+      }
+
+      console.log(`[Snapshots Route] Extraction tools verified. Starting on-demand extraction for ${resolvedVideoId} at ${secondsInt}s...`);
+
+      // Define temp directory and file output path
+      const tempDir = path.join(process.cwd(), "public", "snapshots", "temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      const tempOut = path.join(tempDir, `${resolvedVideoId}_${secondsInt}_${Date.now()}.jpg`);
+
+      // Resolve stream URL using yt-dlp
+      let streamUrl = "";
+      try {
+        const { stdout } = await execAsync(`"${ytdlpPath}" -f "best[ext=mp4]/best" -g "${youtubeUrl}"`);
+        streamUrl = stdout.trim();
+      } catch (err: any) {
+        console.warn(`[Snapshots Route] yt-dlp first attempt failed: ${err.message}. Trying fallback...`);
+        try {
+          const { stdout } = await execAsync(`"${ytdlpPath}" -g "${youtubeUrl}"`);
+          streamUrl = stdout.trim();
+        } catch (fallbackErr: any) {
+          console.error(`[Snapshots Route] yt-dlp fallback failed: ${fallbackErr.message}`);
+          return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+        }
+      }
+
+      // Extract the frame using ffmpeg
+      try {
+        await execAsync(`"${ffmpegPath}" -y -ss ${secondsInt} -i "${streamUrl}" -vframes 1 -q:v 2 "${tempOut}"`);
+      } catch (err: any) {
+        console.error(`[Snapshots Route] ffmpeg frame extraction failed: ${err.message}`);
+        if (fs.existsSync(tempOut)) {
+          try { fs.unlinkSync(tempOut); } catch (_) {}
+        }
+        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+      }
+
+      if (!fs.existsSync(tempOut)) {
+        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+      }
+
+      // Verify if the extracted frame is a chart/graph/table using AI Snapshot Guard
+      const isChart = await isImageAChart(tempOut);
+      if (!isChart) {
+        console.log(`[Snapshots Route] AI Guard: Discarding non-chart dynamic snapshot at ${secondsInt}s. Deleting local temp file.`);
+        try {
+          fs.unlinkSync(tempOut);
+        } catch (_) {}
+        // If it is not a chart, return the standard YouTube cover so we still have a beautiful preview
+        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+      }
+
+      const fileBuffer = fs.readFileSync(tempOut);
+
+      // Clean up temp file immediately
+      try {
+        fs.unlinkSync(tempOut);
+      } catch (unlinkErr) {
+        console.error(`[Snapshots Route] Temp file cleanup error:`, unlinkErr);
+      }
+
+      // Upload to Supabase Storage as a background/cached task so next time we bypass this
+      if (supabaseUrl && supabaseKey) {
+        try {
+          const supabase = createClient(supabaseUrl, supabaseKey, {
+            auth: { persistSession: false },
+          });
+          const uploadPath = `${resolvedVideoId}/${fileKey}`;
+          const { error: uploadError } = await supabase.storage
+              .from("snapshots")
+              .upload(uploadPath, fileBuffer, {
+                contentType: "image/jpeg",
+                upsert: true,
+              });
+
+          if (uploadError) {
+            console.error(`[Snapshots Route] Supabase upload failed for ${uploadPath}:`, uploadError.message);
+          } else {
+            console.log(`[Snapshots Route] Successfully generated and uploaded fallback snapshot: ${uploadPath}`);
+          }
+        } catch (uploadErr) {
+          console.error(`[Snapshots Route] Failed to cache generated snapshot to Supabase:`, uploadErr);
+        }
+      }
+
+      // Return the buffer directly to the user
+      return new NextResponse(fileBuffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/jpeg",
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
     }
 
     let isNotFoundFinal = response.status === 404;

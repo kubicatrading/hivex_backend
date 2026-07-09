@@ -292,6 +292,49 @@ export async function extractSnapshotsInBackground(
             console.error(`[Snapshot Extractor] Error during Supabase upload for ${chart.seconds}s:`, uploadErr);
           }
         }
+
+        // Extract and upload native mobile-optimized MP4 video clip if it is a valid chart
+        if (extracted && isChart && supabaseAdmin) {
+          const clipOutputPath = path.join(snapshotsDir, `${chart.seconds}.mp4`);
+          let clipExtracted = false;
+
+          if (fs.existsSync(clipOutputPath)) {
+            console.log(`[Snapshot Extractor] Video clip at ${chart.seconds}s already exists, skipping extraction.`);
+            clipExtracted = true;
+          } else {
+            console.log(`[Snapshot Extractor] Extracting 60s native mobile-optimized video clip at ${chart.timestamp} (${chart.seconds}s) to: ${clipOutputPath}`);
+            try {
+              // Extract a 60s H.264 MP4 clip with AAC audio (fully compatible with Telegram native player)
+              const ffmpegClipCmd = `ffmpeg -y -ss ${chart.seconds} -i "${streamUrl}" -t 60 -c:v libx264 -c:a aac -strict -2 -b:v 800k -b:a 128k -profile:v baseline -level 3.0 "${clipOutputPath}"`;
+              await runCmd(ffmpegClipCmd);
+              console.log(`[Snapshot Extractor] Successfully saved video clip: ${chart.seconds}.mp4`);
+              clipExtracted = true;
+            } catch (ffmpegErr) {
+              console.error(`[Snapshot Extractor] Failed to extract video clip at ${chart.seconds}s via ffmpeg:`, ffmpegErr);
+            }
+          }
+
+          if (clipExtracted && fs.existsSync(clipOutputPath)) {
+            try {
+              const clipBuffer = fs.readFileSync(clipOutputPath);
+              const uploadClipPath = `clips/${resolvedVideoId}/${chart.seconds}.mp4`;
+              console.log(`[Snapshot Extractor] Uploading video clip to Supabase Storage bucket documents/${uploadClipPath}...`);
+              const { error: uploadError } = await supabaseAdmin.storage
+                .from("documents")
+                .upload(uploadClipPath, clipBuffer, {
+                  contentType: "video/mp4",
+                  upsert: true
+                });
+              if (uploadError) {
+                console.error(`[Snapshot Extractor] Failed to upload video clip "${uploadClipPath}" to Supabase:`, uploadError.message);
+              } else {
+                console.log(`[Snapshot Extractor] Video clip successfully uploaded to Supabase Storage: ${uploadClipPath}`);
+              }
+            } catch (uploadErr) {
+              console.error(`[Snapshot Extractor] Error during Supabase video clip upload for ${chart.seconds}s:`, uploadErr);
+            }
+          }
+        }
       }
 
       console.log(`[Snapshot Extractor] Background snapshot extraction job completed for video ID: ${resolvedVideoId}`);

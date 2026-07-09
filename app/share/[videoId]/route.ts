@@ -108,7 +108,7 @@ export async function GET(
     const protocol = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
     const absoluteOrigin = `${protocol}://${host}`;
 
-    const redirectUrl = `https://youtu.be/${youtubeId}?t=${start}`;
+    const redirectUrl = `${absoluteOrigin}/dashboard/videos?id=${finalVideoUuid}&start=${start}${end ? `&end=${end}` : ""}&from=telegram`;
     const shareUrl = `${absoluteOrigin}/share/${videoId}?start=${start}${end ? `&end=${end}` : ""}`;
     const coverImageUrl = `${absoluteOrigin}/snapshots/${finalVideoUuid}/${start}.jpg`;
 
@@ -117,6 +117,39 @@ export async function GET(
     const startInt = parseInt(start, 10) || 0;
     const endInt = parseInt(end, 10) || 0;
     const embedUrl = `https://www.youtube.com/embed/${youtubeId}?start=${startInt}${endInt ? `&end=${endInt}` : ""}&autoplay=1`;
+
+    // 4.1 Check if a pre-generated MP4 clip exists in Supabase Storage documents/clips/ folder
+    let videoClipUrl = "";
+    let ogVideoType = "text/html";
+    let activeVideoUrl = embedUrl;
+
+    if (youtubeId) {
+      const ytClipUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${youtubeId}/${start}.mp4`;
+      try {
+        const headRes = await fetch(ytClipUrl, { method: "HEAD" });
+        if (headRes.ok) {
+          videoClipUrl = ytClipUrl;
+        }
+      } catch (_) {}
+    }
+
+    if (!videoClipUrl && finalVideoUuid) {
+      const uuidClipUrl = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/clips/${finalVideoUuid}/${start}.mp4`;
+      try {
+        const headRes = await fetch(uuidClipUrl, { method: "HEAD" });
+        if (headRes.ok) {
+          videoClipUrl = uuidClipUrl;
+        }
+      } catch (_) {}
+    }
+
+    if (videoClipUrl) {
+      console.log(`[Share Route] Pre-generated MP4 clip detected at: ${videoClipUrl}. Enabling native Telegram block-and-lock playback.`);
+      activeVideoUrl = videoClipUrl;
+      ogVideoType = "video/mp4";
+    } else {
+      console.log(`[Share Route] Pre-generated MP4 clip not found. Falling back to bounded YouTube embed player.`);
+    }
 
     // 5. Generate and return the HTML template containing the Open Graph & Twitter Cards headers for crawlers,
     // and the Meta Refresh + JS Redirects for real users.
@@ -134,9 +167,9 @@ export async function GET(
   <meta property="og:url" content="${shareUrl}" />
   
   <!-- Telegram & Facebook Embedded Video Player -->
-  <meta property="og:video" content="${embedUrl}" />
-  <meta property="og:video:secure_url" content="${embedUrl}" />
-  <meta property="og:video:type" content="text/html" />
+  <meta property="og:video" content="${activeVideoUrl}" />
+  <meta property="og:video:secure_url" content="${activeVideoUrl}" />
+  <meta property="og:video:type" content="${ogVideoType}" />
   <meta property="og:video:width" content="1280" />
   <meta property="og:video:height" content="720" />
   
@@ -151,7 +184,7 @@ export async function GET(
   <meta name="twitter:card" content="player" />
   <meta name="twitter:title" content="${videoTitle}" />
   <meta name="twitter:description" content="Gráfico clave analizado en la Cabina de Estudio interactiva de HIVEX." />
-  <meta name="twitter:player" content="${embedUrl}" />
+  <meta name="twitter:player" content="${activeVideoUrl}" />
   <meta name="twitter:player:width" content="1280" />
   <meta name="twitter:player:height" content="720" />
   <meta name="twitter:image" content="${coverImageUrl}" />
