@@ -778,7 +778,7 @@ export async function sendTelegramMessageWithPhotos(
       const mediaUrl = resolveUrl(matches[i].url);
       const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") || mediaUrl.includes("/clips/");
       const heading = headings[i];
-      const explanation = explanations[i];
+      let explanation = explanations[i];
 
       // Format caption (only prepend heading if it was parsed as a formal heading from the markdown text)
       const isFormalHeading = heading !== matches[i].alt && heading !== "Gráfico de Análisis";
@@ -795,7 +795,7 @@ export async function sendTelegramMessageWithPhotos(
 
         // Fetch the video's actual title from the database
         let videoTitle = "Cabina de Estudio (HIVEX)";
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
         const supabaseAdmin = getSupabaseAdmin();
         if (supabaseAdmin) {
           try {
@@ -837,6 +837,18 @@ export async function sendTelegramMessageWithPhotos(
           return line;
         });
         captionMarkdown = updatedLines.join("\n").trim();
+
+        // Also replace inside the separate explanation block (in case caption length is > 950 and sent as a split message)
+        if (explanation) {
+          const expLines = explanation.split("\n");
+          const updatedExpLines = expLines.map(line => {
+            if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena")) {
+              return replacementLinkHtml;
+            }
+            return line;
+          });
+          explanation = updatedExpLines.join("\n").trim();
+        }
       }
 
       const captionHtml = markdownToTelegramHtml(captionMarkdown);
