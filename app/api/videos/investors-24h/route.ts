@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   return handleInvestors(request);
 }
@@ -273,9 +275,11 @@ Sigue ESTRICTAMENTE las siguientes reglas de priorización y síntesis:
 - CONTEXTO HISTÓRICO: Complementa y enriquece estas decisiones estratégicas utilizando el trasfondo, tesis previas o datos de los vídeos marcados como "contextType: Histórico (Base de Conocimiento General)". Úsalos para cruzar datos y dar profundidad macroeconómica al informe bursátil.
 
 Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
-1. El título principal del boletín debe ser exactamente:
+1. El boletín debe iniciarse exactamente con el siguiente encabezado y una brevisima presentación formal:
 🚨 HIVEX Investors - 24H
 ---
+
+[Un párrafo de presentación formal del inversor de HIVEX extremadamente corto, sobrio, directo y premium (de un párrafo breve de no más de una o dos líneas, máximo 30-40 palabras) que exponga con claridad el propósito de las decisiones tácticas presentadas hoy, sirviendo como preámbulo formal al inicio absoluto de la comunicación antes de cualquier decisión.]
 
 2. Cada decisión táctica debe estructurarse de manera premium tal como se describe abajo. Deja un doble salto de línea entre cada bloque:
 
@@ -291,7 +295,7 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
-- En la primera recomendación, el título "🚨 HIVEX Investors - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 DECISIÓN 1:".
+- En la primera recomendación, el título "🚨 HIVEX Investors - 24H" debe ir seguido inmediatamente por la línea de separación "---", la breve presentación formal, y un espacio en blanco antes de "🚨 DECISIÓN 1:".
 - Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la decisión para mantener un diseño premium y respirable.
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 // Standard YouTube feeds map
 const YT_CHANNELS: Record<string, string> = {
   "Andrei Jikh": "UCGy7SkBjcIAgTiwkXEtPnYg",
@@ -61,18 +63,37 @@ export async function POST(request: Request) {
 
 async function handleSync(request: Request) {
   try {
-    // 1. Validate Secret Auth Token to prevent unauthorized invocation
+    // 1. Validate Secret Auth Token (for cron/scripts) or Supabase user session (for dashboard manual sync)
     const { searchParams } = new URL(request.url);
-    const authHeader = request.headers.get("authorization");
-    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+    let isAuthorized = false;
 
-    const cronSecret = searchParams.get("secret") || 
-                       request.headers.get("x-cron-secret") || 
-                       bearerToken;
-
+    // Check 1: Cron Secret validation
+    const cronSecret = searchParams.get("secret") || request.headers.get("x-cron-secret");
     const expectedSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (expectedSecret && cronSecret === expectedSecret) {
+      isAuthorized = true;
+    }
 
-    if (expectedSecret && cronSecret !== expectedSecret) {
+    // Check 2: Supabase active session JWT token validation (for Dashboard manual sync)
+    const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+    
+    if (!isAuthorized && bearerToken) {
+      const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (supabaseUrl && supabaseAnonKey) {
+        const { createClient } = await import("@supabase/supabase-js");
+        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false }
+        });
+        const { data: { user }, error } = await supabase.auth.getUser(bearerToken);
+        if (user && !error) {
+          isAuthorized = true;
+        }
+      }
+    }
+
+    if (!isAuthorized) {
       return NextResponse.json({ success: false, error: "Unauthorized access" }, { status: 401 });
     }
 

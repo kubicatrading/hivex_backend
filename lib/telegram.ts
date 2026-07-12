@@ -125,16 +125,13 @@ export function formatVideoNotification({
 
   let message = `<b>HIVEX Update - AddNewVideo</b>\n`;
   message += `---\n`;
-  message += `<b>${labelTitle}:</b> ${escapedTitle}\n`;
+  if (targetId) {
+    message += `<b>${labelTitle}:</b> <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">${escapedTitle}</a>\n`;
+  } else {
+    message += `<b>${labelTitle}:</b> <a href="https://hivex-backend.vercel.app/dashboard/videos?from=telegram">${escapedTitle}</a>\n`;
+  }
   message += `<b>${labelChannel}:</b> ${escapedChannel}\n`;
   message += `<b>${labelDate}:</b> ${dateStr}\n`;
-  
-  if (targetId) {
-    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">${escapedTitle} - Cabina de Estudio HIVEX</a>\n`;
-  } else {
-    message += `🔗 <a href="https://hivex-backend.vercel.app/dashboard/videos?from=telegram">Cabina de Estudio HIVEX</a>\n`;
-  }
-  
   message += `---`;
   return message;
 }

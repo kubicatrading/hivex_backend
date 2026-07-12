@@ -4,6 +4,8 @@ import { transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 import { sendTelegramMessage, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
 
+export const dynamic = "force-dynamic";
+
 // Server-side helper to split transcription into verbatim, summary, charts, and report segments
 function splitTranscription(text: string) {
   if (!text) return { transcription: "", summary: "", charts: "", report: "" };
@@ -342,8 +344,17 @@ export async function GET(request: NextRequest) {
 
       const isPending = !hasTranscriptionInMetadata || !hasAnalysisDoc;
       const isFailedPermanently = failedAttempts >= 5;
-
       return isPending && !isFailedPermanently;
+    });
+
+    // Sort pending videos: prioritize those with fewer failed attempts (0 attempts first) to avoid a blocked video stalling the queue
+    pendingVideos.sort((a: any, b: any) => {
+      const attemptsA = a.metadata?.analysis_failed_attempts || 0;
+      const attemptsB = b.metadata?.analysis_failed_attempts || 0;
+      if (attemptsA !== attemptsB) {
+        return attemptsA - attemptsB;
+      }
+      return Date.parse(b.created_at) - Date.parse(a.created_at);
     });
 
     console.log(`[Monitor Cron] Found ${pendingVideos.length} pending videos. (Out of ${videos.length} total videos)`);

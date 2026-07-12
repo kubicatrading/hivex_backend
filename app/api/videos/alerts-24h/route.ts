@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   return handleAlerts(request);
 }
@@ -255,9 +257,11 @@ Debes enfocar este reporte estrictamente en:
 - Ofrecer una ventaja inversora clara y asertiva que beneficie a nuestros asociados del canal.
 
 Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
-1. El título principal del boletín debe ser exactamente:
+1. El boletín debe iniciarse exactamente con el siguiente encabezado y una brevisima presentación formal:
 🚨 HIVEX Alerts - 24H
 ---
+
+[Un párrafo de presentación formal del inversor de HIVEX extremadamente corto, sobrio, directo y premium (de un párrafo breve de no más de una o dos líneas, máximo 30-40 palabras) que exponga con claridad el propósito del boletín de hoy, sirviendo como preámbulo formal al inicio absoluto de la comunicación antes de cualquier alerta.]
 
 2. Cada vídeo analizado debe presentarse con la estructura de ALERTA premium descrita a continuación. Deja un doble salto de línea entre cada sección de la alerta para mantener un formato limpio:
 
@@ -273,7 +277,7 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
-- En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 ALERTA 1:".
+- En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", la breve presentación formal, y un espacio en blanco antes de "🚨 ALERTA 1:".
 - Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la alerta para mantener el diseño premium y aireado.
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Devuelven líneas de texto independientes y limpias.
@@ -284,7 +288,7 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera un link markdown directo apuntando a la ruta de compartir de HIVEX inyectando el {videoId} real (su UUID en HIVEX) y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) calculados en la URL de "/share/".
 - Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
 
-3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Alerts - 24H" y continúa inmediatamente con la línea de separación "---".
+3. PROHIBICIÓN ABSOLUTA DE METANARRATIVA, PASOS DE AUTO-CORRECCIÓN Y REVISIONES DE IA: No escribas borradores, explicaciones, notas, listas de cumplimiento, listas de autocomprobación (ej. "Review against constraints" o similares), ni pasos de validación en la respuesta. El informe debe terminar de forma limpia y directa inmediatamente después del último enlace de la última alerta, sin texto de revisión adicional. Comienza directamente con el encabezado indicado.
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
 5. Redacta todo el informe en español de alta gama profesional.
 

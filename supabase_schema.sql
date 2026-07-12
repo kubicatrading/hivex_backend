@@ -62,9 +62,9 @@ create table public.documents (
 alter table public.documents enable row level security;
 
 -- Políticas de RLS para Documents
-create policy "Los usuarios pueden ver sus propios documentos" 
+create policy "Los usuarios pueden ver sus propios documentos o de ADMIN" 
   on public.documents for select 
-  using (auth.uid() = user_id);
+  using (auth.uid() = user_id or user_id = '5c8d65c6-0798-4f8a-aae3-dd2cebebd868'::uuid);
 
 create policy "Los usuarios pueden crear sus propios documentos" 
   on public.documents for insert 

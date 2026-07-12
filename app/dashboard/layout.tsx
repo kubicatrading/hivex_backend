@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { 
   Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2,
-  Radio, ChevronDown, ChevronRight, Heart, Settings
+  Radio, ChevronDown, ChevronRight, Heart, Settings, Calendar
 } from "lucide-react";
 import { translations } from "@/lib/translations";
 import { Logo } from "@/components/Logo";
@@ -153,6 +153,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: t.overview || "Resumen General", path: "/dashboard", icon: LayoutDashboard },
     { name: t.audioStation || "Estación de Audio", path: "/dashboard/audios", icon: Music },
     { name: t.favorites || "Vídeos preferidos", path: "/dashboard/videos?favorite=true", icon: Heart },
+    { name: t.economicCalendar || "Calendario Económico", path: "/dashboard/calendar", icon: Calendar },
     ...(isAdmin ? [{ name: t.administration || "Administración", path: "/dashboard/admin", icon: Settings }] : [])
   ];
 

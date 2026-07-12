@@ -248,7 +248,7 @@ export async function extractSnapshotsInBackground(
 
           try {
             // Seek 5 seconds after the start of the chart timestamp to capture actual charts and avoid the presenter's face
-            const ffmpegCmd = `ffmpeg -y -ss ${chart.seconds + 5} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+            const ffmpegCmd = `ffmpeg -y -ss ${chart.seconds + 5} -i "${streamUrl}" -vframes 1 -q:v 2 -strict -2 "${outputPath}"`;
             await runCmd(ffmpegCmd);
             console.log(`[Snapshot Extractor] Successfully saved snapshot: ${chart.seconds}.jpg`);
             extracted = true;

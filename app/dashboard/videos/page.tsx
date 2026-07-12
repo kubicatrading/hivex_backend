@@ -3861,7 +3861,8 @@ export default function VideosPage() {
     setSyncing(true);
     setSyncError(null);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error("No se encontró una sesión de usuario activa.");
 
       const targetChannel = filterChannel || "Andrei Jikh";
@@ -3878,8 +3879,13 @@ export default function VideosPage() {
       const existingUrls = new Set((existingDocs || []).map((v) => v.file_url));
       existingUrls.forEach(url => globallySyncedUrls.add(url));
 
-      // 2. Call our API Route
-      const res = await fetch(`/api/videos/sync?channel=${encodeURIComponent(targetChannel)}`, { method: "POST" });
+      // 2. Call our API Route with Authorization header
+      const res = await fetch(`/api/videos/sync?channel=${encodeURIComponent(targetChannel)}`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${session?.access_token || ""}`
+        }
+      });
       if (!res.ok) {
         throw new Error("No se pudo obtener el feed del canal de inversión.");
       }
