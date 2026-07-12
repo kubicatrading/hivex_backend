@@ -49,12 +49,32 @@ const localTranslations: Record<string, {
 export default function EconomicCalendarPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [iframeLoaded, setIframeLoaded] = useState<boolean>(false);
+  const [deviceType, setDeviceType] = useState<"mobile" | "tablet" | "desktop">("desktop");
 
   // Initialize language from localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("hivex_selected_language") || "en";
       setSelectedLanguage(saved);
+    }
+  }, []);
+
+  // Dynamically detect screen width to configure optimal table columns for mobile/tablet/desktop
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const handleResize = () => {
+        const width = window.innerWidth;
+        if (width < 480) {
+          setDeviceType("mobile");
+        } else if (width < 768) {
+          setDeviceType("tablet");
+        } else {
+          setDeviceType("desktop");
+        }
+      };
+      handleResize();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
     }
   }, []);
 
@@ -72,6 +92,11 @@ export default function EconomicCalendarPage() {
       window.removeEventListener("languageChanged", handleLangChangedEvent);
     };
   }, []);
+
+  // Force re-skeleton transition when device columns layout changes
+  useEffect(() => {
+    setIframeLoaded(false);
+  }, [deviceType]);
 
   const t = localTranslations[selectedLanguage] || localTranslations["en"];
 
@@ -93,13 +118,25 @@ export default function EconomicCalendarPage() {
       : `https://www.investing.com/economic-calendar/`;
   };
 
+  // Custom columns parameter to keep the iframe 100% responsive and scroll-free
+  const getColumnsParam = (device: "mobile" | "tablet" | "desktop") => {
+    if (device === "mobile") {
+      // 3 essential columns: Currency, Importance, Actual (fits perfectly in 280px-320px)
+      return "exc_currency,exc_importance,exc_actual";
+    }
+    if (device === "tablet") {
+      // 4 columns: Currency, Importance, Actual, Forecast (fits perfectly in 450px-600px)
+      return "exc_currency,exc_importance,exc_actual,exc_forecast";
+    }
+    // All 6 columns for desktop (fits perfectly in 650px)
+    return "exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous";
+  };
+
   // Configure high-fidelity iframe URL matching our premium dark theme
-  // Columns: Flags, Currency, Importance, Actual, Forecast, Previous
-  // Importance: 1, 2, 3 (Low, Medium, High)
-  const iframeUrl = `https://sslecal2.investing.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
+  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
-    <div className="max-w-[650px] mx-auto space-y-4 animate-fade-in">
+    <div className="max-w-[650px] mx-auto space-y-4 animate-fade-in px-4 sm:px-0">
       {/* COMPACT MINIMALIST HEADER */}
       <div className="flex items-center justify-between gap-4 pb-3 border-b border-zinc-900/60">
         <div className="flex items-center gap-2">
