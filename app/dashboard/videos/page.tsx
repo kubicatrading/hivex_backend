@@ -1940,8 +1940,8 @@ export default function VideosPage() {
   const [audioError, setAudioError] = useState<string | null>(null);
 
   // Voice selection states (premium Gemini voices)
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string>("gemini-charon");
-  const selectedVoiceIdRef = useRef<string>("gemini-charon");
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>("gemini-aoede");
+  const selectedVoiceIdRef = useRef<string>("gemini-aoede");
   useEffect(() => {
     selectedVoiceIdRef.current = selectedVoiceId;
   }, [selectedVoiceId]);
@@ -4740,15 +4740,16 @@ export default function VideosPage() {
                             {selectedLanguage === "es" ? "Voz:" : selectedLanguage === "de" ? "Stimme:" : selectedLanguage === "tr" ? "Ses:" : "Voice:"}
                           </span>
                           <select
+                            disabled
                             value={selectedVoiceId}
                             onChange={(e) => handleVoiceIdChange(e.target.value)}
-                            className="bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800/80 text-zinc-300 hover:text-white px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer outline-none focus:border-indigo-500/50 transition-all select-none"
+                            className="bg-zinc-950/40 border border-zinc-900 text-zinc-500 px-2.5 py-1 rounded-lg text-xs font-semibold outline-none transition-all select-none cursor-not-allowed opacity-70"
                           >
-                            <option value="gemini-charon">
-                              Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
-                            </option>
                             <option value="gemini-aoede">
                               Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzälerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
+                            </option>
+                            <option value="gemini-charon">
+                              Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
                             </option>
                             <option value="gemini-puck">
                               Puck ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
