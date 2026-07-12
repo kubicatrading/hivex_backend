@@ -121,12 +121,12 @@ export default function EconomicCalendarPage() {
   // Custom columns parameter to keep the iframe 100% responsive and scroll-free
   const getColumnsParam = (device: "mobile" | "tablet" | "desktop") => {
     if (device === "mobile") {
-      // 3 essential columns: Currency, Importance, Actual (fits perfectly in 280px-320px)
-      return "exc_currency,exc_importance,exc_actual";
+      // 4 essential columns: Currency, Importance, Actual, Previous (fits perfectly in 320px-360px with zoom)
+      return "exc_currency,exc_importance,exc_actual,exc_previous";
     }
     if (device === "tablet") {
-      // 4 columns: Currency, Importance, Actual, Forecast (fits perfectly in 450px-600px)
-      return "exc_currency,exc_importance,exc_actual,exc_forecast";
+      // 5 columns: Currency, Importance, Actual, Forecast, Previous (fits perfectly in 450px-600px)
+      return "exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous";
     }
     // All 6 columns for desktop (fits perfectly in 650px)
     return "exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous";
