@@ -8,10 +8,23 @@ export async function POST(request: NextRequest) {
     const payload = await request.json();
     console.log("[Telegram Webhook] Received update payload:", JSON.stringify(payload));
 
-    const message = payload.message;
+    const message = payload.message || payload.edited_message;
     if (!message) {
       return NextResponse.json({ ok: true });
     }
+
+    const fromUser = message.from || {};
+    const fromId = fromUser.id?.toString() || "";
+    const fromUsername = fromUser.username || "";
+    const fromFirstName = fromUser.first_name || "";
+    const fromLastName = fromUser.last_name || "";
+    const fromFullName = `${fromFirstName} ${fromLastName}`.trim();
+
+    console.log(`[Telegram Webhook] Sender Info - ID: ${fromId}, Username: ${fromUsername}, Full Name: ${fromFullName}`);
+
+    let identifiedName = "";
+    let senderDetails = "";
+
 
     const chatId = message.chat.id;
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -254,6 +267,118 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
       });
     }
 
+    // Determine sender identity and role dynamically or via hardcoded fallback rules
+    const normalizedUsername = fromUsername.toLowerCase();
+    const normalizedFirstName = fromFirstName.toLowerCase();
+    const normalizedLastName = fromLastName.toLowerCase();
+    const normalizedFullName = fromFullName.toLowerCase();
+
+    const isCeren = fromId === "8963408509" || 
+                    normalizedUsername === "cyildirim" || 
+                    normalizedUsername === "cerendeinert" || 
+                    normalizedFirstName.includes("ceren") ||
+                    normalizedLastName.includes("yildirim") ||
+                    normalizedLastName.includes("deinert") ||
+                    normalizedFullName.includes("ceren");
+
+    const isJuanma = fromId === "1450113787" || 
+                     normalizedUsername === "jsaavedra" || 
+                     normalizedUsername.includes("juanma") || 
+                     normalizedFirstName.includes("juan") || 
+                     normalizedFirstName.includes("juanma") ||
+                     fromId === "111111"; // Mock ID for local tests
+
+    console.log(`[Telegram Webhook] Identity checks - isCeren: ${isCeren}, isJuanma: ${isJuanma} (Normalized Username: "${normalizedUsername}", First: "${normalizedFirstName}", Last: "${normalizedLastName}", Full: "${normalizedFullName}")`);
+
+    if (isCeren) {
+      identifiedName = "Ceren Yildirim";
+      senderDetails = "Te está hablando Ceren Yildirim (cofundadora de HIVEX, inversora principal y usuaria cyildirim). Dirígete a ella como Ceren con un trato premium, sofisticado y de máxima consideración.";
+    } else if (isJuanma) {
+      identifiedName = "Juan Manuel Saavedra";
+      senderDetails = "Te está hablando Juanma (Juan Manuel Saavedra, fundador de HIVEX y director de análisis, usuario jsaavedra). Dirígete a él como Juanma con un trato profesional, asertivo y directo.";
+    }
+
+    try {
+      if (fromId || fromUsername) {
+        let dbQuery = supabaseClient.from("profiles").select("full_name, email, telegram_username, telegram_user_id");
+        if (fromId) {
+          dbQuery = dbQuery.or(`telegram_user_id.eq.${fromId},telegram_username.eq.${fromUsername}`);
+        } else {
+          dbQuery = dbQuery.eq("telegram_username", fromUsername);
+        }
+        
+        const { data: dbProfiles, error: pError } = await dbQuery;
+        
+        if (!pError && dbProfiles && dbProfiles.length > 0) {
+          const profile = dbProfiles[0];
+          console.log("[Telegram Webhook] Matched sender profile in Supabase DB:", JSON.stringify(profile));
+          if (!identifiedName) {
+            identifiedName = profile.full_name || "";
+            if (profile.email === "cerendeinert@hotmail.de") {
+              senderDetails = "Te está hablando Ceren Yildirim (cofundadora de HIVEX, inversora principal y usuaria cyildirim). Dirígete a ella como Ceren con un trato premium, sofisticado y de máxima consideración.";
+            } else if (profile.email === "semeviene@hotmail.es") {
+              senderDetails = "Te está hablando Juanma (Juan Manuel Saavedra, fundador de HIVEX y director de análisis, usuario jsaavedra). Dirígete a él como Juanma con un trato profesional, asertivo y directo.";
+            } else {
+              senderDetails = `Te está hablando el usuario registrado ${profile.full_name} (Email: ${profile.email}). Trátalo de manera profesional, asertiva y sofisticada.`;
+            }
+          }
+        }
+      }
+    } catch (profileErr) {
+      console.error("[Telegram Webhook] Error matching sender profile in DB:", profileErr);
+    }
+
+    if (!senderDetails) {
+      senderDetails = `Te está hablando un miembro del grupo con nombre "${fromFullName}" (ID de Telegram: ${fromId}, Username: @${fromUsername}). Trátalo de manera profesional y sofisticada como a todo inversor de HIVEX.`;
+    }
+
+    // Handle identity query /whoami to help debug ID / username issues in production
+    let checkCommand = userText;
+    if (checkCommand.startsWith("/")) {
+      checkCommand = checkCommand.replace(/@\w+/, "");
+    }
+    if (checkCommand === "/whoami") {
+      let recogName = "No reconocido (Usuario general)";
+      if (isCeren) {
+        recogName = "Ceren Yildirim (Cofundadora - Detectada por estática)";
+      } else if (isJuanma) {
+        recogName = "Juan Manuel Saavedra (Fundador - Detectado por estática)";
+      } else if (identifiedName) {
+        recogName = `${identifiedName} (Reconocido vía Base de Datos)`;
+      }
+
+      const whoamiMarkdown = `**🔍 DIAGNÓSTICO DE IDENTIDAD HIVEX**
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Aquí están tus datos de Telegram detectados en tiempo real:
+
+• **ID de Telegram**: \`${fromId}\`
+• **Nombre de usuario**: ${fromUsername ? `@${fromUsername}` : "*Ninguno*"}
+• **Nombre de pila**: \`${fromFirstName}\`
+• **Apellido**: \`${fromLastName || ""}\`
+• **Nombre completo**: \`${fromFullName}\`
+
+• **Identificación**: **${recogName}**
+• **Detalles de Rol**:
+${senderDetails}
+━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+      const whoamiText = markdownToTelegramHtml(whoamiMarkdown);
+
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: whoamiText,
+          parse_mode: "HTML",
+        }),
+      });
+
+      return NextResponse.json({ ok: true });
+    }
+
+
+
     try {
       // Optimize query to avoid loading heavy columns (like full transcriptions)
       // and limit context size to the last 100 entries to prevent Telegram webhook timeouts.
@@ -330,6 +455,10 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
     const systemInstruction = `Eres el Bot de Telegram de la plataforma premium HIVEX SaaS.
 Fecha y hora actual en España (zona horaria de Madrid): ${currentDateTimeStr}.
 Tu tono es sofisticado, profesional, riguroso, asertivo y objetivo, como un analista bursátil o banquero de inversión de élite.
+
+INFORMACIÓN SOBRE EL INTERLOCUTOR:
+${senderDetails}
+Cuando respondas en el chat de grupo, debes saber exactamente con quién estás hablando. Trata a esa persona de manera personalizada según corresponda (por ejemplo, si te habla Ceren, trátala como Ceren y dirígete a ella como tal; si te habla Juanma, dirígete a él como Juanma y con un tono directo y asertivo de socio estratégico).
 
 Tienes dos propósitos de servicio principales:
 

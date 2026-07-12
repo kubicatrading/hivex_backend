@@ -26,8 +26,9 @@ async function run() {
 
   console.log(`Retrieved ${data.length} profiles:`);
   data.forEach(p => {
-    console.log(`ID: ${p.id} | Email: ${p.email} | Name: ${p.full_name}`);
+    console.log(JSON.stringify(p, null, 2));
   });
 }
 
 run();
+
