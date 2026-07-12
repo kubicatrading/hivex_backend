@@ -136,9 +136,9 @@ export default function EconomicCalendarPage() {
   const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
-    <div className="max-w-[650px] mx-auto space-y-4 animate-fade-in px-4 sm:px-0">
+    <div className="max-w-[650px] mx-auto space-y-3 sm:space-y-4 animate-fade-in px-0 sm:px-0">
       {/* COMPACT MINIMALIST HEADER */}
-      <div className="flex items-center justify-between gap-4 pb-3 border-b border-zinc-900/60">
+      <div className="flex items-center justify-between gap-4 pb-3 border-b border-zinc-900/60 px-4 sm:px-0">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded-lg bg-violet-950/40 border border-violet-900/20">
             <Calendar className="w-4 h-4 text-violet-400" />
@@ -163,10 +163,10 @@ export default function EconomicCalendarPage() {
         </a>
       </div>
 
-      {/* FULLSCREEN IFRAME CONTAINER - DIRECTLY BELOW HEADER */}
-      <div className="relative w-full rounded-2xl border border-zinc-900/80 bg-zinc-950/50 backdrop-blur-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col">
-        {/* Iframe header mimic */}
-        <div className="w-full h-9 bg-zinc-900/30 border-b border-zinc-900/60 px-4 flex items-center justify-between">
+      {/* FULLSCREEN IFRAME CONTAINER - STRIPPED TO BORDERLESS EDGE-TO-EDGE ON MOBILE */}
+      <div className="relative w-full rounded-none sm:rounded-2xl border-x-0 border-y sm:border border-zinc-900/80 bg-zinc-950 sm:bg-zinc-950/50 backdrop-blur-md overflow-hidden shadow-none sm:shadow-2xl sm:shadow-black/80 flex flex-col">
+        {/* Iframe header mimic - Desktop only */}
+        <div className="hidden sm:flex w-full h-9 bg-zinc-900/30 border-b border-zinc-900/60 px-4 items-center justify-between">
           <div className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-rose-500/40" />
             <span className="w-2 h-2 rounded-full bg-amber-500/40" />
@@ -178,26 +178,26 @@ export default function EconomicCalendarPage() {
 
         {/* Dynamic skeleton loader */}
         {!iframeLoaded && (
-          <div className="absolute inset-0 top-9 bg-zinc-950/90 z-20 flex flex-col items-center justify-center space-y-3">
+          <div className="absolute inset-0 top-0 sm:top-9 bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
             <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
             <p className="text-zinc-500 text-[10px] font-mono tracking-wide animate-pulse">{t.loadingText}</p>
           </div>
         )}
 
-        {/* Embed Frame */}
-        <div className="w-full h-[700px] overflow-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+        {/* Embed Frame - Full-screen height on mobile to fill viewport */}
+        <div className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
           <iframe
             src={iframeUrl}
             onLoad={() => setIframeLoaded(true)}
-            className="w-full h-full border-0 rounded-b-2xl bg-zinc-950"
+            className="w-full h-full border-0 sm:rounded-b-2xl bg-zinc-950"
             scrolling="yes"
             title="Economic Calendar Feed"
           />
         </div>
       </div>
 
-      {/* COMPANION INFO BANNER - PLACE AT THE BOTTOM AS FOOTER */}
-      <div className="flex items-start gap-2.5 p-3 rounded-xl bg-violet-950/5 border border-violet-900/10 text-violet-300/60 text-[10px] font-medium leading-normal">
+      {/* COMPANION INFO BANNER - PLACE AT THE BOTTOM AS FOOTER WITH MOBILE MARGINS */}
+      <div className="flex items-start gap-2.5 p-3 mx-4 sm:mx-0 rounded-xl bg-violet-950/5 border border-violet-900/10 text-violet-300/60 text-[10px] font-medium leading-normal">
         <Info className="w-3.5 h-3.5 text-violet-400/80 flex-shrink-0 mt-0.5" />
         <div className="space-y-0.5">
           <p>{t.disclaimer}</p>
