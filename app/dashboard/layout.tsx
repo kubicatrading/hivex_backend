@@ -217,7 +217,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
       {/* SIDEBAR NAVIGATION (Desktop & Mobile drawer) */}
       <aside className={`
-        fixed inset-y-0 left-0 z-50 w-72 border-r border-zinc-900 bg-zinc-950/90 md:bg-zinc-950/40 md:backdrop-blur-xl flex flex-col justify-between p-6 transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static
+        fixed inset-y-0 left-0 z-50 w-72 border-r border-zinc-900 bg-zinc-950/90 md:bg-zinc-950/40 md:backdrop-blur-xl flex flex-col justify-between p-6 transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static overflow-y-auto
         ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
       `}>
         <div className="space-y-8">
