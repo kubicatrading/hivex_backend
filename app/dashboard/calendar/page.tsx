@@ -132,6 +132,33 @@ export default function EconomicCalendarPage() {
     return "exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous";
   };
 
+  // Dynamic zoom styles via CSS scale to completely fit all columns on smaller devices
+  const getIframeStyle = () => {
+    if (deviceType === "mobile") {
+      // 88% scale down gives ~13.6% extra horizontal workspace for the table layout to render perfectly without wrapping
+      return {
+        transform: "scale(0.88)",
+        transformOrigin: "top left",
+        width: "113.6%",
+        height: "113.6%",
+      };
+    }
+    if (deviceType === "tablet") {
+      // 95% scale down for medium tablet devices
+      return {
+        transform: "scale(0.95)",
+        transformOrigin: "top left",
+        width: "105.2%",
+        height: "105.2%",
+      };
+    }
+    // 100% full size for desktop
+    return {
+      width: "100%",
+      height: "100%",
+    };
+  };
+
   // Configure high-fidelity iframe URL matching our premium dark theme
   const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
@@ -185,11 +212,12 @@ export default function EconomicCalendarPage() {
         )}
 
         {/* Embed Frame - Full-screen height on mobile to fill viewport */}
-        <div className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+        <div className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
           <iframe
             src={iframeUrl}
             onLoad={() => setIframeLoaded(true)}
-            className="w-full h-full border-0 sm:rounded-b-2xl bg-zinc-950"
+            style={getIframeStyle()}
+            className="border-0 sm:rounded-b-2xl bg-zinc-950"
             scrolling="yes"
             title="Economic Calendar Feed"
           />
