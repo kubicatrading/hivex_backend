@@ -163,7 +163,7 @@ export default function EconomicCalendarPage() {
   const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
-    <div className="max-w-[650px] mx-auto space-y-3 sm:space-y-4 animate-fade-in px-0 sm:px-0">
+    <div className="-mx-4 sm:mx-auto max-w-[650px] space-y-3 sm:space-y-4 animate-fade-in px-0 sm:px-0">
       {/* COMPACT MINIMALIST HEADER */}
       <div className="flex items-center justify-between gap-4 pb-3 border-b border-zinc-900/60 px-4 sm:px-0">
         <div className="flex items-center gap-2">
