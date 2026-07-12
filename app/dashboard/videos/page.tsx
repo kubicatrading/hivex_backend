@@ -1389,100 +1389,22 @@ function YoutubeCorsWarning({ selectedLanguage }: { selectedLanguage: string }) 
 }
 
 function VideoFrameSnapshot({ src, targetTime }: { src: string; targetTime: number }) {
-  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(false);
-    setSnapshotUrl(null);
-
-    const video = document.createElement("video");
-    video.src = src;
-    video.crossOrigin = "anonymous";
-    video.preload = "auto";
-    video.muted = true;
-    video.playsInline = true;
-    video.currentTime = targetTime;
-    videoRef.current = video;
-
-    const handleSeeked = () => {
-      if (!active) return;
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 360;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-          if (active) {
-            setSnapshotUrl(dataUrl);
-            setLoading(false);
-          }
-        } else {
-          throw new Error("Could not get 2d context");
-        }
-      } catch (err) {
-        console.error("Error generating frame snapshot:", err);
-        if (active) {
-          setError(true);
-          setLoading(false);
-        }
-      }
-    };
-
-    const handleError = () => {
-      if (active) {
-        setError(true);
-        setLoading(false);
-      }
-    };
-
-    video.addEventListener("seeked", handleSeeked);
-    video.addEventListener("error", handleError);
-
-    video.load();
-
-    return () => {
-      active = false;
-      video.removeEventListener("seeked", handleSeeked);
-      video.removeEventListener("error", handleError);
-      video.src = "";
-    };
-  }, [src, targetTime]);
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 border border-zinc-900 rounded-xl aspect-[16/9] text-center w-full">
-        <Loader2 className="w-6 h-6 text-emerald-400 animate-spin mb-2" />
-        <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">Generando Snapshot...</span>
-      </div>
-    );
-  }
-
-  if (error || !snapshotUrl) {
-    return (
-      <div className="flex flex-col items-center justify-center p-6 bg-zinc-950 border border-zinc-900 rounded-xl aspect-[16/9] text-center w-full">
-        <AlertTriangle className="w-6 h-6 text-zinc-600 mb-2" />
-        <span className="text-[10px] font-black tracking-wider text-zinc-500 uppercase">Snapshot no disponible</span>
-      </div>
-    );
-  }
+  // Use HTML5 Media Fragments (#t=seconds) to natively position the video at the exact second
+  const videoSrc = `${src}#t=${targetTime}`;
 
   return (
     <div className="relative group rounded-xl overflow-hidden border border-zinc-900 shadow-lg aspect-[16/9] w-full bg-zinc-950">
-      <img
-        src={snapshotUrl}
-        alt={`Snapshot at ${targetTime}s`}
-        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      <video
+        src={videoSrc}
+        preload="metadata"
+        className="w-full h-full object-contain"
+        muted
+        playsInline
+        controls
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-350 flex items-end p-3">
-        <span className="text-[9px] font-black tracking-wide text-white uppercase bg-zinc-900/95 px-2 py-1 rounded border border-zinc-850">
-          Timestamp: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
+      <div className="absolute top-2 left-2 z-10 pointer-events-none">
+        <span className="text-[8px] font-black tracking-wider text-emerald-400 bg-zinc-950/90 border border-emerald-500/20 px-2.5 py-1 rounded-full uppercase shadow-md backdrop-blur-sm">
+          Snapshot: {Math.floor(targetTime / 60)}:{(targetTime % 60).toString().padStart(2, "0")}
         </span>
       </div>
     </div>

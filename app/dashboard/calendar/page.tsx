@@ -99,7 +99,7 @@ export default function EconomicCalendarPage() {
   const iframeUrl = `https://sslecal2.investing.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="max-w-[1000px] mx-auto space-y-8 animate-fade-in">
       {/* HEADER BANNER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60">
         <div>
