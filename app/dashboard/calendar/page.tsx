@@ -99,72 +99,56 @@ export default function EconomicCalendarPage() {
   const iframeUrl = `https://sslecal2.investing.com/?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
-    <div className="max-w-[1000px] mx-auto space-y-8 animate-fade-in">
-      {/* HEADER BANNER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60">
-        <div>
-          <div className="flex items-center gap-2 mb-2 text-violet-400 font-mono text-xs tracking-wider uppercase">
-            <Globe className="w-3.5 h-3.5" />
-            <span>Macroeconomic Station</span>
+    <div className="max-w-[650px] mx-auto space-y-4 animate-fade-in">
+      {/* COMPACT MINIMALIST HEADER */}
+      <div className="flex items-center justify-between gap-4 pb-3 border-b border-zinc-900/60">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-violet-950/40 border border-violet-900/20">
+            <Calendar className="w-4 h-4 text-violet-400" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight text-white md:text-4xl flex items-center gap-3">
-            <Calendar className="w-8 h-8 text-violet-400" />
-            {t.title}
-          </h1>
-          <p className="text-sm text-zinc-400 max-w-2xl mt-2 font-medium leading-relaxed">
-            {t.subtitle}
-          </p>
+          <div>
+            <h1 className="text-base font-black tracking-tight text-white flex items-center gap-2">
+              {t.title}
+              <span className="text-[9px] font-mono tracking-widest text-violet-400/80 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded-full uppercase">Macro</span>
+            </h1>
+          </div>
         </div>
 
-        {/* ACTION BUTTON */}
-        <div className="flex items-center gap-3">
-          <a
-            href={getExternalUrl(selectedLanguage)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-5 py-3 rounded-xl bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800/80 transition-all duration-300 text-sm font-bold shadow-md shadow-black/30 group"
-          >
-            <span>{t.openButton}</span>
-            <ExternalLink className="w-4 h-4 text-zinc-500 group-hover:text-violet-400 group-hover:translate-y-[-1px] group-hover:translate-x-[1px] transition-all" />
-          </a>
-        </div>
+        {/* COMPACT ACTION BUTTON */}
+        <a
+          href={getExternalUrl(selectedLanguage)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900/80 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800/80 transition-all duration-300 text-xs font-bold shadow-md shadow-black/30 group"
+        >
+          <span>{t.openButton}</span>
+          <ExternalLink className="w-3 h-3 text-zinc-500 group-hover:text-violet-400 transition-all" />
+        </a>
       </div>
 
-      {/* COMPANION INFO BANNER */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-violet-950/10 border border-violet-900/20 text-violet-300/80 text-xs font-medium">
-        <Info className="w-4 h-4 text-violet-400 flex-shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p>{t.disclaimer}</p>
-          <p className="text-zinc-500 font-mono">{t.sourceText}</p>
-        </div>
-      </div>
-
-      {/* FULLSCREEN IFRAME CONTAINER */}
+      {/* FULLSCREEN IFRAME CONTAINER - DIRECTLY BELOW HEADER */}
       <div className="relative w-full rounded-2xl border border-zinc-900/80 bg-zinc-950/50 backdrop-blur-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col">
         {/* Iframe header mimic */}
-        <div className="w-full h-11 bg-zinc-900/30 border-b border-zinc-900/60 px-5 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500/40" />
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/40" />
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/40" />
+        <div className="w-full h-9 bg-zinc-900/30 border-b border-zinc-900/60 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-rose-500/40" />
+            <span className="w-2 h-2 rounded-full bg-amber-500/40" />
+            <span className="w-2 h-2 rounded-full bg-emerald-500/40" />
           </div>
-          <span className="text-[10px] font-mono tracking-widest text-zinc-500">SECURE CONSOLE</span>
-          <span className="text-[10px] font-mono text-zinc-600 bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/40 uppercase">GMT+1 Timezone</span>
+          <span className="text-[9px] font-mono tracking-widest text-zinc-500">SECURE CONSOLE</span>
+          <span className="text-[9px] font-mono text-zinc-600 bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/40 uppercase">GMT+1 Timezone</span>
         </div>
 
         {/* Dynamic skeleton loader */}
         {!iframeLoaded && (
-          <div className="absolute inset-0 top-11 bg-zinc-950/90 z-20 flex flex-col items-center justify-center space-y-4">
-            <div className="relative flex items-center justify-center">
-              <div className="absolute w-12 h-12 rounded-full border border-violet-500/10 animate-ping" />
-              <Loader2 className="w-8 h-8 text-violet-400 animate-spin" />
-            </div>
-            <p className="text-zinc-400 text-xs font-mono tracking-wide animate-pulse">{t.loadingText}</p>
+          <div className="absolute inset-0 top-9 bg-zinc-950/90 z-20 flex flex-col items-center justify-center space-y-3">
+            <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+            <p className="text-zinc-500 text-[10px] font-mono tracking-wide animate-pulse">{t.loadingText}</p>
           </div>
         )}
 
         {/* Embed Frame */}
-        <div className="w-full h-[750px] overflow-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+        <div className="w-full h-[700px] overflow-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
           <iframe
             src={iframeUrl}
             onLoad={() => setIframeLoaded(true)}
@@ -172,6 +156,15 @@ export default function EconomicCalendarPage() {
             scrolling="yes"
             title="Economic Calendar Feed"
           />
+        </div>
+      </div>
+
+      {/* COMPANION INFO BANNER - PLACE AT THE BOTTOM AS FOOTER */}
+      <div className="flex items-start gap-2.5 p-3 rounded-xl bg-violet-950/5 border border-violet-900/10 text-violet-300/60 text-[10px] font-medium leading-normal">
+        <Info className="w-3.5 h-3.5 text-violet-400/80 flex-shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <p>{t.disclaimer}</p>
+          <p className="text-zinc-600 font-mono text-[9px]">{t.sourceText}</p>
         </div>
       </div>
     </div>
