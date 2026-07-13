@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 // Standard YouTube feeds map
 const YT_CHANNELS: Record<string, string> = {
   "Andrei Jikh": "UCGy7SkBjcIAgTiwkXEtPnYg",
-  "Judging Freedom": "UCDkEYb-TXJVWLvOokshtlsw",
+  "Judging Freedom": "UCkei_gbdGw1lxyc9NV45wJQ",
   "Cihat E. Çiçek": "UCHExW8VqaE0a3W0kwSe_BXg",
   "Zang International with Lynette Zang": "UCvONE8y1nZarMAnZM-2ojfA",
   "The Rich Dad Channel": "UCuifm5ns5SRG8LZJ6gCfKyw",
