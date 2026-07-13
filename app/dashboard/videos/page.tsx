@@ -1930,10 +1930,14 @@ export default function VideosPage() {
       const { data, error } = await supabase
         .from("documents")
         .select("*")
-        .eq("type", "favorite_chart")
+        .eq("type", "chart")
         .eq("user_id", user.id);
       if (error) throw error;
-      setFavoriteCharts(data || []);
+      
+      const favorited = (data || []).filter(
+        (doc: any) => doc.metadata?.is_favorite_chart === true
+      );
+      setFavoriteCharts(favorited);
     } catch (err) {
       console.error("Failed to fetch favorite charts:", err);
     }
@@ -1945,20 +1949,25 @@ export default function VideosPage() {
       if (!user) return;
 
       const isFav = favoriteCharts.some(
-        (fc) => fc.file_url === video.file_url && fc.metadata?.seconds === chart.seconds
+        (fc) => (fc.metadata?.video_id === video.id || fc.file_url === video.file_url) && 
+                Number(fc.metadata?.seconds) === Number(chart.seconds)
       );
 
       if (isFav) {
         // Optimistic UI state update: remove from list
         setFavoriteCharts((prev) =>
           prev.filter(
-            (fc) => !(fc.file_url === video.file_url && fc.metadata?.seconds === chart.seconds)
+            (fc) => !(
+              (fc.metadata?.video_id === video.id || fc.file_url === video.file_url) && 
+              Number(fc.metadata?.seconds) === Number(chart.seconds)
+            )
           )
         );
 
         // Delete from Supabase
         const targetFav = favoriteCharts.find(
-          (fc) => fc.file_url === video.file_url && fc.metadata?.seconds === chart.seconds
+          (fc) => (fc.metadata?.video_id === video.id || fc.file_url === video.file_url) && 
+                  Number(fc.metadata?.seconds) === Number(chart.seconds)
         );
         if (targetFav) {
           const { error } = await supabase
@@ -1974,12 +1983,13 @@ export default function VideosPage() {
         const newFavDoc = {
           id: newFavId,
           user_id: user.id,
-          type: "favorite_chart",
+          type: "chart",
           title: chart.title,
           description: chart.legend || "",
           file_url: video.file_url,
           created_at: new Date().toISOString(),
           metadata: {
+            is_favorite_chart: true,
             video_id: video.id,
             video_title: video.title,
             channel_title: video.metadata?.channel_title || "Andrei Jikh",
@@ -4730,24 +4740,26 @@ export default function VideosPage() {
                                                     onClick={() => toggleFavoriteChart(chart, activeStudyVideo)}
                                                     className={`p-2 rounded-xl transition-all shadow-md flex items-center justify-center border hover:bg-rose-500/10 ${
                                                       favoriteCharts.some(
-                                                        (fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds
+                                                        (fc) => (fc.metadata?.video_id === activeStudyVideo.id || fc.file_url === activeStudyVideo.file_url) && 
+                                                                Number(fc.metadata?.seconds) === Number(chart.seconds)
                                                       )
                                                         ? "text-rose-500 border-rose-500/20 hover:text-rose-600 bg-rose-500/5 animate-pulse-subtle"
                                                         : "text-zinc-500 border-zinc-900 bg-zinc-900/40 hover:text-rose-400"
                                                     }`}
                                                     title={
                                                       selectedLanguage === "es"
-                                                        ? (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Quitar de preferidos" : "Marcar como preferido")
+                                                        ? (favoriteCharts.some((fc) => (fc.metadata?.video_id === activeStudyVideo.id || fc.file_url === activeStudyVideo.file_url) && Number(fc.metadata?.seconds) === Number(chart.seconds)) ? "Quitar de preferidos" : "Marcar como preferido")
                                                         : selectedLanguage === "de"
-                                                        ? (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Aus Favoriten entfernen" : "Als Favorit markieren")
+                                                        ? (favoriteCharts.some((fc) => (fc.metadata?.video_id === activeStudyVideo.id || fc.file_url === activeStudyVideo.file_url) && Number(fc.metadata?.seconds) === Number(chart.seconds)) ? "Aus Favoriten entfernen" : "Als Favorit markieren")
                                                         : selectedLanguage === "tr"
-                                                        ? (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Favorilerden kaldır" : "Favorilere ekle")
-                                                        : (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Remove from favorites" : "Mark as favorite")
+                                                        ? (favoriteCharts.some((fc) => (fc.metadata?.video_id === activeStudyVideo.id || fc.file_url === activeStudyVideo.file_url) && Number(fc.metadata?.seconds) === Number(chart.seconds)) ? "Favorilerden kaldır" : "Favorilere ekle")
+                                                        : (favoriteCharts.some((fc) => (fc.metadata?.video_id === activeStudyVideo.id || fc.file_url === activeStudyVideo.file_url) && Number(fc.metadata?.seconds) === Number(chart.seconds)) ? "Remove from favorites" : "Mark as favorite")
                                                     }
                                                   >
                                                     <Heart className={`w-3.5 h-3.5 ${
                                                       favoriteCharts.some(
-                                                        (fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds
+                                                        (fc) => (fc.metadata?.video_id === activeStudyVideo.id || fc.file_url === activeStudyVideo.file_url) && 
+                                                                Number(fc.metadata?.seconds) === Number(chart.seconds)
                                                       )
                                                         ? "fill-current"
                                                         : ""
