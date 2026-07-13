@@ -164,7 +164,8 @@ async function handleSync(request: Request) {
         xmlText = await response.text();
       } catch (fetchErr: any) {
         console.error(`[Sync] Failed to fetch feed for ${channelTitle}:`, fetchErr);
-        throw new Error(`Error de red al obtener el feed de YouTube para "${channelTitle}": ${fetchErr?.message || String(fetchErr)}`);
+        // Continue to the next channel instead of crashing the entire sync
+        continue;
       }
 
       // 2. Parse Entries using a robust RegExp parser
