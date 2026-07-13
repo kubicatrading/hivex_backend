@@ -1727,19 +1727,36 @@ function SmartVideoSnapshot({
     setLoading(true);
 
     const testImg = new Image();
-    const publicPath = `/snapshots/${videoId}/${targetTime}.jpg`;
+    const supabasePath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${videoId}/${targetTime}.jpg`;
+    const localPath = `/snapshots/${videoId}/${targetTime}.jpg`;
+    const ytId = getYoutubeId(fileUrl);
+    const ytThumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "";
 
+    // Try loading from Supabase Storage first (source of truth)
     testImg.onload = () => {
-      setImgUrl(publicPath);
+      setImgUrl(supabasePath);
       setLoading(false);
     };
 
     testImg.onerror = () => {
-      setError(true);
-      setLoading(false);
+      // Fallback 1: Try local filesystem path
+      const localImg = new Image();
+      localImg.onload = () => {
+        setImgUrl(localPath);
+        setLoading(false);
+      };
+      
+      localImg.onerror = () => {
+        // Fallback 2: Try YouTube high-quality thumbnail
+        setImgUrl(ytThumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80");
+        setError(true);
+        setLoading(false);
+      };
+      
+      localImg.src = localPath;
     };
 
-    testImg.src = publicPath;
+    testImg.src = supabasePath;
   }, [videoId, fileUrl, targetTime, isYt]);
 
   const loadingText = {
@@ -1758,8 +1775,8 @@ function SmartVideoSnapshot({
     );
   }
 
-  // Render YouTubeSnapshotPlayer if it is a YT video and either isPlaying is true, hasBeenPlayed is true, or snapshot image errored (e.g. in production)
-  const showPlayer = isYt && (isPlaying || hasBeenPlayed || error);
+  // Render YouTubeSnapshotPlayer ONLY when actively playing or has been played to prevent general cover thumbnails
+  const showPlayer = isYt && (isPlaying || hasBeenPlayed);
 
   if (showPlayer) {
     const ytId = getYoutubeId(fileUrl);
