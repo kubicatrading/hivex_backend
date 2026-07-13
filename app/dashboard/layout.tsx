@@ -153,6 +153,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     { name: t.overview || "Resumen General", path: "/dashboard", icon: LayoutDashboard },
     { name: t.audioStation || "Estación de Audio", path: "/dashboard/audios", icon: Music },
     { name: t.favorites || "Vídeos preferidos", path: "/dashboard/videos?favorite=true", icon: Heart },
+    { name: t.favoriteCharts || "Charts Favoritos", path: "/dashboard/charts-favorites", icon: Heart },
     { name: t.economicCalendar || "Calendario Económico", path: "/dashboard/calendar", icon: Calendar },
     ...(isAdmin ? [{ name: t.administration || "Administración", path: "/dashboard/admin", icon: Settings }] : [])
   ];

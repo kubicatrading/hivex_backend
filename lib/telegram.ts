@@ -781,6 +781,15 @@ export async function sendTelegramMessageWithPhotos(
           .replace(".mp4", ".jpg");
       }
 
+      // If the URL is a direct Supabase Storage URL pointing to snapshots, redirect it to our Vercel proxied URL.
+      // This ensures that UUIDs are dynamically resolved to YouTube video IDs by our backend proxy.
+      if (mediaUrl.includes(".supabase.co/storage/v1/object/public/snapshots/")) {
+        mediaUrl = mediaUrl.replace(
+          /https?:\/\/[^\/]+\.supabase\.co\/storage\/v1\/object\/public\/snapshots\//i,
+          "https://hivex-backend.vercel.app/snapshots/"
+        );
+      }
+
       const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") || mediaUrl.includes("/clips/");
       let heading = headings[i];
       let explanation = explanations[i];

@@ -1920,6 +1920,95 @@ export default function VideosPage() {
   const [urlEndSeconds, setUrlEndSeconds] = useState<number | null>(null);
   const [mainPlayerPlaying, setMainPlayerPlaying] = useState<boolean>(false);
 
+  // Favorite Charts state and logic
+  const [favoriteCharts, setFavoriteCharts] = useState<any[]>([]);
+
+  const fetchFavoriteCharts = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data, error } = await supabase
+        .from("documents")
+        .select("*")
+        .eq("type", "favorite_chart")
+        .eq("user_id", user.id);
+      if (error) throw error;
+      setFavoriteCharts(data || []);
+    } catch (err) {
+      console.error("Failed to fetch favorite charts:", err);
+    }
+  }, []);
+
+  const toggleFavoriteChart = async (chart: ParsedChart, video: VideoDocument) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const isFav = favoriteCharts.some(
+        (fc) => fc.file_url === video.file_url && fc.metadata?.seconds === chart.seconds
+      );
+
+      if (isFav) {
+        // Optimistic UI state update: remove from list
+        setFavoriteCharts((prev) =>
+          prev.filter(
+            (fc) => !(fc.file_url === video.file_url && fc.metadata?.seconds === chart.seconds)
+          )
+        );
+
+        // Delete from Supabase
+        const targetFav = favoriteCharts.find(
+          (fc) => fc.file_url === video.file_url && fc.metadata?.seconds === chart.seconds
+        );
+        if (targetFav) {
+          const { error } = await supabase
+            .from("documents")
+            .delete()
+            .eq("id", targetFav.id);
+          if (error) throw error;
+          console.log("Chart unfavorited successfully:", chart.title);
+        }
+      } else {
+        // Generate a unique ID using a timestamp and safe random string
+        const newFavId = `fav-chart-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+        const newFavDoc = {
+          id: newFavId,
+          user_id: user.id,
+          type: "favorite_chart",
+          title: chart.title,
+          description: chart.legend || "",
+          file_url: video.file_url,
+          created_at: new Date().toISOString(),
+          metadata: {
+            video_id: video.id,
+            video_title: video.title,
+            channel_title: video.metadata?.channel_title || "Andrei Jikh",
+            seconds: chart.seconds,
+            endSeconds: chart.endSeconds || null,
+            bullets: chart.bullets || [],
+            legend: chart.legend || "",
+            timestamp: chart.timestamp
+          }
+        };
+
+        // Optimistic UI state update: add to list
+        setFavoriteCharts((prev) => [...prev, newFavDoc]);
+
+        // Insert to Supabase
+        const { error } = await supabase.from("documents").insert(newFavDoc);
+        if (error) throw error;
+        console.log("Chart favorited successfully:", chart.title);
+      }
+    } catch (err) {
+      console.error("Failed to toggle favorite chart:", err);
+      fetchFavoriteCharts();
+    }
+  };
+
+  useEffect(() => {
+    fetchFavoriteCharts();
+  }, [fetchFavoriteCharts]);
+
   // Reset playing chart index when active video changes
   useEffect(() => {
     setPlayingChartIdx(null);
@@ -3147,14 +3236,9 @@ export default function VideosPage() {
     return finalCh.toLowerCase() === currentFilter.toLowerCase();
   });
 
-  // Sort favorites first by channel alphabetically ascending, and then by age descending (most recent first)
+  // Sort favorites purely by creation date descending (most recent video first)
   if (filterFavorite) {
     filteredVideos.sort((a, b) => {
-      const chanA = (a.metadata?.channel_title || "Andrei Jikh").toLowerCase().trim();
-      const chanB = (b.metadata?.channel_title || "Andrei Jikh").toLowerCase().trim();
-      if (chanA !== chanB) {
-        return chanA.localeCompare(chanB);
-      }
       const timeA = Date.parse(a.created_at) || 0;
       const timeB = Date.parse(b.created_at) || 0;
       return timeB - timeA;
@@ -4600,46 +4684,76 @@ export default function VideosPage() {
                                                     {chart.title}
                                                   </h4>
                                                 </div>
-                                                <button
-                                                  onClick={() => {
-                                                    if (isYt) {
-                                                      if (playingChartIdx === idx) {
-                                                        setPlayingChartIdx(null);
-                                                      } else {
-                                                        setPlayingChartIdx(idx);
-                                                      }
-                                                    } else {
-                                                      // Local html5 video playback control fallback
-                                                      setPlayerTime(chart.seconds);
-                                                      if (studyVideoRef.current) {
-                                                        studyVideoRef.current.currentTime = chart.seconds;
-                                                        studyVideoRef.current.play().catch(err => console.log("Autoplay prevented:", err));
-                                                      }
-                                                    }
-                                                  }}
-                                                  className={`p-2 rounded-xl transition-all shadow-md shrink-0 flex items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider px-3 ${
-                                                    isYt && playingChartIdx === idx
-                                                      ? "bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 hover:text-amber-300"
-                                                      : "bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 hover:text-emerald-300"
-                                                  }`}
-                                                >
-                                                  {isYt && playingChartIdx === idx ? (
-                                                    <>
-                                                      <Pause className="w-3.5 h-3.5 fill-current" />
-                                                      <span>{selectedLanguage === "es" ? "Pausar" : selectedLanguage === "de" ? "Pause" : selectedLanguage === "tr" ? "Duraklat" : "Pause"}</span>
-                                                    </>
-                                                  ) : (
-                                                    <>
-                                                      <Play className="w-3.5 h-3.5 fill-current" />
-                                                      <span>
-                                                        {isYt
-                                                          ? (selectedLanguage === "es" ? "Play" : selectedLanguage === "de" ? "Abspielen" : selectedLanguage === "tr" ? "Oynat" : "Play")
-                                                          : (selectedLanguage === "es" ? "Ir" : selectedLanguage === "de" ? "Ansehen" : selectedLanguage === "tr" ? "Git" : "Play")
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                  <button
+                                                    onClick={() => {
+                                                      if (isYt) {
+                                                        if (playingChartIdx === idx) {
+                                                          setPlayingChartIdx(null);
+                                                        } else {
+                                                          setPlayingChartIdx(idx);
                                                         }
-                                                      </span>
-                                                    </>
-                                                  )}
-                                                </button>
+                                                      } else {
+                                                        // Local html5 video playback control fallback
+                                                        setPlayerTime(chart.seconds);
+                                                        if (studyVideoRef.current) {
+                                                          studyVideoRef.current.currentTime = chart.seconds;
+                                                          studyVideoRef.current.play().catch(err => console.log("Autoplay prevented:", err));
+                                                        }
+                                                      }
+                                                    }}
+                                                    className={`p-2 rounded-xl transition-all shadow-md shrink-0 flex items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider px-3 ${
+                                                      isYt && playingChartIdx === idx
+                                                        ? "bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 hover:text-amber-300"
+                                                        : "bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400 hover:text-emerald-300"
+                                                    }`}
+                                                  >
+                                                    {isYt && playingChartIdx === idx ? (
+                                                      <>
+                                                        <Pause className="w-3.5 h-3.5 fill-current" />
+                                                        <span>{selectedLanguage === "es" ? "Pausar" : selectedLanguage === "de" ? "Pause" : selectedLanguage === "tr" ? "Duraklat" : "Pause"}</span>
+                                                      </>
+                                                    ) : (
+                                                      <>
+                                                        <Play className="w-3.5 h-3.5 fill-current" />
+                                                        <span>
+                                                          {isYt
+                                                            ? (selectedLanguage === "es" ? "Play" : selectedLanguage === "de" ? "Abspielen" : selectedLanguage === "tr" ? "Oynat" : "Play")
+                                                            : (selectedLanguage === "es" ? "Ir" : selectedLanguage === "de" ? "Ansehen" : selectedLanguage === "tr" ? "Git" : "Play")
+                                                          }
+                                                        </span>
+                                                      </>
+                                                    )}
+                                                  </button>
+
+                                                  <button
+                                                    onClick={() => toggleFavoriteChart(chart, activeStudyVideo)}
+                                                    className={`p-2 rounded-xl transition-all shadow-md flex items-center justify-center border hover:bg-rose-500/10 ${
+                                                      favoriteCharts.some(
+                                                        (fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds
+                                                      )
+                                                        ? "text-rose-500 border-rose-500/20 hover:text-rose-600 bg-rose-500/5 animate-pulse-subtle"
+                                                        : "text-zinc-500 border-zinc-900 bg-zinc-900/40 hover:text-rose-400"
+                                                    }`}
+                                                    title={
+                                                      selectedLanguage === "es"
+                                                        ? (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Quitar de preferidos" : "Marcar como preferido")
+                                                        : selectedLanguage === "de"
+                                                        ? (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Aus Favoriten entfernen" : "Als Favorit markieren")
+                                                        : selectedLanguage === "tr"
+                                                        ? (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Favorilerden kaldır" : "Favorilere ekle")
+                                                        : (favoriteCharts.some((fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds) ? "Remove from favorites" : "Mark as favorite")
+                                                    }
+                                                  >
+                                                    <Heart className={`w-3.5 h-3.5 ${
+                                                      favoriteCharts.some(
+                                                        (fc) => fc.file_url === activeStudyVideo.file_url && fc.metadata?.seconds === chart.seconds
+                                                      )
+                                                        ? "fill-current"
+                                                        : ""
+                                                    }`} />
+                                                  </button>
+                                                </div>
                                               </div>
 
                                               {chart.bullets.length > 0 && (
@@ -5260,11 +5374,10 @@ export default function VideosPage() {
                     <div
                       key={v.id}
                       onClick={() => {
-                        if (filterFavorite) {
-                          setActiveStudyVideo(v);
-                        } else {
-                          setSelectedVideo(v);
-                        }
+                        setSelectedVideo(v);
+                      }}
+                      onDoubleClick={() => {
+                        setActiveStudyVideo(v);
                       }}
                       className={`rounded-xl border overflow-hidden cursor-pointer flex gap-3.5 transition-all p-2 relative ${isOld ? "opacity-75 grayscale border-zinc-800 bg-zinc-950/20" : ""} ${selectedVideo?.id === v.id ? "bg-sky-500/10 border-sky-500/40" : "bg-zinc-900/30 border-zinc-900/80 hover:border-zinc-800"}`}
                     >
