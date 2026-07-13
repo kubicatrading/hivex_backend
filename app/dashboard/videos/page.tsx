@@ -1978,10 +1978,7 @@ export default function VideosPage() {
           console.log("Chart unfavorited successfully:", chart.title);
         }
       } else {
-        // Generate a unique ID using a timestamp and safe random string
-        const newFavId = `fav-chart-${Date.now()}-${Math.random().toString(36).substring(2)}`;
         const newFavDoc = {
-          id: newFavId,
           user_id: user.id,
           type: "chart",
           title: chart.title,
@@ -2001,12 +1998,29 @@ export default function VideosPage() {
           }
         };
 
-        // Optimistic UI state update: add to list
-        setFavoriteCharts((prev) => [...prev, newFavDoc]);
+        // Use a temporary valid UUID for optimistic UI rendering
+        const tempId = "00000000-0000-0000-0000-000000000000";
+        const tempFavDoc = { ...newFavDoc, id: tempId };
+        setFavoriteCharts((prev) => [...prev, tempFavDoc]);
 
-        // Insert to Supabase
-        const { error } = await supabase.from("documents").insert(newFavDoc);
-        if (error) throw error;
+        // Insert without specifying id, so PostgreSQL automatically generates a valid UUID
+        const { data: insertedData, error } = await supabase
+          .from("documents")
+          .insert(newFavDoc)
+          .select();
+
+        if (error) {
+          // Rollback on error
+          setFavoriteCharts((prev) => prev.filter((fc) => fc.id !== tempId));
+          throw error;
+        }
+
+        if (insertedData && insertedData.length > 0) {
+          // Replace optimistic ID with the real database-generated UUID
+          setFavoriteCharts((prev) =>
+            prev.map((fc) => (fc.id === tempId ? insertedData[0] : fc))
+          );
+        }
         console.log("Chart favorited successfully:", chart.title);
       }
     } catch (err) {
