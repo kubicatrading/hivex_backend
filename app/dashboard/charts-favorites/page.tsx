@@ -307,8 +307,10 @@ export default function FavoriteChartsPage() {
                 // Build the exact deep linked video URL to play starting at specific chart
                 const deepLinkUrl = `/dashboard/videos?id=${videoId}&start=${targetTime}${endSeconds ? `&end=${endSeconds}` : ""}`;
 
-                // Build snapshot image path
-                const snapshotPath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${videoId}/${targetTime}.jpg`;
+                // Resolve the folder name in Supabase: YouTube ID if it is a YT video, else DB UUID
+                const resolvedFolder = ytId || videoId;
+                const snapshotPath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${resolvedFolder}/${targetTime}.jpg`;
+
                 // Fallback thumbnail is YouTube high quality, else cinematic stock photo
                 const fallbackThumbnail = ytId 
                   ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`

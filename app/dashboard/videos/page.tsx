@@ -1727,9 +1727,10 @@ function SmartVideoSnapshot({
     setLoading(true);
 
     const testImg = new Image();
-    const supabasePath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${videoId}/${targetTime}.jpg`;
-    const localPath = `/snapshots/${videoId}/${targetTime}.jpg`;
     const ytId = getYoutubeId(fileUrl);
+    const resolvedFolder = isYt ? (ytId || videoId) : videoId;
+    const supabasePath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${resolvedFolder}/${targetTime}.jpg`;
+    const localPath = `/snapshots/${videoId}/${targetTime}.jpg`;
     const ytThumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "";
 
     // Try loading from Supabase Storage first (source of truth)
