@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
   Calendar, ExternalLink, Globe, Loader2, Info, UploadCloud, CheckCircle2 
@@ -183,6 +183,8 @@ export default function EconomicCalendarPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [iframeLoaded, setIframeLoaded] = useState<boolean>(false);
   const [deviceType, setDeviceType] = useState<"mobile" | "tablet" | "desktop">("desktop");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(440);
   // Video Upload States (matching videos page layout)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -213,10 +215,18 @@ export default function EconomicCalendarPage() {
         } else {
           setDeviceType("desktop");
         }
+
+        if (containerRef.current) {
+          setContainerWidth(containerRef.current.offsetWidth);
+        }
       };
-      handleResize();
+      // Short delay on mount to ensure browser has completed layout before reading offsetWidth
+      const timer = setTimeout(handleResize, 100);
       window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener("resize", handleResize);
+      };
     }
   }, []);
 
@@ -280,6 +290,28 @@ export default function EconomicCalendarPage() {
 
   // Dynamic zoom styles via CSS scale to completely fit all columns on smaller devices
   const getIframeStyle = () => {
+    if (deviceType === "mobile") {
+      const targetWidth = 430; // Optimal minimum internal width for 4 columns on mobile
+      const scale = containerWidth < targetWidth ? containerWidth / targetWidth : 1;
+      const widthPercent = (1 / scale) * 100;
+      return {
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
+        width: `${widthPercent}%`,
+        height: `${widthPercent}%`,
+      };
+    }
+    if (deviceType === "tablet") {
+      const targetWidth = 620; // Optimal minimum internal width for 5 columns on tablet
+      const scale = containerWidth < targetWidth ? containerWidth / targetWidth : 1;
+      const widthPercent = (1 / scale) * 100;
+      return {
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
+        width: `${widthPercent}%`,
+        height: `${widthPercent}%`,
+      };
+    }
     return {
       width: "100%",
       height: "100%",
@@ -415,7 +447,7 @@ export default function EconomicCalendarPage() {
             )}
 
             {/* Embed Frame - Full-screen height on mobile to fill viewport */}
-            <div className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+            <div ref={containerRef} className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
               <iframe
                 src={iframeUrl}
                 onLoad={() => setIframeLoaded(true)}
