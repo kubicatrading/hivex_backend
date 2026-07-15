@@ -37,17 +37,17 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Override Tailwind Zinc color scale with corporate Anthracite greys */
+  /* Override Tailwind Zinc color scale with premium, highly-legible corporate Anthracite greys (Apple System Dark standard) */
   --color-zinc-50: #FAFAFB;
   --color-zinc-100: #F5F5F7;
-  --color-zinc-200: #C2C2C7;
-  --color-zinc-300: #86868B;
-  --color-zinc-400: #606A72;
-  --color-zinc-500: #484F56;
-  --color-zinc-600: #30353A;
-  --color-zinc-700: #24282D;
-  --color-zinc-800: #1B1E21;
-  --color-zinc-900: #121416;
+  --color-zinc-200: #D2D2D7;   /* Light platinum silver for maximum readability (Apple System secondary text) */
+  --color-zinc-300: #AEAEB2;   /* Soft premium white-silver (Apple System tertiary text) */
+  --color-zinc-400: #8E8E93;   /* Visible medium gray for secondary descriptions and labels */
+  --color-zinc-500: #636366;   /* Muted gray for metadata and borders */
+  --color-zinc-600: #48484A;
+  --color-zinc-700: #3A3A3C;
+  --color-zinc-800: #2C2C2E;
+  --color-zinc-900: #1C1C1E;
   --color-zinc-950: #0B0C0D;
 
   /* Override Violet and Purple scales with elegant Champagne Gold scales */
@@ -87,6 +87,10 @@ body {
   font-family: var(--font-sans);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+p {
+  color: var(--color-zinc-200); /* Establece un color por defecto sumamente legible sin forzar la vista */
 }
 
 /* Custom Scrollbar */
