@@ -126,23 +126,40 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Load last visited dates from localStorage on mount
+  // Load last visited dates from localStorage on mount or when profile loads
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && profile?.email) {
       try {
-        const saved = localStorage.getItem("hivex_channels_last_visited");
+        const key = `hivex_channels_last_visited_${profile.email}`;
+        const saved = localStorage.getItem(key);
         if (saved) {
           setLastVisitedDates(JSON.parse(saved));
+        } else {
+          // Fallback/Legacy migration: see if there's a non-scoped old key
+          const legacySaved = localStorage.getItem("hivex_channels_last_visited");
+          if (legacySaved) {
+            setLastVisitedDates(JSON.parse(legacySaved));
+            localStorage.setItem(key, legacySaved);
+          } else {
+            // First time login for this user: set all channels to read by default (preventing false-positive red badges on old videos)
+            const nowStr = new Date().toISOString();
+            const initial: Record<string, string> = {};
+            channels.forEach(ch => {
+              initial[ch] = nowStr;
+            });
+            setLastVisitedDates(initial);
+            localStorage.setItem(key, JSON.stringify(initial));
+          }
         }
       } catch (err) {
         console.error("Failed to load last visited channels:", err);
       }
     }
-  }, []);
+  }, [profile?.email, channels]);
 
   // Track and update visited channel
   useEffect(() => {
-    if (pathname === "/dashboard/videos") {
+    if (pathname === "/dashboard/videos" && profile?.email) {
       const channelParam = searchParams.get("channel") || "Andrei Jikh";
       
       // Update last visited date for this channel
@@ -150,12 +167,13 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         const nowStr = new Date().toISOString();
         const updated = { ...prev, [channelParam]: nowStr };
         if (typeof window !== "undefined") {
-          localStorage.setItem("hivex_channels_last_visited", JSON.stringify(updated));
+          const key = `hivex_channels_last_visited_${profile.email}`;
+          localStorage.setItem(key, JSON.stringify(updated));
         }
         return updated;
       });
     }
-  }, [pathname, searchParams]);
+  }, [pathname, searchParams, profile?.email]);
 
   // Check auth session on load
   useEffect(() => {
