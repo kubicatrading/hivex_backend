@@ -135,7 +135,10 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
       ],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 10
+        maxOutputTokens: 10,
+        thinkingConfig: {
+          thinkingBudget: 0
+        }
       }
     };
 
@@ -153,7 +156,14 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
     }
 
     const json = await response.json();
-    const answer = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase();
+    const parts = json.candidates?.[0]?.content?.parts || [];
+    const textPart = parts
+      .filter((p: any) => !p.thought)
+      .map((p: any) => p.text)
+      .filter(Boolean)
+      .join("") || "";
+
+    const answer = textPart.trim().toUpperCase();
     console.log(`[AI Snapshot Guard] Gemini model output for image "${path.basename(filePath)}": "${answer}"`);
 
     if (answer && answer.includes("YES")) {

@@ -76,7 +76,38 @@ const SEED_AUDIOS = [
   }
 ];
 
-const SEED_VIDEOS: any[] = [];
+const SEED_VIDEOS = [
+  {
+    id: "seed-video-1",
+    title: "Amerikan Borsası Uzun Vadede Kazandırmak Zorunda, Neden?",
+    description: "Análisis en profundidad de las tendencias a largo plazo en el mercado estadounidense.",
+    type: "video",
+    file_url: "https://www.youtube.com/embed/avoZodQxkMk",
+    metadata: {
+      duration: "12:34",
+      resolution: "4K UHD",
+      thumbnail: "https://img.youtube.com/vi/avoZodQxkMk/maxresdefault.jpg",
+      is_youtube: true,
+      channel_title: "Kanal Finans"
+    },
+    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: "seed-video-2",
+    title: "US Job Creation Prints at Half of Market Expectations",
+    description: "Discussion on the latest macro employment report and its global implications.",
+    type: "video",
+    file_url: "https://www.youtube.com/embed/8753cef9-7ca8-489a-a859-d1494bbfe64a",
+    metadata: {
+      duration: "15:20",
+      resolution: "4K UHD",
+      thumbnail: "https://img.youtube.com/vi/8753cef9-7ca8-489a-a859-d1494bbfe64a/maxresdefault.jpg",
+      is_youtube: true,
+      channel_title: "Judging Freedom"
+    },
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString()
+  }
+];
 
 interface MockUser {
   id: string;
@@ -167,6 +198,15 @@ class MockSupabase {
             console.warn("[Migration] Error parsing key in loop:", key, e);
           }
         }
+      }
+    }
+
+    // Ensure all entries in SEED_VIDEOS exist in globalDocs to guarantee red dots are visible out of the box in local development
+    const currentIds = new Set(globalDocs.map(d => d.id));
+    for (const v of SEED_VIDEOS) {
+      if (!currentIds.has(v.id)) {
+        globalDocs.push(v);
+        changed = true;
       }
     }
 

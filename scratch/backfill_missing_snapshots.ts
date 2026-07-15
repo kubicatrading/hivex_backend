@@ -170,62 +170,74 @@ async function run() {
       fs.mkdirSync(localDir, { recursive: true });
     }
 
-    let streamUrl = videoUrl;
     const isYoutube = videoUrl.includes("youtube.com") || videoUrl.includes("youtu.be");
 
-    if (isYoutube) {
+    const getStreamUrl = async (): Promise<string> => {
+      if (!isYoutube) return videoUrl;
       try {
         console.log(`[Backfill Snapshots] Resolving stream URL via yt-dlp...`);
         const resolved = await runCmd(`yt-dlp -f "best[ext=mp4]/best" -g "${videoUrl}"`);
-        if (resolved) {
-          streamUrl = resolved;
-          console.log(`[Backfill Snapshots] Stream URL resolved successfully!`);
-        }
+        if (resolved) return resolved;
       } catch (err) {
         console.warn(`[Backfill Snapshots] Standard yt-dlp resolution failed, trying fallback...`);
         try {
           const fallback = await runCmd(`yt-dlp -g "${videoUrl}"`);
-          if (fallback) {
-            streamUrl = fallback;
-            console.log(`[Backfill Snapshots] Stream URL resolved via fallback!`);
-          }
+          if (fallback) return fallback;
         } catch (fallbackErr) {
-          console.error(`[Backfill Snapshots] Failed to resolve video stream URL. Skipping video.`, fallbackErr);
-          continue;
+          console.error(`[Backfill Snapshots] Failed to resolve video stream URL.`, fallbackErr);
         }
       }
-    }
+      return videoUrl;
+    };
+
+    let streamUrl = await getStreamUrl();
 
     for (const chart of parsedCharts) {
       const outputPath = path.join(localDir, `${chart.seconds}.jpg`);
       const offsetSeconds = chart.seconds + 5;
 
       console.log(`[Backfill Snapshots] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s + 5s offset = ${offsetSeconds}s)...`);
-      try {
-        const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
-        await runCmd(ffmpegCmd);
-        console.log(`[Backfill Snapshots] Saved locally: ${chart.seconds}.jpg`);
-
-        if (fs.existsSync(outputPath)) {
-          const fileBuffer = fs.readFileSync(outputPath);
-          const uploadPath = `${resolvedVideoId}/${chart.seconds}.jpg`;
-          console.log(`[Backfill Snapshots] Uploading to Supabase snapshots/${uploadPath}...`);
-
-          const { error: uploadError } = await supabaseClient.storage
-            .from("snapshots")
-            .upload(uploadPath, fileBuffer, {
-              contentType: "image/jpeg",
-              upsert: true
-            });
-
-          if (uploadError) {
-            console.error(`[Backfill Snapshots] Failed to upload snapshot "${uploadPath}":`, uploadError.message);
-          } else {
-            console.log(`[Backfill Snapshots] Successfully uploaded snapshot!`);
+      let success = false;
+      if (fs.existsSync(outputPath)) {
+        console.log(`[Backfill Snapshots] Snapshot at ${chart.timestamp} (${chart.seconds}s) already exists locally, skipping extraction.`);
+        success = true;
+      } else {
+        try {
+          const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+          await runCmd(ffmpegCmd);
+          console.log(`[Backfill Snapshots] Saved locally: ${chart.seconds}.jpg`);
+          success = true;
+        } catch (err) {
+          console.warn(`[Backfill Snapshots] Ffmpeg failed. Re-resolving stream URL and retrying...`);
+          try {
+            streamUrl = await getStreamUrl();
+            const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+            await runCmd(ffmpegCmd);
+            console.log(`[Backfill Snapshots] Saved locally on retry: ${chart.seconds}.jpg`);
+            success = true;
+          } catch (retryErr) {
+            console.error(`[Backfill Snapshots] Error processing snapshot for ${chart.seconds}s on retry:`, retryErr);
           }
         }
-      } catch (err) {
-        console.error(`[Backfill Snapshots] Error processing snapshot for ${chart.seconds}s:`, err);
+      }
+
+      if (success && fs.existsSync(outputPath)) {
+        const fileBuffer = fs.readFileSync(outputPath);
+        const uploadPath = `${resolvedVideoId}/${chart.seconds}.jpg`;
+        console.log(`[Backfill Snapshots] Uploading to Supabase snapshots/${uploadPath}...`);
+
+        const { error: uploadError } = await supabaseClient.storage
+          .from("snapshots")
+          .upload(uploadPath, fileBuffer, {
+            contentType: "image/jpeg",
+            upsert: true
+          });
+
+        if (uploadError) {
+          console.error(`[Backfill Snapshots] Failed to upload snapshot "${uploadPath}":`, uploadError.message);
+        } else {
+          console.log(`[Backfill Snapshots] Successfully uploaded snapshot!`);
+        }
       }
     }
   }

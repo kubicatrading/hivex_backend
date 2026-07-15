@@ -144,13 +144,65 @@ export async function GET(
     }
 
     if (isNotFound) {
-      console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Checking for dynamic extraction support...`);
+      console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Checking for closest available match...`);
       
       // Parse seconds to integer
       const secondsInt = parseInt(fileKey.replace(".jpg", ""), 10);
       if (isNaN(secondsInt)) {
         return new NextResponse("Invalid seconds parameter", { status: 400 });
       }
+
+      // Try closest available match resolution in the backend (using admin bypass listing)
+      try {
+        const supabase = createClient(supabaseUrl, supabaseKey, {
+          auth: { persistSession: false },
+        });
+        const { data: fileList, error: listErr } = await supabase.storage
+          .from("snapshots")
+          .list(resolvedVideoId, { limit: 100 });
+
+        if (!listErr && fileList && fileList.length > 0) {
+          const availableSeconds = fileList
+            .map((f) => parseInt(f.name.replace(".jpg", ""), 10))
+            .filter((s) => !isNaN(s));
+
+          if (availableSeconds.length > 0) {
+            let closest = availableSeconds[0];
+            let minDiff = Math.abs(availableSeconds[0] - secondsInt);
+            for (let i = 1; i < availableSeconds.length; i++) {
+              const diff = Math.abs(availableSeconds[i] - secondsInt);
+              if (diff < minDiff) {
+                minDiff = diff;
+                closest = availableSeconds[i];
+              }
+            }
+
+            // Allow up to a generous 60-second window to resolve slightly shifted timestamps
+            if (minDiff <= 60) {
+              const resolvedFileKey = `${closest}.jpg`;
+              console.log(`[Snapshots Route] Resolved shifted timestamp ${secondsInt} to closest match ${resolvedFileKey}`);
+              const closestStorageUrl = `${supabaseUrl}/storage/v1/object/public/snapshots/${resolvedVideoId}/${resolvedFileKey}`;
+              const closestResponse = await fetch(closestStorageUrl);
+              if (closestResponse.ok) {
+                const contentType = closestResponse.headers.get("Content-Type") || "image/jpeg";
+                const buffer = await closestResponse.arrayBuffer();
+
+                return new NextResponse(buffer, {
+                  status: 200,
+                  headers: {
+                    "Content-Type": contentType,
+                    "Cache-Control": "public, max-age=31536000, immutable",
+                  },
+                });
+              }
+            }
+          }
+        }
+      } catch (matchErr) {
+        console.error("[Snapshots Route] Closest match resolution crash:", matchErr);
+      }
+
+      console.log(`[Snapshots Route] Dynamic extraction fallback required for ${fileKey}...`);
 
       // Reconstruct the YouTube URL
       let youtubeUrl = rawFileUrl;

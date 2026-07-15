@@ -3,38 +3,47 @@ const fs = require('fs');
 
 // Read env variables
 const envText = fs.readFileSync('.env.local', 'utf8');
-const supabaseUrl = envText.match(/NEXT_PUBLIC_SUPABASE_URL=([^\r\n]+)/)?.[1];
-const supabaseAnonKey = envText.match(/NEXT_PUBLIC_SUPABASE_ANON_KEY=([^\r\n]+)/)?.[1];
+const supabaseUrl = envText.match(/SUPABASE_PRODUCTION_URL=([^\r\n]+)/)?.[1]?.trim();
+const supabaseServiceKey = envText.match(/SUPABASE_PRODUCTION_SERVICE_ROLE_KEY=([^\r\n]+)/)?.[1]?.trim();
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Could not read Supabase credentials from .env.local");
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error("Could not read Supabase production credentials from .env.local");
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { persistSession: false }
+});
 
 async function run() {
   console.log("Fetching documents from Supabase...");
+  const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  console.log("Cutoff date (24h):", cutoff24h);
+
   const { data, error } = await supabase
     .from('documents')
-    .select('*')
-    .eq('type', 'video');
+    .select('id, title, type, created_at, file_url, metadata')
+    .gte('created_at', cutoff24h)
+    .order('created_at', { ascending: false });
 
   if (error) {
     console.error("Error fetching documents:", error);
     return;
   }
 
-  console.log(`Retrieved ${data.length} video documents:`);
-  for (const doc of data) {
+  const counts = {};
+  data.forEach(d => {
+    counts[d.type] = (counts[d.type] || 0) + 1;
+  });
+  console.log("\nDocument counts by type in the last 24 hours:", counts);
+
+  const videos = data.filter(d => d.type === 'video');
+  console.log(`\nFound ${videos.length} 'video' documents:`);
+  for (const doc of videos) {
     console.log(`\nDoc ID: ${doc.id}`);
     console.log(`Title: ${doc.title}`);
     console.log(`Created At: ${doc.created_at}`);
-    console.log(`Transcription length: ${doc.metadata?.transcription?.length || 0}`);
-    if (doc.metadata?.transcription) {
-      console.log(`--- First 500 chars of transcription/summary/report ---`);
-      console.log(doc.metadata.transcription.substring(0, 500));
-    }
+    console.log(`File URL: ${doc.file_url}`);
   }
 }
 

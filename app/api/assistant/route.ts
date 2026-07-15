@@ -222,7 +222,10 @@ ${useInternet ? `
           contents: contentsPayload,
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 8192
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingBudget: 0
+            }
           }
         };
 
@@ -272,13 +275,14 @@ ${useInternet ? `
         if (res.ok) {
           geminiData = await res.json();
           const candidate = geminiData.candidates?.[0];
-          const part = candidate?.content?.parts?.[0];
+          const parts = candidate?.content?.parts || [];
           
-          if (part) {
-            if (part.functionCall || (part.text && part.text.trim().length > 0)) {
-              successfulModel = attempt.name;
-              break;
-            }
+          const hasFunction = parts.some((p: any) => p.functionCall);
+          const hasText = parts.some((p: any) => p.text && p.text.trim().length > 0);
+
+          if (hasFunction || hasText) {
+            successfulModel = attempt.name;
+            break;
           }
           errorDetails.push(`${attempt.name}: Respuesta vacía o formato inválido.`);
         } else {
@@ -291,16 +295,23 @@ ${useInternet ? `
     }
 
     const candidate = geminiData?.candidates?.[0];
-    const part = candidate?.content?.parts?.[0];
+    const parts = candidate?.content?.parts || [];
 
-    if (!part) {
+    if (parts.length === 0) {
       return NextResponse.json({
         error: "No se pudo obtener una respuesta válida de la API de Gemini. Detalles:\n" + errorDetails.join("\n")
       }, { status: 500 });
     }
 
-    geminiResponseText = part.text || "";
-    const functionCall = part.functionCall || null;
+    // Cleanly extract text by joining non-thought parts
+    geminiResponseText = parts
+      .filter((p: any) => !p.thought)
+      .map((p: any) => p.text)
+      .filter(Boolean)
+      .join("") || "";
+
+    const functionCallPart = parts.find((p: any) => p.functionCall);
+    const functionCall = functionCallPart ? functionCallPart.functionCall : null;
 
     // Handle autonomous function call for Telegram
     if (functionCall && functionCall.name === "send_telegram_notification") {

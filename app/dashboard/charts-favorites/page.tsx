@@ -329,8 +329,13 @@ export default function FavoriteChartsPage() {
                             src={snapshotPath}
                             alt={chart.title}
                             onError={(e) => {
-                              // Fallback to youtube thumbnail if local snapshot fails
-                              (e.currentTarget as HTMLImageElement).src = fallbackThumbnail;
+                              const img = e.currentTarget as HTMLImageElement;
+                              if (!img.dataset.triedProxy) {
+                                img.dataset.triedProxy = "true";
+                                img.src = `/snapshots/${videoId}/${targetTime}.jpg`;
+                              } else {
+                                img.src = fallbackThumbnail;
+                              }
                             }}
                             className="w-full h-full object-cover transition-transform duration-500 group-hover/thumb:scale-102"
                           />

@@ -774,13 +774,6 @@ export async function sendTelegramMessageWithPhotos(
     for (let i = 0; i < matches.length; i++) {
       let mediaUrl = resolveUrl(matches[i].url);
       
-      // Convert any mp4 clips to high-quality static snapshots (.jpg) to save storage cost and enhance security
-      if (mediaUrl.includes("/clips/")) {
-        mediaUrl = mediaUrl
-          .replace("/public/documents/clips/", "/public/snapshots/")
-          .replace(".mp4", ".jpg");
-      }
-
       // If the URL is a direct Supabase Storage URL pointing to snapshots, redirect it to our Vercel proxied URL.
       // This ensures that UUIDs are dynamically resolved to YouTube video IDs by our backend proxy.
       if (mediaUrl.includes(".supabase.co/storage/v1/object/public/snapshots/")) {

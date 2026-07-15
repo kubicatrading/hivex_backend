@@ -93,7 +93,10 @@ async function translateSegment(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 8192 // Incremented maximum number of tokens allowed per request
+          maxOutputTokens: 8192, // Incremented maximum number of tokens allowed per request
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
         }
       };
 
@@ -115,7 +118,12 @@ async function translateSegment(
 
       if (response.ok) {
         const geminiData = await response.json();
-        const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parts = geminiData.candidates?.[0]?.content?.parts || [];
+        const apiResponse = parts
+          .filter((p: any) => !p.thought)
+          .map((p: any) => p.text)
+          .filter(Boolean)
+          .join("") || "";
 
         if (apiResponse && apiResponse.trim().length > 0) {
           translatedText = apiResponse.trim();

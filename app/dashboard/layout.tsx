@@ -80,6 +80,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   const [canalesOpen, setCanalesOpen] = useState(true);
   const [channels, setChannels] = useState<string[]>(DEFAULT_CHANNELS);
+  const [channelMaxDates, setChannelMaxDates] = useState<Record<string, string>>({});
+  const [lastVisitedDates, setLastVisitedDates] = useState<Record<string, string>>({});
 
   // Fetch unique channels dynamically from saved videos
   useEffect(() => {
@@ -87,24 +89,32 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       try {
         const { data } = await supabase
           .from("documents")
-          .select("metadata")
+          .select("metadata, created_at")
           .eq("type", "video");
         
         if (data) {
           const uniqueChannels = new Set<string>(DEFAULT_CHANNELS);
+          const maxDates: Record<string, string> = {};
           
-          data.forEach((doc: { metadata?: { channel_title?: string } }) => {
+          data.forEach((doc: { created_at: string; metadata?: { channel_title?: string } }) => {
             if (doc.metadata && doc.metadata.channel_title) {
               const ch = doc.metadata.channel_title;
               // Clean up any dynamic (Mock Feed) suffixes so they map to the clean sidebar categories
               const cleanCh = ch.replace(/\s*\(Mock\s+Feed\)/i, "");
               if (cleanCh !== "HIVEX Demo") {
                 uniqueChannels.add(cleanCh);
+                
+                // Track maximum creation date
+                const currentMax = maxDates[cleanCh];
+                if (!currentMax || new Date(doc.created_at) > new Date(currentMax)) {
+                  maxDates[cleanCh] = doc.created_at;
+                }
               }
             }
           });
           
           setChannels(Array.from(uniqueChannels));
+          setChannelMaxDates(maxDates);
         }
       } catch (err) {
         console.error("Failed to fetch dynamic channels for sidebar:", err);
@@ -115,6 +125,37 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     const interval = setInterval(fetchChannels, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Load last visited dates from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("hivex_channels_last_visited");
+        if (saved) {
+          setLastVisitedDates(JSON.parse(saved));
+        }
+      } catch (err) {
+        console.error("Failed to load last visited channels:", err);
+      }
+    }
+  }, []);
+
+  // Track and update visited channel
+  useEffect(() => {
+    if (pathname === "/dashboard/videos") {
+      const channelParam = searchParams.get("channel") || "Andrei Jikh";
+      
+      // Update last visited date for this channel
+      setLastVisitedDates((prev) => {
+        const nowStr = new Date().toISOString();
+        const updated = { ...prev, [channelParam]: nowStr };
+        if (typeof window !== "undefined") {
+          localStorage.setItem("hivex_channels_last_visited", JSON.stringify(updated));
+        }
+        return updated;
+      });
+    }
+  }, [pathname, searchParams]);
 
   // Check auth session on load
   useEffect(() => {
@@ -299,6 +340,19 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                   <div className="pl-4 ml-6 border-l border-zinc-900/85 space-y-1.5 mt-1 transition-all">
                     {channels.map((ch) => {
                       const isActive = pathname === "/dashboard/videos" && (searchParams.get("channel") === ch || (ch === "Andrei Jikh" && !searchParams.get("channel")));
+                      const maxDate = channelMaxDates[ch];
+                      const lastVisited = lastVisitedDates[ch];
+                      const hasNewVideos = maxDate && (!lastVisited || new Date(maxDate) > new Date(lastVisited));
+
+                      let dotClass = "w-1.5 h-1.5 rounded-full transition-all duration-150 ";
+                      if (isActive) {
+                        dotClass += "bg-sky-400 shadow-md shadow-sky-400/50";
+                      } else if (hasNewVideos) {
+                        dotClass += "bg-rose-500 shadow-md shadow-rose-500/50 animate-pulse";
+                      } else {
+                        dotClass += "bg-zinc-800";
+                      }
+
                       return (
                         <Link
                           key={ch}
@@ -313,7 +367,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                           `}
                         >
                           <span className="truncate">{ch}</span>
-                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-sky-400 shadow-md shadow-sky-400/50" : "bg-zinc-800"}`} />
+                          <span className={dotClass} />
                         </Link>
                       );
                     })}

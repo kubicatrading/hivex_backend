@@ -105,13 +105,26 @@ export async function POST(request: NextRequest) {
                       }
                     ]
                   }
-                ]
+                ],
+                generationConfig: {
+                  temperature: 0.1,
+                  maxOutputTokens: 1024,
+                  thinkingConfig: {
+                    thinkingBudget: 0
+                  }
+                }
               })
             });
 
             if (res.ok) {
               const resData = await res.json();
-              const textPart = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+              const parts = resData.candidates?.[0]?.content?.parts || [];
+              const textPart = parts
+                .filter((p: any) => !p.thought)
+                .map((p: any) => p.text)
+                .filter(Boolean)
+                .join("") || "";
+                
               if (textPart) {
                 transcribedText = textPart.trim();
                 console.log(`[Telegram Webhook] Successfully transcribed. Result: "${transcribedText}"`);
@@ -559,7 +572,10 @@ Tienes dos propósitos de servicio principales:
           contents: contentsPayload,
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 8192
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingBudget: 0
+            }
           },
           systemInstruction: {
             parts: [{ text: systemInstruction }]
@@ -580,9 +596,15 @@ Tienes dos propósitos de servicio principales:
         if (res.ok) {
           const resData = await res.json();
           const candidate = resData.candidates?.[0];
-          const part = candidate?.content?.parts?.[0];
-          if (part && part.text) {
-            geminiResponseText = part.text;
+          const parts = candidate?.content?.parts || [];
+          const textResponse = parts
+            .filter((p: any) => !p.thought)
+            .map((p: any) => p.text)
+            .filter(Boolean)
+            .join("") || "";
+            
+          if (textResponse) {
+            geminiResponseText = textResponse;
             successfulModel = attempt.name;
             console.log(`[Telegram Webhook] Gemini response obtained from ${attempt.name}. Text length: ${geminiResponseText.length} chars.`);
             break;

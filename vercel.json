@@ -31,14 +31,18 @@
   "crons": [
     {
       "path": "/api/videos/sync",
-      "schedule": "0 2 * * *"
+      "schedule": "0 2,10,18 * * *"
     },
     {
       "path": "/api/videos/monitor-analysis",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/videos/alerts-24h",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/videos/digest",
       "schedule": "30 6 * * *"
     },
     {
@@ -47,7 +51,7 @@
     },
     {
       "path": "/api/videos/backfill-snapshots",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }

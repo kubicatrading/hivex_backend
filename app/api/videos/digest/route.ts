@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown, getTelegramLanguage, getYoutubeId } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Prevent Vercel lambda timeout during daily synthesis
 
 export async function GET(request: NextRequest) {
   return handleDigest(request);
@@ -406,6 +407,9 @@ ${JSON.stringify(videoContexts, null, 2)}
         generationConfig: {
           temperature: 0.15,
           maxOutputTokens: 8192,
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
         },
       };
 
@@ -419,7 +423,12 @@ ${JSON.stringify(videoContexts, null, 2)}
 
       if (response.ok) {
         const geminiData = await response.json();
-        const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parts = geminiData.candidates?.[0]?.content?.parts || [];
+        const apiResponse = parts
+          .filter((p: any) => !p.thought)
+          .map((p: any) => p.text)
+          .filter(Boolean)
+          .join("") || "";
 
         if (apiResponse && apiResponse.trim().length > 0) {
           let cleaned = apiResponse.trim();

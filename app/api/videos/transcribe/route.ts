@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { YoutubeTranscript } from "youtube-transcript";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 
+export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during transcription
+
+
 // Exact system instruction matching user requirements for Google Gemini
 const SYSTEM_INSTRUCTION = `You are the Google Gemini model, a high-precision professional transcriber and elite content analyst. Your task is to process a raw, auto-generated transcript of a YouTube video and generate a JSON response with exactly two properties: "transcription" (verbatim refinement) and "analysis" (objective summary and investment report).`;
 
@@ -419,6 +422,8 @@ You must perform a high-fidelity meta-analysis based ONLY on the video's Title a
 - Description: "${description || "No description provided."}"
 - Duration: ${duration}
 
+CRITICAL FINANCIAL RIGOR RULE: Financial accuracy is of absolute, strict importance. You MUST capture and preserve all numerical values, price levels, asset figures, interest rates, dates, and currency values EXACTLY as they are stated in the provided metadata.
+
 The "analysis" property MUST be written entirely in English with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
 
 You MUST return a JSON object with exactly the following structure:
@@ -430,11 +435,13 @@ You MUST return a JSON object with exactly the following structure:
     promptText = `Below is the raw, auto-generated transcript of a YouTube video titled "${title}". Every spoken line is prefixed with its starting timestamp in brackets like [MM:SS] or [HH:MM:SS].
 Your task is to analyze it and generate an objective summary, detected charts, and a detailed investment analysis report in English.
 
+CRITICAL FINANCIAL RIGOR RULE: Financial accuracy is of absolute, strict importance. You MUST capture and preserve all numerical values, price levels (e.g., $4,100, etc.), asset figures, interest rates, dates, and currency values EXACTLY as they are stated in the transcript. You are strictly forbidden from "correcting", hallucinating, or substituting spoken transcript numbers with historical values or expectations from your pre-training memory (e.g., if the speaker or transcript states a level or target of $4,100, do NOT output $2,100 under any circumstance). 100% faithfulness to spoken figures is mandatory.
+
 The "analysis" property MUST be written entirely in English with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
 
 You MUST return a JSON object with exactly the following structure:
 {
-  "analysis": "### 📝 Detailed Content Summary\\n\\nCRITICAL FULL COVERAGE RULE: The video lasts a total of ${duration}. It is mandatory to structure the detailed summary sequentially and uniformly covering the entire length of the video from start [00:00] to the end or closing minutes of the video (near ${duration}), ensuring timestamps are balanced across the duration (for example, ${intervalText}) and not just summarizing the beginning or first half. Divide the summary into logical segments with fourth-level chronological headings such as: #### [MM:SS] or #### [HH:MM:SS] **Bold Heading of the Segment** (without bullets or hyphens in the headings). Under each heading, add bulleted sub-paragraphs using hyphens (-) and bold text to highlight key concepts. Strictly objective, neutral, without financial analysis.\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\nChronologically identify any chart, data table, diagram, or visual resource shown on screen or discussed. CRITICAL DETECTION RULE: If during the video precise percentages, numbers, or statistical data are mentioned sequentially (for example, yield figures, spreads, interest rates, or projections), assume with total confidence that at that moment a visual card or static data chart with little movement (split screen or fixed data frame for more than 5 seconds) was projected on screen. You must identify these parts as charts or data visualization resources if they are grounded in the actual transcript. GOLDEN RULE OF TRUTHFULNESS: Extract only charts and visualizations that stem realistically and directly from the figures and topics detailed in the video. It is strictly forbidden to hallucinate financial assets, percentages, or specific timestamps that do not appear in the actual transcript. Illustrative output format example (DO NOT invent these data if they are not in the text): #### [01:23 - 01:55] **Descriptive Title of the Real Chart or Table**. On the other hand, absolutely avoid generating charts at purely conversational points without figures (for example, avoid timestamps where there is only general fluent chat). For each detected chart, add a section with a chronological heading showing its start and end range like: #### [MM:SS - MM:SS] or #### [HH:MM:SS - HH:MM:SS] **Descriptive Title of the Chart** showing precisely when the chart starts and ends in the video. Under each heading, write a bulleted list (-) describing the key metrics, data, or axes shown. Immediately after the bullets, add a single line in italics: *Legend: [Brief summary explaining the key takeaway at the bottom of the chart].* If the video does not contain charts or data visual resources, write exactly: *No charts were detected in this video.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+  "analysis": "### 📝 Detailed Content Summary\\n\\nCRITICAL FULL COVERAGE RULE: The video lasts a total of ${duration}. It is mandatory to structure the detailed summary sequentially and uniformly covering the entire length of the video from start [00:00] to the end or closing minutes of the video (near ${duration}), ensuring timestamps are balanced across the duration (for example, ${intervalText}) and not just summarizing the beginning or first half. Divide the summary into logical segments with fourth-level chronological headings such as: #### [MM:SS] or #### [HH:MM:SS] **Bold Heading of the Segment** (without bullets or hyphens in the headings). Under each heading, add bulleted sub-paragraphs using hyphens (-) and bold text to highlight key concepts. Strictly objective, neutral, without financial analysis.\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\nChronologically identify any chart, data table, diagram, or visual resource shown on screen or discussed. CRITICAL DETECTION RULE: If during the video precise percentages, numbers, or statistical data are mentioned sequentially (for example, yield figures, spreads, interest rates, or projections), assume with total confidence that at that moment a visual card or static data chart with little movement (split screen or fixed data frame for more than 5 seconds) was projected on screen. You must identify these parts as charts or data visualization resources if they are grounded in the actual transcript. GOLDEN RULE OF TRUTHFULNESS & NUMERICAL PRESERVATION: Extract only charts and visualizations that stem realistically and directly from the figures and topics detailed in the video. It is strictly forbidden to hallucinate financial assets, percentages, or specific timestamps that do not appear in the actual transcript. You must report all price levels and metrics exactly as they are detailed in the transcript (e.g., if the transcript says $4,100, do not alter it). Illustrative output format example (DO NOT invent these data if they are not in the text): #### [01:23 - 01:55] **Descriptive Title of the Real Chart or Table**. On the other hand, absolutely avoid generating charts at purely conversational points without figures (for example, avoid timestamps where there is only general fluent chat). For each detected chart, add a section with a chronological heading showing its start and end range like: #### [MM:SS - MM:SS] or #### [HH:MM:SS - HH:MM:SS] **Descriptive Title of the Chart** showing precisely when the chart starts and ends in the video. Under each heading, write a bulleted list (-) describing the key metrics, data, or axes shown. Immediately after the bullets, add a single line in italics: *Legend: [Brief summary explaining the key takeaway at the bottom of the chart].* If the video does not contain charts or data visual resources, write exactly: *No charts were detected in this video.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
 }
 
 Raw transcript text:
@@ -516,7 +523,10 @@ ${rawTranscriptText}`;
         generationConfig: {
           temperature: 0.2,
           responseMimeType: "application/json",
-          maxOutputTokens: 8192
+          maxOutputTokens: 8192,
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
         }
       };
 
@@ -538,7 +548,12 @@ ${rawTranscriptText}`;
 
       if (response.ok) {
         const geminiData = await response.json();
-        const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parts = geminiData.candidates?.[0]?.content?.parts || [];
+        const apiResponse = parts
+          .filter((p: any) => !p.thought)
+          .map((p: any) => p.text)
+          .filter(Boolean)
+          .join("") || "";
 
         if (apiResponse && apiResponse.trim().length > 0) {
           try {
@@ -613,15 +628,314 @@ ${rawTranscriptText}`;
   }
 }
 
+
+// Helper functions for server-side database updates to avoid RLS and desync issues
+
+function splitTranscription(text: string) {
+  if (!text) return { transcription: "", summary: "", charts: "", report: "" };
+  
+  const regexSplit = /\n\s*(?:---|===|\*\*\*|___|- - -)[^\n]*\n/;
+  const parts = text.split(regexSplit);
+  
+  let transcription = "";
+  let summary = "";
+  let charts = "";
+  let report = "";
+  
+  if (parts.length >= 4) {
+    transcription = parts[0] || "";
+    summary = parts[1] || "";
+    charts = parts[2] || "";
+    report = parts.slice(3).join("\n---\n") || "";
+  } else if (parts.length === 3) {
+    transcription = parts[0] || "";
+    summary = parts[1] || "";
+    charts = "";
+    report = parts[2] || "";
+  } else {
+    const lines = text.split("\n");
+    let summaryIdx = -1;
+    let chartsIdx = -1;
+    let reportIdx = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      
+      if (trimmed.startsWith("#") || trimmed.startsWith("- #") || trimmed.startsWith("**")) {
+        const headerText = trimmed.replace(/^[\s\-\*#]*/, "").replace(/^\*\*|\*\*$/g, "").trim();
+        
+        if (summaryIdx === -1) {
+          if (headerText.includes("resumen") || headerText.includes("summary") || headerText.includes("zusammenfassung") || headerText.includes("ozet") || headerText.includes("part 2") || headerText.includes("parte 2") || headerText.includes("teil 2") || headerText.includes("bolum 2") || headerText.includes("kisim 2")) {
+            summaryIdx = i;
+          }
+        } else if (chartsIdx === -1) {
+          if (headerText.includes("grafico") || headerText.includes("grafik") || headerText.includes("chart") || headerText.includes("diagram") || headerText.includes("visualizac") || headerText.includes("visualis") || headerText.includes("gorsel") || headerText.includes("part 3") || headerText.includes("parte 3") || headerText.includes("teil 3") || headerText.includes("bolum 3") || headerText.includes("kisim 3")) {
+            const isReport = headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim");
+            if (isReport && !headerText.includes("grafic") && !headerText.includes("grafik") && !headerText.includes("chart") && !headerText.includes("visualizac") && !headerText.includes("visualis") && !headerText.includes("gorsel")) {
+              reportIdx = i;
+            } else {
+              chartsIdx = i;
+            }
+          }
+        } else if (reportIdx === -1) {
+          if (headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim") || headerText.includes("part 4") || headerText.includes("parte 4") || headerText.includes("teil 4") || headerText.includes("bolum 4") || headerText.includes("kisim 4")) {
+            reportIdx = i;
+          }
+        }
+      }
+    }
+
+    if (summaryIdx !== -1 && chartsIdx !== -1 && reportIdx !== -1 && reportIdx > chartsIdx && chartsIdx > summaryIdx) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx, chartsIdx).join("\n");
+      charts = lines.slice(chartsIdx, reportIdx).join("\n");
+      report = lines.slice(reportIdx).join("\n");
+    } else if (summaryIdx !== -1 && reportIdx !== -1 && reportIdx > summaryIdx) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx, reportIdx).join("\n");
+      charts = "";
+      report = lines.slice(reportIdx).join("\n");
+    } else if (summaryIdx !== -1 && chartsIdx !== -1 && chartsIdx > summaryIdx) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx, chartsIdx).join("\n");
+      charts = lines.slice(chartsIdx).join("\n");
+      report = "";
+    } else if (summaryIdx !== -1) {
+      transcription = lines.slice(0, summaryIdx).join("\n");
+      summary = lines.slice(summaryIdx).join("\n");
+      charts = "";
+      report = "";
+    } else {
+      transcription = parts[0] || "";
+      summary = parts[1] || "";
+      charts = parts[2] || "";
+      report = parts.slice(3).join("\n---\n") || "";
+      
+      if (parts.length === 1) {
+        transcription = text;
+        summary = "";
+        charts = "";
+        report = "";
+      } else if (parts.length === 2) {
+        transcription = parts[0] || "";
+        summary = parts[1] || "";
+        charts = "";
+        report = "";
+      } else if (parts.length === 3) {
+        transcription = parts[0] || "";
+        summary = parts[1] || "";
+        charts = "";
+        report = parts[2] || "";
+      }
+    }
+  }
+  
+  const cleanSummary = summary.replace(/^#*\s*(?:Resumen Detallado|Resumen Detallado del Contenido|Resumen|Detailed Summary|Zusammenfassung|Ozet|Part 2|Parte 2|Teil 2|Teil2|Bolum 2|Kisim 2)[^\n]*\n+/i, "").trim();
+  const cleanCharts = charts.replace(/^#*\s*(?:Graficos y Visualizaciones Detectadas|Graficos y Visualizaciones|Graficos|Charts and Visualizations|Charts|Visualizaciones|Erkannte Grafiken und Visualisierungen|Erkannte Grafiken|Tespit Edilen Grafikler ve Gorsellestirmeler|Tespit Edilen Grafikler|Part 3|Parte 3|Teil 3|Teil3|Bolum 3|Kisim 3)[^\n]*\n+/i, "").trim();
+  const cleanReport = report.replace(/^#*\s*(?:Informe de Inversión|Informe de Análisis|Informe|Investment Report|Investitionsbericht|Investitionsanalysebericht|Rapor|Yatirim Analiz Raporu|Analysis|Analyse|Analiz|Part 4|Parte 4|Teil 4|Teil4|Bolum 4|Kisim 4|Part 3|Parte 3)[^\n]*\n+/i, "").trim();
+  
+  return {
+    transcription: transcription.trim(),
+    summary: cleanSummary,
+    charts: cleanCharts,
+    report: cleanReport
+  };
+}
+
+async function saveVideoKnowledgeBaseServer(
+  supabaseAdmin: any,
+  videoDoc: { id: string; title: string; file_url?: string; metadata?: any },
+  transcriptionText: string
+) {
+  const adminId = "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
+  const splitResult = splitTranscription(transcriptionText);
+  const channelTitle = videoDoc.metadata?.channel_title || "Andrei Jikh";
+  const dateStr = new Date().toISOString();
+  const fileUrl = videoDoc.file_url || "";
+
+  // 1. Literal transcription
+  const transcriptionDoc = {
+    user_id: adminId,
+    title: `[Transcripción] - ${videoDoc.title}`,
+    description: `Transcripción completa literal de ${videoDoc.title}`,
+    type: "knowledge_transcription",
+    file_url: fileUrl,
+    metadata: {
+      fecha_transcripcion: dateStr,
+      canal_origen: channelTitle,
+      nombre_video: videoDoc.title,
+      texto_transcripcion: splitResult.transcription
+    }
+  };
+
+  // 2. Content summary
+  const summaryDoc = {
+    user_id: adminId,
+    title: `[Resumen] - ${videoDoc.title}`,
+    description: `Resumen de contenido completo de ${videoDoc.title}`,
+    type: "knowledge_summary",
+    file_url: fileUrl,
+    metadata: {
+      fecha_resumen: dateStr,
+      canal_origen: channelTitle,
+      nombre_video: videoDoc.title,
+      resumen_markdown: splitResult.summary
+    }
+  };
+
+  // 3. Charts and Visualizations
+  const chartsDoc = {
+    user_id: adminId,
+    title: `[Gráficos] - ${videoDoc.title}`,
+    description: `Gráficos y visualizaciones detectadas de ${videoDoc.title}`,
+    type: "knowledge_charts",
+    file_url: fileUrl,
+    metadata: {
+      fecha_graficos: dateStr,
+      canal_origen: channelTitle,
+      nombre_video: videoDoc.title,
+      graficos_markdown: splitResult.charts
+    }
+  };
+
+  // 4. Investment analysis report
+  const analysisDoc = {
+    user_id: adminId,
+    title: `[Análisis] - ${videoDoc.title}`,
+    description: `Informe de análisis financiero de ${videoDoc.title}`,
+    type: "knowledge_analysis",
+    file_url: fileUrl,
+    metadata: {
+      fecha_informe: dateStr,
+      canal_origen: channelTitle,
+      nombre_video: videoDoc.title,
+      informe_completo: splitResult.report
+    }
+  };
+
+  const docsToInsert = [
+    { doc: transcriptionDoc, type: "knowledge_transcription" },
+    { doc: summaryDoc, type: "knowledge_summary" },
+    { doc: chartsDoc, type: "knowledge_charts" },
+    { doc: analysisDoc, type: "knowledge_analysis" }
+  ];
+
+  for (const item of docsToInsert) {
+    const { data: existing, error: checkErr } = await supabaseAdmin
+      .from("documents")
+      .select("id")
+      .eq("type", item.type)
+      .eq("file_url", fileUrl);
+
+    if (checkErr) {
+      console.warn(`[Base de Conocimiento Server] Error al verificar existencia de ${item.type}:`, checkErr);
+    }
+
+    if (!existing || existing.length === 0) {
+      const { error: insertErr } = await supabaseAdmin
+        .from("documents")
+        .insert(item.doc);
+      if (insertErr) {
+        console.warn(`[Base de Conocimiento Server] Error al insertar ${item.type} para ${videoDoc.title}:`, insertErr);
+      } else {
+        console.log(`[Base de Conocimiento Server] Persistido con éxito ${item.type} para: ${videoDoc.title}`);
+      }
+    } else {
+      const { error: updateErr } = await supabaseAdmin
+        .from("documents")
+        .update(item.doc)
+        .eq("id", existing[0].id);
+      if (updateErr) {
+        console.warn(`[Base de Conocimiento Server] Error al actualizar ${item.type} para ${videoDoc.title}:`, updateErr);
+      } else {
+        console.log(`[Base de Conocimiento Server] Actualizado con éxito ${item.type} para: ${videoDoc.title}`);
+      }
+    }
+  }
+}
+
+async function syncVideoAndKnowledgeBaseServer(
+  supabaseAdmin: any,
+  fileUrl: string,
+  title: string,
+  transcriptionText: string,
+  modelUsed: string
+) {
+  try {
+    console.log(`[Transcribe API Server Sync] Buscando documento de vídeo para: ${title}...`);
+    const { data: videos, error: findErr } = await supabaseAdmin
+      .from("documents")
+      .select("*")
+      .eq("type", "video")
+      .eq("file_url", fileUrl)
+      .limit(1);
+
+    if (findErr) {
+      console.error("[Transcribe API Server Sync] Error al buscar vídeo:", findErr);
+      return;
+    }
+
+    if (videos && videos.length > 0) {
+      const videoDoc = videos[0];
+      console.log(`[Transcribe API Server Sync] Actualizando metadatos del vídeo ${videoDoc.id}...`);
+
+      const updatedMetadata = {
+        ...(videoDoc.metadata || {}),
+        transcription: transcriptionText,
+        transcription_model: modelUsed || "Google Vertex AI Gemini 1.5 Pro"
+      };
+
+      const { error: updateErr } = await supabaseAdmin
+        .from("documents")
+        .update({ metadata: updatedMetadata })
+        .eq("id", videoDoc.id);
+
+      if (updateErr) {
+        console.error("[Transcribe API Server Sync] Error al actualizar metadatos del vídeo:", updateErr);
+      } else {
+        console.log(`[Transcribe API Server Sync] Metadatos del vídeo ${videoDoc.id} actualizados correctamente.`);
+      }
+
+      // Sincronizar las cuatro tarjetas de conocimiento bajo ADMIN_ID
+      await saveVideoKnowledgeBaseServer(supabaseAdmin, videoDoc, transcriptionText);
+    } else {
+      console.warn(`[Transcribe API Server Sync] No se encontró el documento de vídeo para URL: ${fileUrl}`);
+    }
+  } catch (err) {
+    console.error("[Transcribe API Server Sync] Error inesperado durante la sincronización:", err);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body: TranscribeRequestBody & { transcription?: string } = await request.json();
     const { videoId, fileUrl, title, duration = "12:00", transcription } = body;
 
+    // Inicializar el cliente Supabase Admin para actualización/sincronización en el servidor sin RLS
+    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+
+    let supabaseAdmin: any = null;
+    if (supabaseUrl && serviceRoleKey) {
+      const { createClient } = await import("@supabase/supabase-js");
+      supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false }
+      });
+    }
+
     if (transcription) {
       console.log(`[Transcribe API] Received pre-existing transcription for video ${videoId}. Skipping Gemini call and proceeding to extract snapshots.`);
       // Fire-and-forget background job to extract charts snapshots via ffmpeg
       extractSnapshotsInBackground(videoId, fileUrl, transcription);
+
+      // Sincronizar en la base de datos en segundo plano bajo ADMIN_ID
+      if (supabaseAdmin) {
+        syncVideoAndKnowledgeBaseServer(supabaseAdmin, fileUrl, title, transcription, "Pre-existing (Skipped Gemini call)").catch(err => {
+          console.error("[Transcribe API Server Sync] Error sincronizando transcripción existente:", err);
+        });
+      }
+
       return NextResponse.json({
         success: true,
         videoId,
@@ -652,6 +966,13 @@ export async function POST(request: Request) {
     // Fire-and-forget background job to extract charts snapshots via ffmpeg
     if (result.transcription) {
       extractSnapshotsInBackground(videoId, fileUrl, result.transcription);
+
+      // Sincronizar en la base de datos en segundo plano bajo ADMIN_ID
+      if (supabaseAdmin) {
+        syncVideoAndKnowledgeBaseServer(supabaseAdmin, fileUrl, title, result.transcription, result.modelUsed).catch(err => {
+          console.error("[Transcribe API Server Sync] Error sincronizando nueva transcripción:", err);
+        });
+      }
     }
 
     return NextResponse.json({

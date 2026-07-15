@@ -5,6 +5,8 @@ import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 import { sendTelegramMessage, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during long transcripts
+
 
 // Server-side helper to split transcription into verbatim, summary, charts, and report segments
 function splitTranscription(text: string) {
@@ -367,8 +369,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 6. Secure batching: process a maximum of 2 videos sequentially to avoid Gemini API bottlenecks
-    const batch = pendingVideos.slice(0, 2);
+    // 6. Secure batching: process a maximum of 1 video per execution sequentially to avoid Vercel timeouts and Gemini API bottlenecks
+    const batch = pendingVideos.slice(0, 1);
     const results = [];
 
     for (const video of batch) {

@@ -5,6 +5,9 @@ import * as path from "path";
 import * as os from "os";
 import { exec } from "child_process";
 
+export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during stream extraction
+
+
 interface ChartTimestamp {
   timestamp: string;
   seconds: number;

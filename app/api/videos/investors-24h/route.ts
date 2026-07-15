@@ -335,7 +335,13 @@ ${JSON.stringify(videoContexts, null, 2)}
       const payload = {
         contents: [{ role: "user", parts: [{ text: promptText }] }],
         system_instruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: { temperature: 0.15, maxOutputTokens: 8192 },
+        generationConfig: {
+          temperature: 0.15,
+          maxOutputTokens: 8192,
+          thinkingConfig: {
+            thinkingBudget: 0
+          }
+        },
       };
 
       const response = await fetch(attempt.url, {
@@ -346,7 +352,12 @@ ${JSON.stringify(videoContexts, null, 2)}
 
       if (response.ok) {
         const geminiData = await response.json();
-        const apiResponse = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parts = geminiData.candidates?.[0]?.content?.parts || [];
+        const apiResponse = parts
+          .filter((p: any) => !p.thought)
+          .map((p: any) => p.text)
+          .filter(Boolean)
+          .join("") || "";
 
         if (apiResponse && apiResponse.trim().length > 0) {
           let cleaned = apiResponse.trim();

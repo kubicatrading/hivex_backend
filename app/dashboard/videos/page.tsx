@@ -596,174 +596,8 @@ function splitTranscription(text: string) {
 
 // Persiste por separado la transcripción literal, el resumen estructurado, los gráficos y el análisis de inversión
 async function saveVideoKnowledgeBase(videoDoc: { id?: string; title: string; file_url?: string; metadata?: any }, transcriptionText: string) {
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      console.warn("[Base de Conocimiento] No user session found, skipping knowledge base save.");
-      return;
-    }
-
-    const splitResult = splitTranscription(transcriptionText);
-    const channelTitle = videoDoc.metadata?.channel_title || "Andrei Jikh";
-    const dateStr = new Date().toISOString();
-    const fileUrl = videoDoc.file_url || "";
-
-    // 1. Literal transcription
-    const transcriptionDoc = {
-      user_id: user.id,
-      title: `[Transcripción] - ${videoDoc.title}`,
-      description: `Transcripción completa literal de ${videoDoc.title}`,
-      type: "knowledge_transcription",
-      file_url: fileUrl,
-      metadata: {
-        fecha_transcripcion: dateStr,
-        canal_origen: channelTitle,
-        nombre_video: videoDoc.title,
-        texto_transcripcion: splitResult.transcription
-      }
-    };
-
-    // 2. Content summary
-    const summaryDoc = {
-      user_id: user.id,
-      title: `[Resumen] - ${videoDoc.title}`,
-      description: `Resumen de contenido completo de ${videoDoc.title}`,
-      type: "knowledge_summary",
-      file_url: fileUrl,
-      metadata: {
-        fecha_resumen: dateStr,
-        canal_origen: channelTitle,
-        nombre_video: videoDoc.title,
-        resumen_markdown: splitResult.summary
-      }
-    };
-
-    // 3. Charts and Visualizations
-    const chartsDoc = {
-      user_id: user.id,
-      title: `[Gráficos] - ${videoDoc.title}`,
-      description: `Gráficos y visualizaciones detectadas de ${videoDoc.title}`,
-      type: "knowledge_charts",
-      file_url: fileUrl,
-      metadata: {
-        fecha_graficos: dateStr,
-        canal_origen: channelTitle,
-        nombre_video: videoDoc.title,
-        graficos_markdown: splitResult.charts
-      }
-    };
-
-    // 4. Investment analysis report
-    const analysisDoc = {
-      user_id: user.id,
-      title: `[Análisis] - ${videoDoc.title}`,
-      description: `Informe de análisis financiero de ${videoDoc.title}`,
-      type: "knowledge_analysis",
-      file_url: fileUrl,
-      metadata: {
-        fecha_informe: dateStr,
-        canal_origen: channelTitle,
-        nombre_video: videoDoc.title,
-        informe_completo: splitResult.report
-      }
-    };
-
-    const docsToInsert = [
-      { doc: transcriptionDoc, type: "knowledge_transcription" },
-      { doc: summaryDoc, type: "knowledge_summary" },
-      { doc: chartsDoc, type: "knowledge_charts" },
-      { doc: analysisDoc, type: "knowledge_analysis" }
-    ];
-
-    let newlyAnalyzed = false;
-
-    for (const item of docsToInsert) {
-      // Query to avoid duplicate rows for the same file_url and type
-      const { data: existing, error: checkErr } = await supabase
-        .from("documents")
-        .select("id")
-        .eq("type", item.type)
-        .eq("file_url", fileUrl);
-
-      if (checkErr) {
-        console.warn(`[Base de Conocimiento] Error al verificar existencia de ${item.type}:`, checkErr);
-      }
-
-      if (!existing || existing.length === 0) {
-        const { error: insertErr } = await supabase
-          .from("documents")
-          .insert(item.doc as any);
-        if (insertErr) {
-          console.warn(`[Base de Conocimiento] Error al insertar ${item.type} para ${videoDoc.title}:`, insertErr);
-        } else {
-          console.log(`[Base de Conocimiento] Persistido con éxito ${item.type} para: ${videoDoc.title}`);
-          if (item.type === "knowledge_analysis") {
-            newlyAnalyzed = true;
-          }
-        }
-      } else {
-        const { error: updateErr } = await supabase
-          .from("documents")
-          .update(item.doc as any)
-          .eq("id", existing[0].id);
-        if (updateErr) {
-          console.warn(`[Base de Conocimiento] Error al actualizar ${item.type} para ${videoDoc.title}:`, updateErr);
-        } else {
-          console.log(`[Base de Conocimiento] Actualizado con éxito ${item.type} para: ${videoDoc.title}`);
-          if (item.type === "knowledge_analysis") {
-            newlyAnalyzed = true;
-          }
-        }
-      }
-    }
-
-    if (newlyAnalyzed) {
-      // Extract youtubeId from fileUrl
-      let ytId = "";
-      const regexes = [
-        /youtube\.com\/embed\/([a-zA-Z0-9_\-]{11})/,
-        /youtube\.com\/watch\?v=([a-zA-Z0-9_\-]{11})/,
-        /youtu\.be\/([a-zA-Z0-9_\-]{11})/,
-        /youtube\.com\/shorts\/([a-zA-Z0-9_\-]{11})/
-      ];
-      for (const regex of regexes) {
-        const match = fileUrl.match(regex);
-        if (match && match[1]) {
-          ytId = match[1];
-          break;
-        }
-      }
-
-      console.log(`[Base de Conocimiento] Triggering automatic Telegram notification for newly analyzed video: ${videoDoc.title}`);
-      fetch("/api/telegram/notify", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type: "video_analysis",
-          videoTitle: videoDoc.title,
-          channelName: channelTitle,
-          analysisSummary: splitResult.summary || splitResult.report || "Análisis bursátil guardado con éxito.",
-          youtubeId: ytId || undefined,
-          videoId: videoDoc.id,
-        }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success) {
-            console.log(`[Base de Conocimiento] Telegram notification triggered successfully! ${data.simulated ? "(Simulated)" : ""}`);
-          } else {
-            console.warn(`[Base de Conocimiento] Telegram notification failed:`, data.error);
-          }
-        })
-        .catch((err) => {
-          console.error(`[Base de Conocimiento] Failed to call Telegram notify API:`, err);
-        });
-    }
-  } catch (err) {
-    console.error("[Base de Conocimiento] Error al procesar guardado persistente:", err);
-  }
+  console.log(`[Base de Conocimiento] Sincronización delegada exitosamente al servidor para: ${videoDoc.title}`);
+  return;
 }
 
 // Extrae de forma estable la clave de caché global basada en el ID de YouTube o URL del vídeo
@@ -1726,21 +1560,23 @@ function SmartVideoSnapshot({
     setError(false);
     setLoading(true);
 
-    const testImg = new Image();
     const ytId = getYoutubeId(fileUrl);
     const resolvedFolder = isYt ? (ytId || videoId) : videoId;
+
+    const testImg = new Image();
+    // Direct CDN path as the first, fast try
     const supabasePath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${resolvedFolder}/${targetTime}.jpg`;
+    // Backend proxy route as the secure self-healing fallback (which resolves closest match via service role bypass)
     const localPath = `/snapshots/${videoId}/${targetTime}.jpg`;
     const ytThumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "";
 
-    // Try loading from Supabase Storage first (source of truth)
     testImg.onload = () => {
       setImgUrl(supabasePath);
       setLoading(false);
     };
 
     testImg.onerror = () => {
-      // Fallback 1: Try local filesystem path
+      // Fallback 1: Try local backend proxy path (self-healing/closest match resolved in server-side API)
       const localImg = new Image();
       localImg.onload = () => {
         setImgUrl(localPath);
@@ -2198,6 +2034,15 @@ export default function VideosPage() {
     audio.onended = () => {
       if (!isPlayingAudioRef.current) return;
       
+      // CRITICAL GUARD: Ensure we only advance if the sentence that just finished
+      // is indeed the currently active sentence. This completely prevents "ghost" or
+      // delayed onended events from jumping backwards or repeating old sentences
+      // after a manual seek or skipping action.
+      if (index !== activeSentenceIndexRef.current) {
+        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onended event for sentence ${index} because active index is now ${activeSentenceIndexRef.current}`);
+        return;
+      }
+      
       const nextIdx = index + 1;
       if (nextIdx < chunks.length) {
         playGeminiSentence(nextIdx);
@@ -2213,6 +2058,10 @@ export default function VideosPage() {
     };
 
     audio.onerror = (e) => {
+      if (index !== activeSentenceIndexRef.current) {
+        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onerror event for sentence ${index} because active index is now ${activeSentenceIndexRef.current}`);
+        return;
+      }
       console.error("[Gemini Audio Player Error] Failed to play audio URL:", index, e);
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
@@ -2763,30 +2612,43 @@ export default function VideosPage() {
     if (textForSpeech) {
       const cleanedText = cleanSummaryForSpeech(textForSpeech);
       const chunks = chunkTextForSpeech(cleanedText);
-      sentenceChunksRef.current = chunks;
-      setSentenceChunks(chunks);
-      setTotalSentences(chunks.length);
 
-      // Pre-warm the first three sentences to make the very first Play click instant!
-      const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-      if (chunks.length > 0) {
-        const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
-        fetch(src0).catch(() => {});
-      }
-      if (chunks.length > 1) {
-        const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
-        fetch(src1).catch(() => {});
-      }
-      if (chunks.length > 2) {
-        const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
-        fetch(src2).catch(() => {});
+      // CRITICAL OPTIMIZATION: Only update sentence chunks and reset index if the chunks actually changed!
+      // This prevents background updates to transcriptionStates or translationsCache (like transcription progress bars)
+      // from resetting the user's active audio playback position/state.
+      const currentChunks = sentenceChunksRef.current;
+      const chunksChanged = currentChunks.length !== chunks.length || 
+        chunks.some((chunk, i) => chunk !== currentChunks[i]);
+
+      if (chunksChanged) {
+        sentenceChunksRef.current = chunks;
+        setSentenceChunks(chunks);
+        setTotalSentences(chunks.length);
+        setActiveSentenceIndex(-1);
+
+        // Pre-warm the first three sentences to make the very first Play click instant!
+        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+        if (chunks.length > 0) {
+          const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
+          fetch(src0).catch(() => {});
+        }
+        if (chunks.length > 1) {
+          const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
+          fetch(src1).catch(() => {});
+        }
+        if (chunks.length > 2) {
+          const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
+          fetch(src2).catch(() => {});
+        }
       }
     } else {
-      sentenceChunksRef.current = [];
-      setSentenceChunks([]);
-      setTotalSentences(0);
+      if (sentenceChunksRef.current.length > 0) {
+        sentenceChunksRef.current = [];
+        setSentenceChunks([]);
+        setTotalSentences(0);
+        setActiveSentenceIndex(-1);
+      }
     }
-    setActiveSentenceIndex(-1);
   }, [activeStudyVideo, selectedLanguage, transcriptionStates, translationsCache]);
 
   // Trigger translation automatically when video, selected language, or original transcription changes
@@ -2868,25 +2730,7 @@ export default function VideosPage() {
               })
             }).catch(err => console.warn("[Asíncrono] Error al disparar extracción silenciosa de snapshots desde caché:", err));
 
-            // Sincronizar de forma silenciosa la base de datos Supabase del usuario actual para asociarlo de forma nativa
-            const updatedMetadata = {
-              ...videoDoc.metadata,
-              transcription: transcriptionText,
-              transcription_model: modelUsed
-            };
-
-            // Ejecutar la actualización en Supabase de forma no bloqueante
-            supabase
-              .from("documents")
-              .update({ metadata: updatedMetadata })
-              .eq("id", videoDoc.id)
-              .then(({ error: updateError }) => {
-                if (updateError) {
-                  console.warn(`[Asíncrono] Error al vincular transcripción de caché en Supabase para ${videoDoc.title}:`, updateError);
-                } else {
-                  console.log(`[Asíncrono] Transcripción vinculada exitosamente en Supabase para: ${videoDoc.title}`);
-                }
-              });
+            console.log(`[Asíncrono] Sincronización delegada al servidor desde caché local para: ${videoDoc.title}`);
 
             // Establecer el estado como completado directamente al 100%
             setTranscriptionStates((prev) => ({
@@ -3027,25 +2871,7 @@ export default function VideosPage() {
           console.log(`[Caché Global] Guardada exitosamente en localStorage para: ${videoDoc.title}`);
         }
 
-        console.log(`[Asíncrono] Guardando caché en Supabase para: ${videoDoc.title}...`);
-        const updatedMetadata = {
-          ...videoDoc.metadata,
-          transcription: data.transcription,
-          transcription_model: data.modelUsed || "Google Vertex AI Gemini 1.5 Pro"
-        };
-
-        const { error: updateError } = await supabase
-          .from("documents")
-          .update({ metadata: updatedMetadata })
-          .eq("id", videoDoc.id);
-
-        if (updateError) {
-          console.warn(`[Asíncrono] Error al guardar caché en Supabase para ${videoDoc.title}:`, updateError);
-        } else {
-          console.log(`[Asíncrono] Transcripción guardada y cacheada en BBDD con éxito para: ${videoDoc.title}!`);
-        }
-
-        // Persistir los metadatos en la base de conocimiento duradera de forma asíncrona
+        console.log(`[Asíncrono] Sincronización delegada al servidor para: ${videoDoc.title}`);
         saveVideoKnowledgeBase(videoDoc, data.transcription);
 
         // Stop progress and set success
@@ -3286,6 +3112,8 @@ export default function VideosPage() {
       return timeB - timeA;
     });
   }
+
+
 
   // Refs to track previous channel and favorite filters to detect feed switches
   const prevFilterChannelRef = useRef<string | null>(null);
@@ -3600,6 +3428,57 @@ export default function VideosPage() {
       setLoading(false);
     }
   }, [triggerBackgroundTranscription, checkOldVideos]);
+
+  // Automatically clear browser cache and storage list caches when entering or switching channels
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      console.log(`[Cabinet Cache] Switch/Enter channel detected ("${filterChannel || "Default"}"). Purging browser Cache API, sessionStorage and localStorage list keys to force fresh data...`);
+      
+      // 1. Clear Browser Cache API (HTTP request/response caches)
+      if ("caches" in window) {
+        try {
+          caches.keys().then((keys) => {
+            keys.forEach((key) => {
+              caches.delete(key);
+            });
+            console.log("[Cabinet Cache] Cleared browser Cache Storage keys.");
+          }).catch((err) => {
+            console.warn("[Cabinet Cache] Failed to retrieve Cache Storage keys:", err);
+          });
+        } catch (err) {
+          console.warn("[Cabinet Cache] Error accessing Cache Storage API:", err);
+        }
+      }
+
+      // 2. Clear Session Storage
+      try {
+        sessionStorage.clear();
+        console.log("[Cabinet Cache] Cleared Session Storage.");
+      } catch (err) {
+        console.warn("[Cabinet Cache] Error clearing Session Storage:", err);
+      }
+
+      // 3. Purge mockSupabase and videos list localStorage caches
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key === "hivex_docs_global" || key.startsWith("hivex_docs_"))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((key) => {
+          localStorage.removeItem(key);
+          console.log(`[Cabinet Cache] Purged cache key: ${key}`);
+        });
+      } catch (err) {
+        console.warn("[Cabinet Cache] Error clearing localStorage document lists:", err);
+      }
+      
+      // 4. Force fetch fresh videos from database
+      fetchVideos();
+    }
+  }, [filterChannel, fetchVideos]);
 
   // Toggle favorite property inside document metadata in Supabase
   const toggleFavorite = async (video: VideoDocument, e: React.MouseEvent) => {
@@ -3943,77 +3822,25 @@ export default function VideosPage() {
         throw new Error(syncResult.error || "Error de sincronización.");
       }
 
-      const freshVideos: VideoDocument[] = syncResult.videos || [];
-      const newlyAddedVideos: VideoDocument[] = [];
-
-      // 3. Insert only NEW videos that don't already exist in our database list
-      for (const fv of freshVideos) {
-        // Fetch existing videos in real-time inside the loop to avoid duplicate-insert race conditions under React Strict Mode double-mount
-        const { data: currentDocs } = await supabase
-          .from("documents")
-          .select("*")
-          .eq("type", "video");
-        
-        const currentUrls = new Set((currentDocs || []).map((v) => v.file_url));
-        currentUrls.forEach(url => globallySyncedUrls.add(url));
-
-        if (globallySyncedUrls.has(fv.file_url)) {
-          console.log(`Skipping sync for already existing video: ${fv.title}`);
-          continue;
+      const newlyAddedVideos: VideoDocument[] = (syncResult.newlyInserted || []).map((v: any) => ({
+        id: v.id,
+        title: v.title,
+        description: v.description || "",
+        file_url: v.file_url || "",
+        created_at: v.created_at,
+        metadata: {
+          duration: String(v.metadata?.duration || "12:00"),
+          resolution: String(v.metadata?.resolution || "4K UHD"),
+          thumbnail: String(v.metadata?.thumbnail || ""),
+          is_youtube: true,
+          channel_title: String(v.metadata?.channel_title || targetChannel)
         }
+      }));
 
-        // Lock synchronously!
-        globallySyncedUrls.add(fv.file_url);
-
-        const newDoc = {
-          user_id: user.id,
-          title: fv.title,
-          description: fv.description,
-          type: "video",
-          file_url: fv.file_url,
-          created_at: fv.created_at, // Preserve original upload date
-          metadata: {
-            duration: fv.metadata.duration,
-            resolution: fv.metadata.resolution,
-            thumbnail: fv.metadata.thumbnail,
-            is_youtube: true,
-            channel_title: fv.metadata?.channel_title || targetChannel
-          }
-        };
-
-        const { data: insertedData, error: insertError } = await supabase
-          .from("documents")
-          .insert(newDoc)
-          .select();
-
-        if (insertError) {
-          console.warn("Failed to insert synced video:", fv.title, insertError);
-          // Unlock on failure
-          globallySyncedUrls.delete(fv.file_url);
-        } else if (insertedData && insertedData[0]) {
-          console.log(`Inserted new video: ${fv.title} with DB ID: ${insertedData[0].id}`);
-          const typedInserted: VideoDocument = {
-            id: insertedData[0].id,
-            title: insertedData[0].title,
-            description: insertedData[0].description,
-            file_url: insertedData[0].file_url || "",
-            created_at: insertedData[0].created_at,
-            metadata: {
-              duration: String(insertedData[0].metadata?.duration || "12:00"),
-              resolution: String(insertedData[0].metadata?.resolution || "4K UHD"),
-              thumbnail: String(insertedData[0].metadata?.thumbnail || ""),
-              is_youtube: true,
-              channel_title: insertedData[0].metadata?.channel_title || targetChannel
-            }
-          };
-          newlyAddedVideos.push(typedInserted);
-        }
-      }
-
-      // 4. Reload Videos Catalogue
+      // Reload Videos Catalogue
       await fetchVideos();
 
-      // 5. Trigger asynchronous background transcriptions for all newly added videos
+      // Trigger asynchronous background transcriptions for all newly added videos
       if (newlyAddedVideos.length > 0) {
         console.log(`Triggering async background transcriptions for ${newlyAddedVideos.length} new videos...`);
         newlyAddedVideos.forEach((nv) => {
@@ -4031,7 +3858,7 @@ export default function VideosPage() {
       setSyncing(false);
       isSyncingRef.current = false;
     }
-  }, [fetchVideos, triggerBackgroundTranscription]);
+  }, [fetchVideos, triggerBackgroundTranscription, filterChannel]);
 
   // Initial mount load: execute the synchronization automatically (Limpieza y Sincronización incondicional al cargar)
   useEffect(() => {
@@ -5283,7 +5110,8 @@ export default function VideosPage() {
         </div>
 
         <div className="flex flex-col gap-2.5 self-start md:self-auto">
-          {/* RESET BUTTON - Only visible to superuser */}
+          {/* RESET BUTTON - Hidden as per user request */}
+          {/*
           {userEmail && (userEmail === "admin@kubicatrading.es" || userEmail.startsWith("admin@kubicatrading") || userEmail === "semeviene@hotmail.es") && (
             <button
               onClick={handleResetTestingVideos}
@@ -5296,6 +5124,7 @@ export default function VideosPage() {
                 : (selectedLanguage === "es" ? "Restablecer Videoteca (Reset)" : selectedLanguage === "de" ? "Videothek zurücksetzen" : selectedLanguage === "tr" ? "Kütüphaneyi Sıfırla" : "Reset Video Library")}
             </button>
           )}
+          */}
 
           {/* SYNC BUTTON */}
           <button
