@@ -151,8 +151,8 @@ async function translateSegment(
 
 export async function POST(request: Request) {
   try {
-    const body: TranslateRequestBody = await request.json();
-    const { text, targetLanguage } = body;
+    const body: any = await request.json();
+    const { text, targetLanguage, videoId, langCode } = body;
 
     if (!text || !targetLanguage) {
       return NextResponse.json(
@@ -192,7 +192,7 @@ export async function POST(request: Request) {
     console.log(`Translate API: Split input document into ${parts.length} segments`);
 
     // 3. Translate segments in parallel
-    const translationPromises = parts.map((part, index) =>
+    const translationPromises = parts.map((part: string, index: number) =>
       translateSegment(part, index, targetLanguage, apiKey || null, googleToken, projectNumber)
     );
 
@@ -203,6 +203,56 @@ export async function POST(request: Request) {
 
     const modelsUsed = Array.from(new Set(results.map(r => r.modelUsed).filter(m => m !== "none")));
     const successfulModel = modelsUsed.join(", ") || "Gemini 3.5 Flash";
+
+    // 5. Server-side persistence using service role to bypass client-side RLS constraints on shared documents
+    if (videoId && langCode) {
+      const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+
+      if (supabaseUrl && serviceRoleKey) {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+            auth: { persistSession: false }
+          });
+
+          console.log(`[Translate Server] Persisting translation for video ${videoId} and language ${langCode}...`);
+          
+          // Fetch existing metadata to preserve other fields
+          const { data: list, error: fetchErr } = await supabaseAdmin
+            .from("documents")
+            .select("metadata")
+            .eq("id", videoId);
+
+          if (!fetchErr && list && list.length > 0) {
+            const currentMetadata = list[0].metadata || {};
+            const currentTranslations = currentMetadata.translations || {};
+            const updatedMetadata = {
+              ...currentMetadata,
+              translations: {
+                ...currentTranslations,
+                [langCode]: translatedText
+              }
+            };
+
+            const { error: updateError } = await supabaseAdmin
+              .from("documents")
+              .update({ metadata: updatedMetadata })
+              .eq("id", videoId);
+
+            if (updateError) {
+              console.warn(`[Translate Server] Error updating translation metadata in DB for ${videoId}:`, updateError);
+            } else {
+              console.log(`[Translate Server] Successfully persisted translation in database for ${videoId} and language ${langCode}`);
+            }
+          } else if (fetchErr) {
+            console.warn(`[Translate Server] Error fetching video document ${videoId} for translation persistence:`, fetchErr);
+          }
+        } catch (dbErr) {
+          console.error("[Translate Server] Unexpected database error in translation persistence:", dbErr);
+        }
+      }
+    }
 
     return NextResponse.json({
       success: true,

@@ -2320,7 +2320,9 @@ export default function VideosPage() {
         headers,
         body: JSON.stringify({
           text: originalText,
-          targetLanguage: targetLanguageName
+          targetLanguage: targetLanguageName,
+          videoId: videoDoc.id,
+          langCode: langCode
         })
       });
 
@@ -2357,38 +2359,7 @@ export default function VideosPage() {
           };
         });
 
-        // PERSIST TRANSLATION IN SUPABASE (Base of Knowledge)
-        try {
-          const { data: list, error: fetchErr } = await supabase
-            .from("documents")
-            .select("metadata")
-            .eq("id", videoDoc.id);
-
-          if (!fetchErr && list && list.length > 0) {
-            const currentMetadata = list[0].metadata || {};
-            const currentTranslations = currentMetadata.translations || {};
-            const updatedMetadata = {
-              ...currentMetadata,
-              translations: {
-                ...currentTranslations,
-                [langCode]: data.translatedText
-              }
-            };
-
-            const { error: updateError } = await supabase
-              .from("documents")
-              .update({ metadata: updatedMetadata })
-              .eq("id", videoDoc.id);
-
-            if (updateError) {
-              console.warn(`[Traducción] Error al persistir traducción en Supabase para ${videoDoc.title}:`, updateError);
-            } else {
-              console.log(`[Traducción] Traducción a ${langCode} persistida en Supabase con éxito para: ${videoDoc.title}!`);
-            }
-          }
-        } catch (dbErr) {
-          console.error(`[Traducción] Error en base de datos al persistir traducción:`, dbErr);
-        }
+        console.log(`[Traducción] La traducción ha sido persistida en base de datos de manera segura en el servidor para: ${videoDoc.title}`);
       } else {
         throw new Error(data.error || "Respuesta vacía del servidor de traducción");
       }
