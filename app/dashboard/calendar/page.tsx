@@ -31,6 +31,12 @@ const localTranslations: Record<string, {
   submitBtn: string;
   submitBtnLoading: string;
   successToast: string;
+  yesterday: string;
+  today: string;
+  thisWeek: string;
+  nextWeek: string;
+  customDate: string;
+  redirectToast: string;
 }> = {
   en: {
     title: "Economic Calendar",
@@ -55,7 +61,13 @@ const localTranslations: Record<string, {
     videoUrlDisclaimer: "* For testing, you can use direct MP4 link.",
     submitBtn: "Upload Video Resource",
     submitBtnLoading: "Saving...",
-    successToast: "Video uploaded successfully!"
+    successToast: "Video uploaded successfully!",
+    yesterday: "Yesterday",
+    today: "Today",
+    thisWeek: "This Week",
+    nextWeek: "Next Week",
+    customDate: "Custom Date",
+    redirectToast: "Opening range filter on Investing.com calendar console..."
   },
   es: {
     title: "Calendario Económico",
@@ -80,7 +92,13 @@ const localTranslations: Record<string, {
     videoUrlDisclaimer: "* Para probar, puedes usar un enlace MP4 directo.",
     submitBtn: "Subir Recurso de Vídeo",
     submitBtnLoading: "Guardando...",
-    successToast: "¡Vídeo subido con éxito!"
+    successToast: "¡Vídeo subido con éxito!",
+    yesterday: "Ayer",
+    today: "Hoy",
+    thisWeek: "Esta semana",
+    nextWeek: "Próxima semana",
+    customDate: "Personalizar",
+    redirectToast: "Abriendo filtro de fechas en la consola de Investing.com..."
   },
   de: {
     title: "Wirtschaftskalender",
@@ -105,7 +123,13 @@ const localTranslations: Record<string, {
     videoUrlDisclaimer: "* Zum Testen können Sie eine direkte MP4-Verbindung verwenden.",
     submitBtn: "Video-Ressource hochladen",
     submitBtnLoading: "Speichern...",
-    successToast: "Video erfolgreich hochgeladen!"
+    successToast: "Video erfolgreich hochgeladen!",
+    yesterday: "Gestern",
+    today: "Heute",
+    thisWeek: "Diese Woche",
+    nextWeek: "Nächste Woche",
+    customDate: "Benutzerdefiniert",
+    redirectToast: "Datumsbereich-Filter auf Investing.com-Kalenderkonsole wird geöffnet..."
   },
   tr: {
     title: "Ekonomik Takvim",
@@ -130,7 +154,13 @@ const localTranslations: Record<string, {
     videoUrlDisclaimer: "* Test etmek için doğrudan MP4 linki kullanabilirsiniz.",
     submitBtn: "Video Kaynağı Yükle",
     submitBtnLoading: "Kaydediliyor...",
-    successToast: "Video başarıyla yüklendi!"
+    successToast: "Video başarıyla yüklendi!",
+    yesterday: "Dün",
+    today: "Bugün",
+    thisWeek: "Bu Hafta",
+    nextWeek: "Gelecek Hafta",
+    customDate: "Özel Tarih",
+    redirectToast: "Tarih aralığı filtresi Investing.com takvim konsolunda açılıyor..."
   }
 };
 
@@ -153,6 +183,8 @@ export default function EconomicCalendarPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [iframeLoaded, setIframeLoaded] = useState<boolean>(false);
   const [deviceType, setDeviceType] = useState<"mobile" | "tablet" | "desktop">("desktop");
+  const [currentCalType, setCurrentCalType] = useState<"day" | "week">("week");
+  const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "this-week" | "next-week" | "custom">("this-week");
 
   // Video Upload States (matching videos page layout)
   const [title, setTitle] = useState("");
@@ -336,7 +368,7 @@ export default function EconomicCalendarPage() {
     }
   };
 
-  const iframeUrl = `https://sslecal2.forexprostools.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
+  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=${currentCalType}&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
     <div className="animate-fade-in relative">
@@ -393,9 +425,82 @@ export default function EconomicCalendarPage() {
               <span className="text-[9px] font-mono text-zinc-600 bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/40 uppercase">GMT+1 Timezone</span>
             </div>
 
+            {/* HIGHLY-POLISHED CUSTOM REACT NAVIGATION BUTTON PANEL (BOTONERA) */}
+            <div className="w-full bg-zinc-950/80 sm:bg-zinc-900/10 border-b border-zinc-900/80 px-4 py-2 sm:py-2.5 flex flex-wrap items-center gap-1.5 sm:gap-2 justify-start sm:justify-start z-10">
+              {/* Yesterday */}
+              <button
+                onClick={() => {
+                  setToastMessage(t.redirectToast);
+                  window.open(getExternalUrl(selectedLanguage), "_blank", "noopener,noreferrer");
+                }}
+                className="px-3 py-1.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 hover:border-zinc-700/50 cursor-pointer"
+              >
+                <span>{t.yesterday}</span>
+              </button>
+
+              {/* Today */}
+              <button
+                onClick={() => {
+                  if (activeTab !== "today") {
+                    setIframeLoaded(false);
+                    setCurrentCalType("day");
+                    setActiveTab("today");
+                  }
+                }}
+                className={`px-3 py-1.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 cursor-pointer ${
+                  activeTab === "today"
+                    ? "bg-violet-500/10 border-violet-500/35 text-violet-400 font-extrabold shadow-sm shadow-violet-950/20"
+                    : "bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 hover:border-zinc-700/50"
+                }`}
+              >
+                <span>{t.today}</span>
+              </button>
+
+              {/* This Week */}
+              <button
+                onClick={() => {
+                  if (activeTab !== "this-week") {
+                    setIframeLoaded(false);
+                    setCurrentCalType("week");
+                    setActiveTab("this-week");
+                  }
+                }}
+                className={`px-3 py-1.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 cursor-pointer ${
+                  activeTab === "this-week"
+                    ? "bg-violet-500/10 border-violet-500/35 text-violet-400 font-extrabold shadow-sm shadow-violet-950/20"
+                    : "bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 hover:border-zinc-700/50"
+                }`}
+              >
+                <span>{t.thisWeek}</span>
+              </button>
+
+              {/* Next Week */}
+              <button
+                onClick={() => {
+                  setToastMessage(t.redirectToast);
+                  window.open(getExternalUrl(selectedLanguage), "_blank", "noopener,noreferrer");
+                }}
+                className="px-3 py-1.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 hover:border-zinc-700/50 cursor-pointer"
+              >
+                <span>{t.nextWeek}</span>
+              </button>
+
+              {/* Custom Date (Calendar Button) */}
+              <button
+                onClick={() => {
+                  setToastMessage(t.redirectToast);
+                  window.open(getExternalUrl(selectedLanguage), "_blank", "noopener,noreferrer");
+                }}
+                className="px-3 py-1.5 sm:py-1 rounded-lg text-[10px] sm:text-[11px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1.5 bg-zinc-900/40 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 hover:border-zinc-700/50 ml-auto cursor-pointer"
+              >
+                <Calendar className="w-3 h-3 text-zinc-500" />
+                <span>{t.customDate}</span>
+              </button>
+            </div>
+
             {/* Dynamic skeleton loader */}
             {!iframeLoaded && (
-              <div className="absolute inset-0 top-0 sm:top-9 bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
+              <div className="absolute inset-x-0 bottom-0 top-[45px] sm:top-[81px] bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
                 <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
                 <p className="text-zinc-500 text-[10px] font-mono tracking-wide animate-pulse">{t.loadingText}</p>
               </div>
