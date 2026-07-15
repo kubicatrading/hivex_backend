@@ -294,28 +294,22 @@ export default function EconomicCalendarPage() {
       const targetWidth = 430; // Optimal minimum internal width for 4 columns on mobile
       const scale = containerWidth < targetWidth ? containerWidth / targetWidth : 1;
       const widthPercent = (1 / scale) * 100;
-      const topCropHeight = 44; // Height of the Investing.com top header bar in px
-      const scaledTopCrop = topCropHeight * scale;
       return {
         transform: `scale(${scale})`,
         transformOrigin: "top left",
         width: `${widthPercent}%`,
-        height: `calc(${widthPercent}% + ${topCropHeight}px)`,
-        marginTop: `-${scaledTopCrop}px`,
+        height: `${widthPercent}%`,
       };
     }
     if (deviceType === "tablet") {
       const targetWidth = 620; // Optimal minimum internal width for 5 columns on tablet
       const scale = containerWidth < targetWidth ? containerWidth / targetWidth : 1;
       const widthPercent = (1 / scale) * 100;
-      const topCropHeight = 44; // Height of the Investing.com top header bar in px
-      const scaledTopCrop = topCropHeight * scale;
       return {
         transform: `scale(${scale})`,
         transformOrigin: "top left",
         width: `${widthPercent}%`,
-        height: `calc(${widthPercent}% + ${topCropHeight}px)`,
-        marginTop: `-${scaledTopCrop}px`,
+        height: `${widthPercent}%`,
       };
     }
     return {
@@ -453,7 +447,7 @@ export default function EconomicCalendarPage() {
             )}
 
             {/* Embed Frame - Full-screen height on mobile to fill viewport */}
-            <div ref={containerRef} className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-hidden">
+            <div ref={containerRef} className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
               <iframe
                 src={iframeUrl}
                 onLoad={() => setIframeLoaded(true)}
