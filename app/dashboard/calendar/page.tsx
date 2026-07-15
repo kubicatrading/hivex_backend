@@ -280,22 +280,6 @@ export default function EconomicCalendarPage() {
 
   // Dynamic zoom styles via CSS scale to completely fit all columns on smaller devices
   const getIframeStyle = () => {
-    if (deviceType === "mobile") {
-      return {
-        transform: "scale(0.75)",
-        transformOrigin: "top left",
-        width: "133.33%",
-        height: "133.33%",
-      };
-    }
-    if (deviceType === "tablet") {
-      return {
-        transform: "scale(0.95)",
-        transformOrigin: "top left",
-        width: "105.2%",
-        height: "105.2%",
-      };
-    }
     return {
       width: "100%",
       height: "100%",
