@@ -185,6 +185,7 @@ export default function EconomicCalendarPage() {
   const [deviceType, setDeviceType] = useState<"mobile" | "tablet" | "desktop">("desktop");
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(440);
+  const [hideTimezone, setHideTimezone] = useState<boolean>(false);
   // Video Upload States (matching videos page layout)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -216,6 +217,8 @@ export default function EconomicCalendarPage() {
           setDeviceType("desktop");
         }
 
+        setHideTimezone(width < 650);
+
         if (containerRef.current) {
           setContainerWidth(containerRef.current.offsetWidth);
         }
@@ -245,10 +248,10 @@ export default function EconomicCalendarPage() {
     };
   }, []);
 
-  // Force re-skeleton transition when device columns layout changes
+  // Force re-skeleton transition when device columns layout or timezone visibility changes
   useEffect(() => {
     setIframeLoaded(false);
-  }, [deviceType]);
+  }, [deviceType, hideTimezone]);
 
   // Toast self-dismiss timer
   useEffect(() => {
@@ -381,7 +384,7 @@ export default function EconomicCalendarPage() {
     }
   };
 
-  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
+  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=${hideTimezone ? "datepicker" : "datepicker,timezone"}&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
     <div className="animate-fade-in relative">
