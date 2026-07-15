@@ -296,9 +296,10 @@ export default function EconomicCalendarPage() {
       const widthPercent = (1 / scale) * 100;
       return {
         transform: `scale(${scale})`,
-        transformOrigin: "top left",
+        transformOrigin: "top right",
         width: `${widthPercent}%`,
         height: `${widthPercent}%`,
+        marginLeft: "auto",
       };
     }
     if (deviceType === "tablet") {
@@ -307,13 +308,16 @@ export default function EconomicCalendarPage() {
       const widthPercent = (1 / scale) * 100;
       return {
         transform: `scale(${scale})`,
-        transformOrigin: "top left",
+        transformOrigin: "top right",
         width: `${widthPercent}%`,
         height: `${widthPercent}%`,
+        marginLeft: "auto",
       };
     }
     return {
       width: "100%",
+      maxWidth: "650px",
+      marginLeft: "auto",
       height: "100%",
     };
   };
