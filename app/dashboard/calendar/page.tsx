@@ -183,8 +183,7 @@ export default function EconomicCalendarPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [iframeLoaded, setIframeLoaded] = useState<boolean>(false);
   const [deviceType, setDeviceType] = useState<"mobile" | "tablet" | "desktop">("desktop");
-  const [currentCalType, setCurrentCalType] = useState<"day" | "week">("week");
-  const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "this-week" | "next-week" | "custom">("this-week");
+
 
   // Video Upload States (matching videos page layout)
   const [title, setTitle] = useState("");
@@ -368,7 +367,7 @@ export default function EconomicCalendarPage() {
     }
   };
 
-  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=${currentCalType}&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
+  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
     <div className="animate-fade-in relative">
@@ -414,86 +413,20 @@ export default function EconomicCalendarPage() {
 
           {/* FULLSCREEN IFRAME CONTAINER - STRIPPED TO BORDERLESS EDGE-TO-EDGE ON MOBILE */}
           <div className="relative w-full rounded-none sm:rounded-2xl border-x-0 border-y sm:border border-zinc-900/80 bg-zinc-950 sm:bg-zinc-950/50 backdrop-blur-md overflow-hidden shadow-none sm:shadow-2xl sm:shadow-black/80 flex flex-col">
-            {/* Integrated Iframe header mimic & custom navigation bar */}
-            <div className="w-full bg-zinc-900/30 border-b border-zinc-900/60 px-3 py-1.5 flex items-center justify-between gap-2 overflow-x-auto scrollbar-none z-10">
-              {/* Left Dots - Desktop only */}
-              <div className="hidden sm:flex items-center gap-1.5">
+            {/* Iframe header mimic - Desktop only */}
+            <div className="hidden sm:flex w-full h-9 bg-zinc-900/30 border-b border-zinc-900/60 px-4 items-center justify-between">
+              <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-rose-500/40" />
                 <span className="w-2 h-2 rounded-full bg-amber-500/40" />
                 <span className="w-2 h-2 rounded-full bg-emerald-500/40" />
               </div>
- 
-              {/* Compact Buttons (Yesterday, Today, This Week, Next Week) */}
-              <div className="flex items-center gap-1.5">
-                {/* Yesterday */}
-                <button
-                  onClick={() => {
-                    setToastMessage(t.redirectToast);
-                    window.open(getExternalUrl(selectedLanguage), "_blank", "noopener,noreferrer");
-                  }}
-                  className="px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 bg-zinc-950/40 border-zinc-800/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 hover:border-zinc-700/40 cursor-pointer"
-                >
-                  <span>{t.yesterday}</span>
-                </button>
- 
-                {/* Today */}
-                <button
-                  onClick={() => {
-                    if (activeTab !== "today") {
-                      setIframeLoaded(false);
-                      setCurrentCalType("day");
-                      setActiveTab("today");
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 cursor-pointer ${
-                    activeTab === "today"
-                      ? "bg-violet-500/10 border-violet-500/30 text-violet-400 font-extrabold shadow-sm shadow-violet-950/20"
-                      : "bg-zinc-950/40 border-zinc-800/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 hover:border-zinc-700/40"
-                  }`}
-                >
-                  <span>{t.today}</span>
-                </button>
- 
-                {/* This Week */}
-                <button
-                  onClick={() => {
-                    if (activeTab !== "this-week") {
-                      setIframeLoaded(false);
-                      setCurrentCalType("week");
-                      setActiveTab("this-week");
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 cursor-pointer ${
-                    activeTab === "this-week"
-                      ? "bg-violet-500/10 border-violet-500/30 text-violet-400 font-extrabold shadow-sm shadow-violet-950/20"
-                      : "bg-zinc-950/40 border-zinc-800/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 hover:border-zinc-700/40"
-                  }`}
-                >
-                  <span>{t.thisWeek}</span>
-                </button>
- 
-                {/* Next Week */}
-                <button
-                  onClick={() => {
-                    setToastMessage(t.redirectToast);
-                    window.open(getExternalUrl(selectedLanguage), "_blank", "noopener,noreferrer");
-                  }}
-                  className="px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight border transition-all duration-300 flex items-center gap-1 bg-zinc-950/40 border-zinc-800/40 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 hover:border-zinc-700/40 cursor-pointer"
-                >
-                  <span>{t.nextWeek}</span>
-                </button>
-              </div>
- 
-              {/* Status Indicator & Timezone - Desktop only */}
-              <div className="hidden sm:flex items-center gap-2">
-                <span className="text-[9px] font-mono tracking-widest text-zinc-500 uppercase">Secure Console</span>
-                <span className="text-[9px] font-mono text-zinc-500 bg-zinc-950/50 px-2 py-0.5 rounded border border-zinc-800/40 uppercase">GMT+1</span>
-              </div>
+              <span className="text-[9px] font-mono tracking-widest text-zinc-500">SECURE CONSOLE</span>
+              <span className="text-[9px] font-mono text-zinc-600 bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/40 uppercase">GMT+1 Timezone</span>
             </div>
- 
+
             {/* Dynamic skeleton loader */}
             {!iframeLoaded && (
-              <div className="absolute inset-x-0 bottom-0 top-[40px] bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
+              <div className="absolute inset-x-0 bottom-0 top-0 sm:top-9 bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
                 <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
                 <p className="text-zinc-500 text-[10px] font-mono tracking-wide animate-pulse">{t.loadingText}</p>
               </div>
