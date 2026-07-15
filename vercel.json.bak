@@ -27,5 +27,31 @@
         }
       ]
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/videos/sync",
+      "schedule": "0 2,10,18 * * *"
+    },
+    {
+      "path": "/api/videos/monitor-analysis",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/videos/alerts-24h",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/videos/digest",
+      "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/videos/investors-24h",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/videos/backfill-snapshots",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
