@@ -284,10 +284,10 @@ export default function EconomicCalendarPage() {
   const getIframeStyle = () => {
     if (deviceType === "mobile") {
       return {
-        transform: "scale(0.88)",
+        transform: "scale(0.75)",
         transformOrigin: "top left",
-        width: "113.6%",
-        height: "113.6%",
+        width: "133.33%",
+        height: "133.33%",
       };
     }
     if (deviceType === "tablet") {
