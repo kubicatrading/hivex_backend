@@ -183,10 +183,6 @@ export default function EconomicCalendarPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [iframeLoaded, setIframeLoaded] = useState<boolean>(false);
   const [deviceType, setDeviceType] = useState<"mobile" | "tablet" | "desktop">("desktop");
-
-  // Dynamic header mimic states for sticky controls
-  const [currentCalType, setCurrentCalType] = useState<"day" | "week">("week");
-  const [currentTimezone, setCurrentTimezone] = useState<number>(58);
   // Video Upload States (matching videos page layout)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -369,7 +365,7 @@ export default function EconomicCalendarPage() {
     }
   };
 
-  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=${currentCalType}&timeZone=${currentTimezone}&lang=${getLangParam(selectedLanguage)}`;
+  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker,timezone&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
     <div className="animate-fade-in relative">
@@ -415,82 +411,27 @@ export default function EconomicCalendarPage() {
 
           {/* FULLSCREEN IFRAME CONTAINER - STRIPPED TO BORDERLESS EDGE-TO-EDGE ON MOBILE */}
           <div className="relative w-full rounded-none sm:rounded-2xl border-x-0 border-y sm:border border-zinc-900/80 bg-zinc-950 sm:bg-zinc-950/50 backdrop-blur-md overflow-hidden shadow-none sm:shadow-2xl sm:shadow-black/80 flex flex-col">
-            {/* Iframe header mimic - Sticky persistent controls on mobile & desktop */}
-            <div className="flex w-full flex-wrap sm:flex-nowrap min-h-[38px] bg-zinc-900/30 border-b border-zinc-900/60 px-4 py-2 sm:py-0 items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <div className="hidden xs:flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-rose-500/40" />
-                  <span className="w-2 h-2 rounded-full bg-amber-500/40" />
-                  <span className="w-2 h-2 rounded-full bg-emerald-500/40" />
-                </div>
-                <span className="text-[9px] font-mono tracking-widest text-zinc-500 font-bold">SECURE CONSOLE</span>
+            {/* Iframe header mimic - Desktop only */}
+            <div className="hidden sm:flex w-full h-9 bg-zinc-900/30 border-b border-zinc-900/60 px-4 items-center justify-between">
+              <div className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500/40" />
+                <span className="w-2 h-2 rounded-full bg-amber-500/40" />
+                <span className="w-2 h-2 rounded-full bg-emerald-500/40" />
               </div>
-              
-              <div className="flex items-center gap-2 ml-auto sm:ml-0">
-                {/* Custom Timezone Selector */}
-                <div className="flex items-center gap-1 bg-zinc-900/60 border border-zinc-800/40 px-2 py-0.5 rounded-lg">
-                  <Globe className="w-3 h-3 text-zinc-500" />
-                  <select
-                    value={currentTimezone}
-                    onChange={(e) => {
-                      setCurrentTimezone(Number(e.target.value));
-                      setIframeLoaded(false);
-                    }}
-                    className="bg-transparent text-[10px] font-mono text-zinc-300 focus:outline-none border-none pr-1 cursor-pointer hover:text-white transition-colors"
-                  >
-                    <option value="58" className="bg-zinc-950 text-zinc-300">GMT+1 (Madrid)</option>
-                    <option value="56" className="bg-zinc-950 text-zinc-300">GMT+3 (Istanbul)</option>
-                    <option value="55" className="bg-zinc-950 text-zinc-300">GMT+0 (London/UTC)</option>
-                    <option value="8" className="bg-zinc-950 text-zinc-300">GMT-5 (New York)</option>
-                  </select>
-                </div>
-
-                {/* Calendar View Selector buttons */}
-                <div className="flex items-center bg-zinc-900/60 border border-zinc-800/40 p-0.5 rounded-lg">
-                  <button
-                    onClick={() => {
-                      if (currentCalType !== "day") {
-                        setCurrentCalType("day");
-                        setIframeLoaded(false);
-                      }
-                    }}
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono transition-all duration-300 ${
-                      currentCalType === "day"
-                        ? "bg-violet-500/15 border border-violet-500/30 text-violet-300 font-bold"
-                        : "border border-transparent text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    {t.today}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (currentCalType !== "week") {
-                        setCurrentCalType("week");
-                        setIframeLoaded(false);
-                      }
-                    }}
-                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono transition-all duration-300 ${
-                      currentCalType === "week"
-                        ? "bg-violet-500/15 border border-violet-500/30 text-violet-300 font-bold"
-                        : "border border-transparent text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    {t.thisWeek}
-                  </button>
-                </div>
-              </div>
+              <span className="text-[9px] font-mono tracking-widest text-zinc-500">SECURE CONSOLE</span>
+              <span className="text-[9px] font-mono text-zinc-600 bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800/40 uppercase">GMT+1 Timezone</span>
             </div>
 
             {/* Dynamic skeleton loader */}
             {!iframeLoaded && (
-              <div className="absolute inset-x-0 bottom-0 top-[38px] bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
+              <div className="absolute inset-x-0 bottom-0 top-0 sm:top-9 bg-zinc-950 z-20 flex flex-col items-center justify-center space-y-3">
                 <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
                 <p className="text-zinc-500 text-[10px] font-mono tracking-wide animate-pulse">{t.loadingText}</p>
               </div>
             )}
 
             {/* Embed Frame - Full-screen height on mobile to fill viewport */}
-            <div className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-hidden">
+            <div className="w-full h-[calc(100vh-195px)] sm:h-[700px] overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
               <iframe
                 src={iframeUrl}
                 onLoad={() => setIframeLoaded(true)}
