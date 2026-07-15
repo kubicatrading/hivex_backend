@@ -336,7 +336,7 @@ export default function EconomicCalendarPage() {
     }
   };
 
-  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
+  const iframeUrl = `https://sslecal2.investing.com/?columns=${getColumnsParam(deviceType)}&importance=1,2,3&features=datepicker&calType=week&timeZone=58&lang=${getLangParam(selectedLanguage)}`;
 
   return (
     <div className="animate-fade-in relative">
