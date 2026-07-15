@@ -2647,6 +2647,65 @@ export default function VideosPage() {
     });
   }, [videos, selectedLanguage, transcriptionStates]);
 
+  // Load transcription dynamically on demand when entering the Study Panel
+  useEffect(() => {
+    if (!activeStudyVideo) return;
+
+    const activeState = transcriptionStates[activeStudyVideo.id];
+    const hasTranscription = activeStudyVideo.metadata?.transcription || activeState?.text;
+
+    if (!hasTranscription) {
+      const loadTranscription = async () => {
+        try {
+          console.log(`[Dynamic Loader] Fetching transcription for video: ${activeStudyVideo.title}...`);
+          const { data, error } = await supabase
+            .from("documents")
+            .select("metadata")
+            .eq("id", activeStudyVideo.id)
+            .single();
+
+          if (error) throw error;
+          
+          if (data?.metadata?.transcription) {
+            console.log(`[Dynamic Loader] Transcription loaded successfully for: ${activeStudyVideo.title}`);
+            const text = String(data.metadata.transcription);
+            const modelUsed = String(data.metadata.transcription_model || "Google Vertex AI Gemini 1.5 Pro");
+            
+            // Re-populate the transcriptionStates so that the UI updates instantly
+            setTranscriptionStates((prev) => ({
+              ...prev,
+              [activeStudyVideo.id]: {
+                text,
+                progress: 100,
+                transcribing: false,
+                error: null
+              }
+            }));
+            
+            // Also store it back into activeStudyVideo metadata to keep local state accurate
+            setActiveStudyVideo((prev) => {
+              if (prev && prev.id === activeStudyVideo.id) {
+                return {
+                  ...prev,
+                  metadata: {
+                    ...prev.metadata,
+                    transcription: text,
+                    transcription_model: modelUsed
+                  }
+                };
+              }
+              return prev;
+            });
+          }
+        } catch (err) {
+          console.error("[Dynamic Loader] Error fetching video transcription:", err);
+        }
+      };
+
+      loadTranscription();
+    }
+  }, [activeStudyVideo, transcriptionStates]);
+
   // Asynchronous background transcription runner for smart automatic sync transcribing
   const triggerBackgroundTranscription = useCallback(async (videoDoc: VideoDocument) => {
     if (videoDoc.metadata?.transcription) {
@@ -3190,22 +3249,41 @@ export default function VideosPage() {
     try {
       const { data, error } = await supabase
         .from("documents")
-        .select("*")
+        .select(`
+          id,
+          title,
+          description,
+          file_url,
+          created_at,
+          duration:metadata->duration,
+          resolution:metadata->resolution,
+          thumbnail:metadata->thumbnail,
+          is_youtube:metadata->is_youtube,
+          channel_title:metadata->channel_title,
+          is_favorite:metadata->is_favorite,
+          is_old:metadata->is_old,
+          translations:metadata->translations
+        `)
         .eq("type", "video");
       if (error) throw error;
       
       if (data) {
         // Map generic documents to typed VideoDocuments
-        const typedData: VideoDocument[] = (data as {
-          id: string;
-          title: string;
-          description?: string;
-          file_url?: string;
-          created_at: string;
-          metadata?: Record<string, unknown>;
-        }[]).map((doc) => {
-          let trans = doc.metadata?.transcription ? String(doc.metadata.transcription) : undefined;
-          let model = doc.metadata?.transcription_model ? String(doc.metadata.transcription_model) : undefined;
+        const typedData: VideoDocument[] = (data as any[]).map((doc) => {
+          // Reconstruct metadata object for downstream compatibility (completely avoiding loading massive transcription payloads)
+          doc.metadata = {
+            duration: doc.duration,
+            resolution: doc.resolution,
+            thumbnail: doc.thumbnail,
+            is_youtube: doc.is_youtube,
+            channel_title: doc.channel_title,
+            is_favorite: doc.is_favorite,
+            is_old: doc.is_old,
+            translations: doc.translations
+          };
+
+          let trans = undefined;
+          let model = undefined;
 
           // Si falta en base de datos local, intentar recuperar desde la caché global persistente
           if (!trans && typeof window !== "undefined") {
