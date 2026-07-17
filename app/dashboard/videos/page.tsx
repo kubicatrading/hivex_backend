@@ -3356,6 +3356,15 @@ export default function VideosPage() {
   const prevFilterChannelRef = useRef<string | null>(null);
   const prevFilterFavoriteRef = useRef<boolean>(false);
 
+  // Refs to track the absolutely most-recent active channel and favorite settings across asynchronous closures (prevents race conditions)
+  const latestActiveChannelRef = useRef<string>("Andrei Jikh");
+  const latestFavoriteRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    latestActiveChannelRef.current = filterChannel || "Andrei Jikh";
+    latestFavoriteRef.current = filterFavorite;
+  }, [filterChannel, filterFavorite]);
+
   // Automatically select the first video of the feed when changing channels/favorites, or on initial load
   useEffect(() => {
     const channelChanged = prevFilterChannelRef.current !== filterChannel;
@@ -3629,6 +3638,18 @@ export default function VideosPage() {
         const sortedData = [...prunedData].sort(
           (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)
         );
+
+        // Race Condition Guard: Asynchronous SWR background fetches resolving late can overwrite
+        // the state of a newly chosen active channel with the old channel's videos.
+        const currentActive = latestActiveChannelRef.current;
+        const currentFav = latestFavoriteRef.current;
+        const queryChannel = filterChannel || "Andrei Jikh";
+        const queryFav = filterFavorite;
+
+        if (queryFav !== currentFav || (!queryFav && queryChannel !== currentActive)) {
+          console.log(`[Race Condition Guard] Ignoring stale fetch for channel "${queryChannel}" (Favorites: ${queryFav}) because active channel is "${currentActive}" (Favorites: ${currentFav}).`);
+          return;
+        }
 
         setVideos(sortedData);
         
