@@ -3720,24 +3720,38 @@ export default function VideosPage() {
       return v;
     }));
 
-    if (selectedVideo?.id === video.id) {
-      setSelectedVideo(prev => prev ? {
-        ...prev,
-        metadata: {
-          ...prev.metadata,
-          is_favorite: isFav
+    if (filterFavorite && !isFav) {
+      const remainingFavorites = filteredVideos.filter(v => v.id !== video.id);
+      if (selectedVideo?.id === video.id) {
+        if (remainingFavorites.length > 0) {
+          setSelectedVideo(remainingFavorites[0]);
+        } else {
+          setSelectedVideo(null);
         }
-      } : null);
-    }
+      }
+      if (activeStudyVideo?.id === video.id) {
+        setActiveStudyVideo(null);
+      }
+    } else {
+      if (selectedVideo?.id === video.id) {
+        setSelectedVideo(prev => prev ? {
+          ...prev,
+          metadata: {
+            ...prev.metadata,
+            is_favorite: isFav
+          }
+        } : null);
+      }
 
-    if (activeStudyVideo?.id === video.id) {
-      setActiveStudyVideo(prev => prev ? {
-        ...prev,
-        metadata: {
-          ...prev.metadata,
-          is_favorite: isFav
-        }
-      } : null);
+      if (activeStudyVideo?.id === video.id) {
+        setActiveStudyVideo(prev => prev ? {
+          ...prev,
+          metadata: {
+            ...prev.metadata,
+            is_favorite: isFav
+          }
+        } : null);
+      }
     }
 
     if (isUsingMock) {
