@@ -301,14 +301,14 @@ async function handleSync(request: Request) {
     // Server-side database synchronization fallback/daemon logic
     // This allows a silent background cron calling GET /api/videos/sync to automatically
     // synchronize and populate new videos in the database for all registered profiles!
-    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+    const daemonSupabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const daemonServiceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
-    if (supabaseUrl && serviceRoleKey && syncedVideos.length > 0) {
+    if (daemonSupabaseUrl && daemonServiceRoleKey && syncedVideos.length > 0) {
       console.log("[Daemon] Sincronización silenciosa en segundo plano iniciada para todos los usuarios...");
       try {
         const { createClient } = await import("@supabase/supabase-js");
-        const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+        const supabaseAdmin = createClient(daemonSupabaseUrl, daemonServiceRoleKey, {
           auth: { persistSession: false }
         });
         // 1. Obtener videos existentes de forma global en la videoteca compartida
