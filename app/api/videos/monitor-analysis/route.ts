@@ -5,7 +5,7 @@ import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 import { sendTelegramMessage, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during long transcripts
+export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during long transcripts
 
 
 // Server-side helper to split transcription into verbatim, summary, charts, and report segments

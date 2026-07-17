@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown, getTelegramLanguage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during synthesis
+export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during synthesis
 
 export async function GET(request: NextRequest) {
   return handleAlerts(request);
@@ -297,8 +297,9 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Devuelven líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA PARA CALCULAR {startSeconds} Y {endSeconds}:
-  1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255). Si no hay marcas, usa 0. Ese es {startSeconds}.
+- REGLA PARA VÍDEOS SIN GRÁFICOS: Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos), NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" ni la línea "🔗 [Abrir Escena del Gráfico...]" para ese vídeo. En ese caso, incluye únicamente la línea "🔗 [Vídeo Completo: {videoTitle}](...)".
+- REGLA PARA CALCULAR {startSeconds} Y {endSeconds} (solo aplicable si el vídeo tiene gráficos):
+  1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255).
   2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
 - Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera un link markdown directo apuntando a la ruta de compartir de HIVEX inyectando el {videoId} real (su UUID en HIVEX) y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) calculados en la URL de "/share/".
 - Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
@@ -340,8 +341,9 @@ CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the public HIVEX "/share/" URL.
 - NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
 - NO BACKTICKS: Do NOT use backticks (\`) anywhere around the titles, markdown links, or URLs.
-- RULE TO CALCULATE {startSeconds} AND {endSeconds}:
-  1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255). If none, use 0. This is {startSeconds}.
+- RULE FOR VIDEOS WITHOUT CHARTS: If the "charts" field for a video is empty, states that no charts were detected, or has no valid timestamps, do NOT include the "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" heading or the "🔗 [Open Chart Scene...]" link for that video. Show only the "🔗 [Full Video: {videoTitle}](...)" link.
+- RULE TO CALCULATE {startSeconds} AND {endSeconds} (only applicable if the video has charts):
+  1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255).
   2. Always add 60 seconds to get {endSeconds} (e.g. if start is 255, end is 315).
 - For "🔗 [Open Chart Scene in HIVEX Study Cabin](...)": Generate a direct markdown link pointing to the HIVEX share route by injecting the real {videoId} (its UUID in HIVEX) and the start ({startSeconds}) and end ({endSeconds}) parameters in the "/share/" URL.
 - For "🔗 [Full Video: {videoTitle}](...)": Generate a direct markdown link pointing to the full video without time parameters by using the real title of the video (property "title" of the data object) as the link text {videoTitle} and "/share/{videoId}" as URL.

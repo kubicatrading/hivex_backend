@@ -300,8 +300,9 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA PARA CALCULAR {startSeconds} Y {endSeconds}:
-  1. Para los vídeos que sustentan la decisión, busca cualquier marca de tiempo de gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) y conviértela a segundos enteros. Si no hay marcas, usa 0. Ese es {startSeconds}.
+- REGLA PARA VÍDEOS SIN GRÁFICOS: Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos), NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" ni la línea "🔗 [Abrir Escena del Gráfico...]" para ese vídeo. En ese caso, incluye únicamente la línea "🔗 [Vídeo Completo: {videoTitle}](...)".
+- REGLA PARA CALCULAR {startSeconds} Y {endSeconds} (solo aplicable si el vídeo tiene gráficos):
+  1. Para los vídeos que sustentan la decisión, busca cualquier marca de tiempo de gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) y conviértela a segundos enteros.
   2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 740, end es 800).
 - Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera el enlace de compartir público apuntando a la escena del vídeo de origen relevante inyectando el {videoId} real y los segundos calculados.
 - Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.

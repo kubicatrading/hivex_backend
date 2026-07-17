@@ -98,7 +98,8 @@ function LoginForm() {
           "Registration successful! Logging in automatically..."
         );
         setTimeout(() => {
-          router.push("/dashboard");
+          const redirectTo = searchParams.get("redirectTo") || "/dashboard";
+          router.push(redirectTo);
         }, 1500);
       } else {
         const trimmedEmail = email.trim();
@@ -123,7 +124,8 @@ function LoginForm() {
           "Logged in successfully. Redirecting..."
         );
         setTimeout(() => {
-          router.push("/dashboard");
+          const redirectTo = searchParams.get("redirectTo") || "/dashboard";
+          router.push(redirectTo);
         }, 1200);
       }
     } catch (err: unknown) {
@@ -221,7 +223,8 @@ function LoginForm() {
               );
               
               setTimeout(() => {
-                router.push("/dashboard");
+                const redirectTo = searchParams.get("redirectTo") || "/dashboard";
+                router.push(redirectTo);
               }, 1200);
 
             } catch (err: unknown) {
@@ -235,10 +238,15 @@ function LoginForm() {
         client.requestAccessToken();
       } else {
         // Supabase OAuth integration
+        const redirectToParam = searchParams.get("redirectTo");
+        const redirectToUrl = redirectToParam 
+          ? `${window.location.origin}${redirectToParam}`
+          : `${window.location.origin}/dashboard`;
+
         const { error: signInError } = await supabase.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: `${window.location.origin}/dashboard`,
+            redirectTo: redirectToUrl,
             queryParams: {
               access_type: "offline",
               prompt: "consent",

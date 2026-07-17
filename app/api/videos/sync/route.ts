@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during sync operations
+export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during sync operations
 
 
 // Standard YouTube feeds map
 const YT_CHANNELS: Record<string, string> = {
   "Andrei Jikh": "UCGy7SkBjcIAgTiwkXEtPnYg",
-  "Judging Freedom": "UCkei_gbdGw1lxyc9NV45wJQ",
+  "Judging Freedom": "UCDkEYb-TXJVWLvOokshtlsw",
   "Cihat E. Çiçek": "UCHExW8VqaE0a3W0kwSe_BXg",
   "Zang International with Lynette Zang": "UCvONE8y1nZarMAnZM-2ojfA",
   "The Rich Dad Channel": "UCuifm5ns5SRG8LZJ6gCfKyw",

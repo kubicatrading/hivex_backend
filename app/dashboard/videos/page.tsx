@@ -3037,6 +3037,8 @@ export default function VideosPage() {
       if (matched) {
         console.log(`[Deep Link] Direct URL deep-link matched video: ${matched.title}. Setting as active study video.`);
         setActiveStudyVideo(matched);
+        setSelectedVideo(matched); // Sincroniza el video de la barra lateral para evitar race condition
+        
         
         // Parse start and end parameters for the deep-linked video clip
         const startVal = searchParams.get("start") || searchParams.get("t");
@@ -3155,7 +3157,8 @@ export default function VideosPage() {
     const favoriteChanged = prevFilterFavoriteRef.current !== filterFavorite;
 
     if (!loading) {
-      const shouldForceFirstVideo = channelChanged || favoriteChanged || !selectedVideo;
+      const isDeepLink = !!(searchParams.get("id") || searchParams.get("video"));
+      const shouldForceFirstVideo = !isDeepLink && (channelChanged || favoriteChanged || !selectedVideo);
       
       if (shouldForceFirstVideo) {
         setActiveStudyVideo(null);
@@ -3170,7 +3173,7 @@ export default function VideosPage() {
       prevFilterChannelRef.current = filterChannel;
       prevFilterFavoriteRef.current = filterFavorite;
     }
-  }, [filterChannel, filterFavorite, loading, selectedVideo, filteredVideos.length]);
+  }, [filterChannel, filterFavorite, loading, selectedVideo, filteredVideos.length, searchParams]);
 
 
   // Form states
@@ -3478,36 +3481,12 @@ export default function VideosPage() {
     }
   }, [triggerBackgroundTranscription, checkOldVideos]);
 
-  // Automatically clear browser cache and storage list caches when entering or switching channels
+  // Automatically clear storage list caches ONCE on initial page mount to force fresh data
   useEffect(() => {
     if (typeof window !== "undefined") {
-      console.log(`[Cabinet Cache] Switch/Enter channel detected ("${filterChannel || "Default"}"). Purging browser Cache API, sessionStorage and localStorage list keys to force fresh data...`);
+      console.log(`[Cabinet Cache] Initial page mount detected. Purging specific localStorage list caches to force fresh data load...`);
       
-      // 1. Clear Browser Cache API (HTTP request/response caches)
-      if ("caches" in window) {
-        try {
-          caches.keys().then((keys) => {
-            keys.forEach((key) => {
-              caches.delete(key);
-            });
-            console.log("[Cabinet Cache] Cleared browser Cache Storage keys.");
-          }).catch((err) => {
-            console.warn("[Cabinet Cache] Failed to retrieve Cache Storage keys:", err);
-          });
-        } catch (err) {
-          console.warn("[Cabinet Cache] Error accessing Cache Storage API:", err);
-        }
-      }
-
-      // 2. Clear Session Storage
-      try {
-        sessionStorage.clear();
-        console.log("[Cabinet Cache] Cleared Session Storage.");
-      } catch (err) {
-        console.warn("[Cabinet Cache] Error clearing Session Storage:", err);
-      }
-
-      // 3. Purge mockSupabase and videos list localStorage caches
+      // Purge mockSupabase and videos list localStorage caches
       try {
         const keysToRemove: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -3518,16 +3497,16 @@ export default function VideosPage() {
         }
         keysToRemove.forEach((key) => {
           localStorage.removeItem(key);
-          console.log(`[Cabinet Cache] Purged cache key: ${key}`);
+          console.log(`[Cabinet Cache] Purged cache key on mount: ${key}`);
         });
       } catch (err) {
         console.warn("[Cabinet Cache] Error clearing localStorage document lists:", err);
       }
       
-      // 4. Force fetch fresh videos from database
+      // Force fetch fresh videos from database once on mount
       fetchVideos();
     }
-  }, [filterChannel, fetchVideos]);
+  }, [fetchVideos]);
 
   // Toggle favorite property inside document metadata in Supabase
   const toggleFavorite = async (video: VideoDocument, e: React.MouseEvent) => {
@@ -4039,8 +4018,28 @@ export default function VideosPage() {
   const handleDeleteVideo = async (id: string) => {
     if (confirm(t.confirmDelete || "¿Estás seguro de que deseas eliminar este vídeo?")) {
       try {
+        // Find the video to obtain its file_url for cascade purging of knowledge base entries
+        const targetVideo = videos.find(v => v.id === id);
+        const fileUrl = targetVideo?.file_url;
+
+        // 1. Delete the video document itself
         const { error } = await supabase.from("documents").delete().eq("id", id);
         if (error) throw error;
+
+        // 2. Cascade delete all associated knowledge cards (transcription, summary, charts, analysis) matching the file_url
+        if (fileUrl) {
+          const typesToDelete = [
+            "knowledge_transcription",
+            "knowledge_summary",
+            "knowledge_charts",
+            "knowledge_analysis"
+          ];
+          await supabase
+            .from("documents")
+            .delete()
+            .in("type", typesToDelete)
+            .eq("file_url", fileUrl);
+        }
         
         const remaining = videos.filter(v => v.id !== id);
         setVideos(remaining);

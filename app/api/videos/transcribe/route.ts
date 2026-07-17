@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { YoutubeTranscript } from "youtube-transcript";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 
-export const maxDuration = 60; // Extend Vercel execution duration to 60s to prevent timeouts during transcription
+export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during transcription
 
 
 // Exact system instruction matching user requirements for Google Gemini

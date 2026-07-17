@@ -179,18 +179,65 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const checkUser = async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        let { data: { user } } = await supabase.auth.getUser();
+        
+        // Point 3: Active OAuth callback parameters detection & race condition prevention
+        if (!user && typeof window !== "undefined") {
+          const hasHashToken = window.location.hash.includes("access_token") || window.location.hash.includes("id_token");
+          const hasQueryCode = window.location.search.includes("code=") || window.location.search.includes("error=");
+          
+          if (hasHashToken || hasQueryCode) {
+            console.log("[Auth Session Recovery] OAuth callback parameters detected in URL. Waiting 1.5 seconds for Supabase to process session...");
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            const retry = await supabase.auth.getUser();
+            user = retry.data.user;
+          }
+        }
+
         if (!user) {
-          router.push("/login");
+          const currentPath = typeof window !== "undefined"
+            ? (window.location.pathname + window.location.search)
+            : "/dashboard";
+          
+          // Save target path to localStorage for bulletproof recovery across domains
+          if (typeof window !== "undefined" && !currentPath.includes("/login")) {
+            console.log(`[Auth Session Recovery] Unauthenticated hit on secure path "${currentPath}". Preserving target path in localStorage...`);
+            localStorage.setItem("hivex_oauth_redirect_to", currentPath);
+          }
+          
+          router.push(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
           return;
         }
+
         setProfile({
           email: user.email,
           fullName: user.user_metadata?.full_name || "Alex Hivex"
         });
+
+        // Restore preserved deep-link destination after successful login
+        if (typeof window !== "undefined") {
+          const savedRedirect = localStorage.getItem("hivex_oauth_redirect_to");
+          if (savedRedirect) {
+            localStorage.removeItem("hivex_oauth_redirect_to");
+            const cleanCurrent = window.location.pathname + window.location.search;
+            if (savedRedirect !== cleanCurrent && !cleanCurrent.includes("/login")) {
+              console.log(`[Auth Session Recovery] Active session detected. Restoring preserved deep-link redirect back to: ${savedRedirect}`);
+              router.push(savedRedirect);
+              return;
+            }
+          }
+        }
       } catch (err) {
         console.error("Auth check failed:", err);
-        router.push("/login");
+        const currentPath = typeof window !== "undefined"
+          ? (window.location.pathname + window.location.search)
+          : "/dashboard";
+        
+        if (typeof window !== "undefined" && !currentPath.includes("/login")) {
+          localStorage.setItem("hivex_oauth_redirect_to", currentPath);
+        }
+        
+        router.push(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
       } finally {
         setAuthLoading(false);
       }
