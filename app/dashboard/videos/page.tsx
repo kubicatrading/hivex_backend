@@ -3434,8 +3434,10 @@ export default function VideosPage() {
     }
   }, []);
 
-  const fetchVideos = useCallback(async () => {
-    setLoading(true);
+  const fetchVideos = useCallback(async (isSilent = false) => {
+    if (!isSilent) {
+      setLoading(true);
+    }
     try {
       const { data, error } = await supabase
         .from("documents")
@@ -3972,7 +3974,7 @@ export default function VideosPage() {
   const handleSyncChannel = useCallback(async (autoTrigger = false) => {
     if (isSyncingRef.current) return;
     isSyncingRef.current = true;
-    setSyncing(true);
+    setSyncing(!autoTrigger);
     setSyncError(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -4024,8 +4026,8 @@ export default function VideosPage() {
         }
       }));
 
-      // Reload Videos Catalogue
-      await fetchVideos();
+      // Reload Videos Catalogue silently in background if this is an automatic trigger
+      await fetchVideos(autoTrigger);
 
       // Trigger asynchronous background transcriptions for all newly added videos
       if (newlyAddedVideos.length > 0) {
@@ -4040,7 +4042,7 @@ export default function VideosPage() {
         setSyncError(err instanceof Error ? err.message : "Error de sincronización desconocido.");
       }
       // Ensure we still load/clear state correctly in case of failure
-      await fetchVideos();
+      await fetchVideos(autoTrigger);
     } finally {
       setSyncing(false);
       isSyncingRef.current = false;
