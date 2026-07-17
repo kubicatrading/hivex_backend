@@ -187,10 +187,17 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           const hasQueryCode = window.location.search.includes("code=") || window.location.search.includes("error=");
           
           if (hasHashToken || hasQueryCode) {
-            console.log("[Auth Session Recovery] OAuth callback parameters detected in URL. Waiting 1.5 seconds for Supabase to process session...");
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            const retry = await supabase.auth.getUser();
-            user = retry.data.user;
+            console.log("[Auth Session Recovery] OAuth callback parameters detected in URL. Initiating fast session polling...");
+            // Poll for session up to 10 times (every 100ms) for ultra-fast session recovery
+            for (let i = 0; i < 10; i++) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              const retry = await supabase.auth.getUser();
+              if (retry.data.user) {
+                user = retry.data.user;
+                console.log(`[Auth Session Recovery] Session established successfully in ${(i + 1) * 100}ms!`);
+                break;
+              }
+            }
           }
         }
 

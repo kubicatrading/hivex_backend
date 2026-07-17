@@ -3053,7 +3053,152 @@ export default function VideosPage() {
   const filterFavorite = searchParams.get("favorite") === "true";
   const videoIdParam = searchParams.get("id") || searchParams.get("video");
 
-  // Handle URL deep-linking for specific video inside study cabin
+  // Immediate deep-link loader to bypass catalog fetching latency on direct URL hits (e.g. from Telegram)
+  useEffect(() => {
+    if (!videoIdParam) return;
+
+    const fetchSingleDeepLink = async () => {
+      try {
+        console.log(`[Deep Link] Fetching single video info instantly for ID: ${videoIdParam}...`);
+        const { data, error } = await supabase
+          .from("documents")
+          .select(`
+            id,
+            title,
+            description,
+            file_url,
+            created_at,
+            duration:metadata->duration,
+            resolution:metadata->resolution,
+            thumbnail:metadata->thumbnail,
+            is_youtube:metadata->is_youtube,
+            channel_title:metadata->channel_title,
+            is_favorite:metadata->is_favorite,
+            is_old:metadata->is_old,
+            transcription:metadata->transcription,
+            transcription_model:metadata->transcription_model,
+            translations:metadata->translations
+          `)
+          .eq("id", videoIdParam)
+          .single();
+
+        if (error) {
+          // If UUID direct query fails, try matching by file_url snippet (e.g. YouTube ID)
+          console.log(`[Deep Link] Direct ID fetch failed, attempting search by URL snippet...`);
+          const { data: searchData, error: searchError } = await supabase
+            .from("documents")
+            .select(`
+              id,
+              title,
+              description,
+              file_url,
+              created_at,
+              duration:metadata->duration,
+              resolution:metadata->resolution,
+              thumbnail:metadata->thumbnail,
+              is_youtube:metadata->is_youtube,
+              channel_title:metadata->channel_title,
+              is_favorite:metadata->is_favorite,
+              is_old:metadata->is_old,
+              transcription:metadata->transcription,
+              transcription_model:metadata->transcription_model,
+              translations:metadata->translations
+            `)
+            .eq("type", "video")
+            .like("file_url", `%${videoIdParam}%`)
+            .limit(1);
+
+          if (!searchError && searchData && searchData.length > 0) {
+            setupDeepLinkVideo(searchData[0]);
+          }
+        } else if (data) {
+          setupDeepLinkVideo(data);
+        }
+      } catch (err) {
+        console.error("[Deep Link] Error loading deep-linked video:", err);
+      }
+    };
+
+    const setupDeepLinkVideo = (doc: any) => {
+      // Reconstruct document with proper metadata structure
+      const videoDoc: VideoDocument = {
+        id: doc.id,
+        title: doc.title,
+        description: doc.description,
+        file_url: doc.file_url,
+        created_at: doc.created_at,
+        metadata: {
+          duration: doc.duration,
+          resolution: doc.resolution,
+          thumbnail: doc.thumbnail,
+          is_youtube: doc.is_youtube,
+          channel_title: doc.channel_title,
+          is_favorite: doc.is_favorite,
+          is_old: doc.is_old,
+          translations: doc.translations
+        }
+      };
+
+      console.log(`[Deep Link] Single video fetched successfully: ${videoDoc.title}`);
+      setActiveStudyVideo(videoDoc);
+      setSelectedVideo(videoDoc);
+
+      // Pre-populate transcription states and translation cache immediately!
+      if (doc.transcription) {
+        setTranscriptionStates(prev => ({
+          ...prev,
+          [videoDoc.id]: {
+            text: String(doc.transcription),
+            progress: 100,
+            transcribing: false,
+            error: null
+          }
+        }));
+      }
+
+      if (doc.translations) {
+        const translationsObj = doc.translations as Record<string, string>;
+        setTranslationsCache(prev => {
+          const videoCache = prev[videoDoc.id] || {};
+          const updatedCache = { ...videoCache };
+          for (const [lang, transText] of Object.entries(translationsObj)) {
+            if (transText) {
+              updatedCache[lang] = {
+                text: String(transText),
+                loading: false,
+                error: null
+              };
+            }
+          }
+          return {
+            ...prev,
+            [videoDoc.id]: updatedCache
+          };
+        });
+      }
+
+      // Parse start and end parameters for the deep-linked video clip
+      const startVal = searchParams.get("start") || searchParams.get("t");
+      const endVal = searchParams.get("end");
+      if (startVal) {
+        const parsedStart = parseInt(startVal, 10);
+        if (!isNaN(parsedStart)) {
+          setUrlStartSeconds(parsedStart);
+          setPlayerTime(parsedStart);
+        }
+      }
+      if (endVal) {
+        const parsedEnd = parseInt(endVal, 10);
+        if (!isNaN(parsedEnd)) {
+          setUrlEndSeconds(parsedEnd);
+        }
+      }
+    };
+
+    fetchSingleDeepLink();
+  }, [videoIdParam]);
+
+  // Handle URL deep-linking matching when the main videos list completes loading in the background
   useEffect(() => {
     if (videoIdParam && videos.length > 0) {
       const matched = videos.find(
@@ -3062,19 +3207,34 @@ export default function VideosPage() {
           v.file_url?.includes(videoIdParam)
       );
       if (matched) {
-        console.log(`[Deep Link] Direct URL deep-link matched video: ${matched.title}. Setting as active study video.`);
-        setActiveStudyVideo(matched);
-        setSelectedVideo(matched); // Sincroniza el video de la barra lateral para evitar race condition
+        console.log(`[Deep Link Sync] Videos list loaded. Matching deep-link: ${matched.title}.`);
         
+        // Prevent resetting the active video if we already fetched its high-detail metadata
+        setActiveStudyVideo(prev => {
+          if (prev && prev.id === matched.id) {
+            return {
+              ...prev,
+              metadata: {
+                ...prev.metadata,
+                ...matched.metadata,
+                transcription: prev.metadata?.transcription || matched.metadata?.transcription,
+                translations: prev.metadata?.translations || matched.metadata?.translations
+              }
+            };
+          }
+          return matched;
+        });
+
+        setSelectedVideo(prev => (prev && prev.id === matched.id ? prev : matched));
         
-        // Parse start and end parameters for the deep-linked video clip
+        // Parse start and end parameters for the deep-linked video clip if not already set
         const startVal = searchParams.get("start") || searchParams.get("t");
         const endVal = searchParams.get("end");
         if (startVal) {
           const parsedStart = parseInt(startVal, 10);
           if (!isNaN(parsedStart)) {
             setUrlStartSeconds(parsedStart);
-            setPlayerTime(parsedStart); // Instantly seek original player to the target start time
+            setPlayerTime(parsedStart);
           }
         } else {
           setUrlStartSeconds(null);
@@ -3088,7 +3248,7 @@ export default function VideosPage() {
           setUrlEndSeconds(null);
         }
       } else {
-        console.warn(`[Deep Link] Video with ID/URL-snippet "${videoIdParam}" not found in videos list.`);
+        console.warn(`[Deep Link Sync] Video with ID/URL-snippet "${videoIdParam}" not found in videos list.`);
       }
     }
   }, [videos, videoIdParam, searchParams]);
