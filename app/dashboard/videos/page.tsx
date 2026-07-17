@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback, useId, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase, isUsingMock } from "@/lib/supabase";
 import { translations } from "@/lib/translations";
 import { 
   Video, Play, Trash2, UploadCloud, Monitor, Sparkles, AlertCircle, Eye, Clock, Volume2,
@@ -3738,6 +3738,24 @@ export default function VideosPage() {
           is_favorite: isFav
         }
       } : null);
+    }
+
+    if (isUsingMock) {
+      try {
+        await supabase
+          .from("documents")
+          .update({
+            metadata: {
+              ...video.metadata,
+              is_favorite: isFav
+            }
+          })
+          .eq("id", video.id);
+        console.log(`[Mock Mode] Video ${video.id} favorite updated in LocalStorage:`, isFav);
+      } catch (err) {
+        console.error("[Mock Mode] Failed to update favorite in LocalStorage:", err);
+      }
+      return;
     }
 
     try {
