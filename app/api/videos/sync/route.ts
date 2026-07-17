@@ -158,7 +158,7 @@ async function handleSync(request: Request) {
       try {
         // 1. Fetch RSS XML Feed from YouTube
         const response = await fetch(ytRssFeed, {
-          next: { revalidate: 3600 }, // Cache feed for 1 hour
+          cache: "no-store", // Bypass Next.js cache to ensure real-time uploads are synchronized immediately
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
           },
