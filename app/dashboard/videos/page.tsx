@@ -2657,7 +2657,7 @@ export default function VideosPage() {
     if (!hasTranscription) {
       const loadTranscription = async () => {
         try {
-          console.log(`[Dynamic Loader] Fetching transcription for video: ${activeStudyVideo.title}...`);
+          console.log(`[Dynamic Loader] Fetching transcription and translations for video: ${activeStudyVideo.title}...`);
           const { data, error } = await supabase
             .from("documents")
             .select("metadata")
@@ -2666,21 +2666,47 @@ export default function VideosPage() {
 
           if (error) throw error;
           
-          if (data?.metadata?.transcription) {
-            console.log(`[Dynamic Loader] Transcription loaded successfully for: ${activeStudyVideo.title}`);
-            const text = String(data.metadata.transcription);
-            const modelUsed = String(data.metadata.transcription_model || "Google Vertex AI Gemini 1.5 Pro");
+          if (data?.metadata) {
+            const metadata = data.metadata;
+            const text = metadata.transcription ? String(metadata.transcription) : "";
+            const modelUsed = String(metadata.transcription_model || "Google Vertex AI Gemini 1.5 Pro");
             
-            // Re-populate the transcriptionStates so that the UI updates instantly
-            setTranscriptionStates((prev) => ({
-              ...prev,
-              [activeStudyVideo.id]: {
-                text,
-                progress: 100,
-                transcribing: false,
-                error: null
-              }
-            }));
+            if (text) {
+              console.log(`[Dynamic Loader] Transcription loaded successfully for: ${activeStudyVideo.title}`);
+              // Re-populate the transcriptionStates so that the UI updates instantly
+              setTranscriptionStates((prev) => ({
+                ...prev,
+                [activeStudyVideo.id]: {
+                  text,
+                  progress: 100,
+                  transcribing: false,
+                  error: null
+                }
+              }));
+            }
+
+            // Also load any pre-existing translations into the translationsCache!
+            if (metadata.translations) {
+              console.log(`[Dynamic Loader] Translations loaded successfully for: ${activeStudyVideo.title}`);
+              const translationsObj = metadata.translations as Record<string, string>;
+              setTranslationsCache((prev) => {
+                const videoCache = prev[activeStudyVideo.id] || {};
+                const updatedCache = { ...videoCache };
+                for (const [lang, transText] of Object.entries(translationsObj)) {
+                  if (transText) {
+                    updatedCache[lang] = {
+                      text: String(transText),
+                      loading: false,
+                      error: null
+                    };
+                  }
+                }
+                return {
+                  ...prev,
+                  [activeStudyVideo.id]: updatedCache
+                };
+              });
+            }
             
             // Also store it back into activeStudyVideo metadata to keep local state accurate
             setActiveStudyVideo((prev) => {
@@ -2689,8 +2715,9 @@ export default function VideosPage() {
                   ...prev,
                   metadata: {
                     ...prev.metadata,
-                    transcription: text,
-                    transcription_model: modelUsed
+                    transcription: text || prev.metadata?.transcription,
+                    transcription_model: modelUsed || prev.metadata?.transcription_model,
+                    translations: metadata.translations || prev.metadata?.translations
                   }
                 };
               }
@@ -3264,8 +3291,7 @@ export default function VideosPage() {
           is_youtube:metadata->is_youtube,
           channel_title:metadata->channel_title,
           is_favorite:metadata->is_favorite,
-          is_old:metadata->is_old,
-          translations:metadata->translations
+          is_old:metadata->is_old
         `)
         .eq("type", "video");
       if (error) throw error;
@@ -3282,7 +3308,7 @@ export default function VideosPage() {
             channel_title: doc.channel_title,
             is_favorite: doc.is_favorite,
             is_old: doc.is_old,
-            translations: doc.translations
+            translations: undefined
           };
 
           let trans = undefined;
@@ -3432,33 +3458,6 @@ export default function VideosPage() {
         );
 
         setVideos(sortedData);
-
-        // Preload any existing translations from the database into the translationsCache
-        const preloadedTranslations: Record<string, Record<string, { text: string; loading: boolean; error: string | null }>> = {};
-        for (const v of sortedData) {
-          if (v.metadata?.translations) {
-            preloadedTranslations[v.id] = {};
-            for (const [lang, text] of Object.entries(v.metadata.translations)) {
-              if (text) {
-                preloadedTranslations[v.id][lang] = {
-                  text: String(text),
-                  loading: false,
-                  error: null
-                };
-              }
-            }
-          }
-        }
-        setTranslationsCache(prev => {
-          const updated = { ...prev };
-          for (const videoId of Object.keys(preloadedTranslations)) {
-            updated[videoId] = {
-              ...(updated[videoId] || {}),
-              ...preloadedTranslations[videoId]
-            };
-          }
-          return updated;
-        });
         
         // Execute immediate daemon check on load
         checkOldVideos(sortedData);
