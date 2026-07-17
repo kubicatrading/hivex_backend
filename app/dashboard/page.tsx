@@ -62,7 +62,9 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const { data, error } = await supabase.from("documents").select("*");
+        const { data, error } = await supabase
+          .from("documents")
+          .select("id, title, description, type, created_at");
         if (error) throw error;
         
         if (data) {

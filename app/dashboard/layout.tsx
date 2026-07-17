@@ -89,16 +89,16 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       try {
         const { data } = await supabase
           .from("documents")
-          .select("metadata, created_at")
+          .select("created_at, channel_title:metadata->channel_title")
           .eq("type", "video");
         
         if (data) {
           const uniqueChannels = new Set<string>(DEFAULT_CHANNELS);
           const maxDates: Record<string, string> = {};
           
-          data.forEach((doc: { created_at: string; metadata?: { channel_title?: string } }) => {
-            if (doc.metadata && doc.metadata.channel_title) {
-              const ch = doc.metadata.channel_title;
+          (data as unknown as Array<{ created_at: string; channel_title: string | null }>).forEach((doc) => {
+            if (doc.channel_title) {
+              const ch = doc.channel_title;
               // Clean up any dynamic (Mock Feed) suffixes so they map to the clean sidebar categories
               const cleanCh = ch.replace(/\s*\(Mock\s+Feed\)/i, "");
               if (cleanCh !== "HIVEX Demo") {

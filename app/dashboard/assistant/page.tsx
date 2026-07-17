@@ -246,8 +246,11 @@ export default function AssistantPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const accessToken = session?.access_token || "";
 
-      // Fetch all local documents from Supabase client (fully populated on the client-side)
-      const { data: localDocs } = await supabase.from("documents").select("*");
+      // Fetch all local documents from Supabase client (fully populated on the client-side, excluding heavy unused transcriptions)
+      const { data: localDocs } = await supabase
+        .from("documents")
+        .select("*")
+        .neq("type", "knowledge_transcription");
 
       // Convert local message format to history required by API route
       const apiHistory = messages.map(m => ({

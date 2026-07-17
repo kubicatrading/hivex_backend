@@ -55,7 +55,8 @@ export async function POST(request: Request) {
         } else {
           const { data, error } = await defaultSupabase
             .from("documents")
-            .select("*");
+            .select("*")
+            .neq("type", "knowledge_transcription");
           if (!error && data) {
             allDocs = data;
           }
@@ -63,7 +64,8 @@ export async function POST(request: Request) {
       } else if (userId) {
         const { data, error } = await supabaseClient
           .from("documents")
-          .select("*");
+          .select("*")
+          .neq("type", "knowledge_transcription");
         if (!error && data) {
           allDocs = data;
         } else if (error) {
