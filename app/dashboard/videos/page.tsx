@@ -3986,7 +3986,7 @@ export default function VideosPage() {
       // Fetch existing videos in the DB first to execute a smart sync (skip already synced & transcribed)
       const { data: existingDocs, error: fetchErr } = await supabase
         .from("documents")
-        .select("*")
+        .select("file_url")
         .eq("type", "video");
       if (fetchErr) throw fetchErr;
 
