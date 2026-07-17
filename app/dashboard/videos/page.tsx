@@ -3741,26 +3741,24 @@ export default function VideosPage() {
     }
 
     try {
-      const { data: list, error } = await supabase
-        .from("documents")
-        .select("metadata")
-        .eq("id", video.id);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-      if (error) throw error;
-      const data = list && list.length > 0 ? list[0] : null;
+      const response = await fetch("/api/videos/favorite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ videoId: video.id, isFavorite: isFav })
+      });
 
-      const updatedMetadata = {
-        ...(data?.metadata || {}),
-        is_favorite: isFav
-      };
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to update favorite");
+      }
 
-      const { error: updateError } = await supabase
-        .from("documents")
-        .update({ metadata: updatedMetadata })
-        .eq("id", video.id);
-
-      if (updateError) throw updateError;
-      console.log(`Video ${video.id} favorite updated successfully in Supabase:`, isFav);
+      console.log(`Video ${video.id} favorite updated successfully via API:`, isFav);
     } catch (err) {
       console.error("Failed to update favorite in Supabase:", err);
       // Revert state if error
@@ -4412,7 +4410,7 @@ export default function VideosPage() {
 
                   <div 
                     className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                      transcriptionExpanded ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+                      transcriptionExpanded ? "max-h-[50000px] opacity-100" : "max-h-0 opacity-0"
                     }`}
                   >
                     <div className="p-6 space-y-4 relative">
@@ -4588,7 +4586,7 @@ export default function VideosPage() {
  
                     <div 
                       className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                        summaryExpanded ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+                        summaryExpanded ? "max-h-[50000px] opacity-100" : "max-h-0 opacity-0"
                       }`}
                     >
                       <div className="p-6 relative select-text">
@@ -4690,7 +4688,7 @@ export default function VideosPage() {
 
                       <div 
                         className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                          chartsExpanded ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+                          chartsExpanded ? "max-h-[50000px] opacity-100" : "max-h-0 opacity-0"
                         }`}
                       >
                         <div className="p-6 relative select-text">
@@ -5254,7 +5252,7 @@ export default function VideosPage() {
 
                     <div 
                       className={`transition-all duration-300 ease-in-out overflow-hidden ${
-                        reportExpanded ? "max-h-[5000px] opacity-100" : "max-h-0 opacity-0"
+                        reportExpanded ? "max-h-[50000px] opacity-100" : "max-h-0 opacity-0"
                       }`}
                     >
                       <div className="p-6 relative select-text">

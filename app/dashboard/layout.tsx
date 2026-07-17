@@ -89,14 +89,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       try {
         const { data } = await supabase
           .from("documents")
-          .select("created_at, channel_title:metadata->channel_title")
+          .select("created_at, updated_at, channel_title:metadata->channel_title")
           .eq("type", "video");
         
         if (data) {
           const uniqueChannels = new Set<string>(DEFAULT_CHANNELS);
           const maxDates: Record<string, string> = {};
           
-          (data as unknown as Array<{ created_at: string; channel_title: string | null }>).forEach((doc) => {
+          (data as unknown as Array<{ created_at: string; updated_at?: string; channel_title: string | null }>).forEach((doc) => {
             if (doc.channel_title) {
               const ch = doc.channel_title;
               // Clean up any dynamic (Mock Feed) suffixes so they map to the clean sidebar categories
@@ -104,10 +104,11 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
               if (cleanCh !== "HIVEX Demo") {
                 uniqueChannels.add(cleanCh);
                 
-                // Track maximum creation date
+                // Track maximum update date (or creation date as fallback) representing when video arrived in HIVEX
                 const currentMax = maxDates[cleanCh];
-                if (!currentMax || new Date(doc.created_at) > new Date(currentMax)) {
-                  maxDates[cleanCh] = doc.created_at;
+                const itemDate = doc.updated_at || doc.created_at;
+                if (!currentMax || new Date(itemDate) > new Date(currentMax)) {
+                  maxDates[cleanCh] = itemDate;
                 }
               }
             }
@@ -126,54 +127,61 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Load last visited dates from localStorage on mount or when profile loads
+  // Unified, atomic synchronization of last visited channels to avoid any race conditions
   useEffect(() => {
-    if (typeof window !== "undefined" && profile?.email) {
-      try {
-        const key = `hivex_channels_last_visited_${profile.email}`;
-        const saved = localStorage.getItem(key);
-        if (saved) {
-          setLastVisitedDates(JSON.parse(saved));
-        } else {
-          // Fallback/Legacy migration: see if there's a non-scoped old key
-          const legacySaved = localStorage.getItem("hivex_channels_last_visited");
-          if (legacySaved) {
-            setLastVisitedDates(JSON.parse(legacySaved));
-            localStorage.setItem(key, legacySaved);
-          } else {
-            // First time login for this user: set all channels to read by default (preventing false-positive red badges on old videos)
-            const nowStr = new Date().toISOString();
-            const initial: Record<string, string> = {};
-            channels.forEach(ch => {
-              initial[ch] = nowStr;
-            });
-            setLastVisitedDates(initial);
-            localStorage.setItem(key, JSON.stringify(initial));
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load last visited channels:", err);
-      }
-    }
-  }, [profile?.email, channels]);
+    if (typeof window === "undefined" || !profile?.email) return;
 
-  // Track and update visited channel
-  useEffect(() => {
-    if (pathname === "/dashboard/videos" && profile?.email) {
-      const channelParam = searchParams.get("channel") || "Andrei Jikh";
-      
-      // Update last visited date for this channel
-      setLastVisitedDates((prev) => {
-        const nowStr = new Date().toISOString();
-        const updated = { ...prev, [channelParam]: nowStr };
-        if (typeof window !== "undefined") {
-          const key = `hivex_channels_last_visited_${profile.email}`;
-          localStorage.setItem(key, JSON.stringify(updated));
+    try {
+      const key = `hivex_channels_last_visited_${profile.email}`;
+      const saved = localStorage.getItem(key);
+      let parsedSaved: Record<string, string> = {};
+
+      if (saved) {
+        try {
+          parsedSaved = JSON.parse(saved);
+        } catch (e) {
+          parsedSaved = {};
         }
-        return updated;
+      } else {
+        // Fallback/Legacy migration: see if there's a non-scoped old key
+        const legacySaved = localStorage.getItem("hivex_channels_last_visited");
+        if (legacySaved) {
+          try {
+            parsedSaved = JSON.parse(legacySaved);
+            localStorage.setItem(key, legacySaved);
+          } catch (e) {}
+        }
+      }
+
+      // Initialize missing channels with a timestamp of 7 days ago to show recent activity
+      let modified = false;
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      channels.forEach(ch => {
+        if (!parsedSaved[ch]) {
+          parsedSaved[ch] = sevenDaysAgo;
+          modified = true;
+        }
       });
+
+      // If we are currently on the videos page, mark the active channel as visited immediately
+      if (pathname === "/dashboard/videos") {
+        const channelParam = searchParams.get("channel") || "Andrei Jikh";
+        const nowStr = new Date().toISOString();
+        if (parsedSaved[channelParam] !== nowStr) {
+          parsedSaved[channelParam] = nowStr;
+          modified = true;
+        }
+      }
+
+      if (modified) {
+        localStorage.setItem(key, JSON.stringify(parsedSaved));
+      }
+
+      setLastVisitedDates(parsedSaved);
+    } catch (err) {
+      console.error("Failed to sync last visited channels:", err);
     }
-  }, [pathname, searchParams, profile?.email]);
+  }, [profile?.email, channels, pathname, searchParams]);
 
   // Check auth session on load
   useEffect(() => {
@@ -416,7 +424,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                       const lastVisited = lastVisitedDates[ch];
                       const hasNewVideos = maxDate && (!lastVisited || new Date(maxDate) > new Date(lastVisited));
 
-                      let dotClass = "w-1.5 h-1.5 rounded-full transition-all duration-150 ";
+                      let dotClass = "w-1.5 h-1.5 inline-block flex-shrink-0 rounded-full transition-all duration-150 ";
                       if (isActive) {
                         dotClass += "bg-sky-400 shadow-md shadow-sky-400/50";
                       } else if (hasNewVideos) {

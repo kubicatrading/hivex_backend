@@ -134,15 +134,14 @@ async function run() {
 
   console.log(`[Backfill Snapshots] Found ${videos.length} video documents.`);
 
-  for (const video of videos) {
+  console.log(`[Backfill Snapshots] Pre-filtering videos by existing snapshots in Supabase Storage...`);
+  const videosWithMissingSnapshots: { video: any, missingCharts: any[], parsedCharts: any[] }[] = [];
+
+  await Promise.all(videos.map(async (video) => {
     const videoUrl = video.file_url;
-    if (!videoUrl) continue;
+    if (!videoUrl) return;
 
-    console.log(`\n--------------------------------------------------------`);
-    console.log(`[Backfill Snapshots] Processing video: "${video.title}"`);
-    console.log(`[Backfill Snapshots] URL: ${videoUrl}`);
-
-    // Gather and combine all textual analysis contents for this video to scan for charts
+    // Gather and combine all textual analysis contents
     const matchingAnalysis = analyses.find(a => a.file_url === videoUrl);
     const matchingSummary = summaries.find(s => s.file_url === videoUrl);
     const matchingChartsDoc = chartsDocs.find(c => c.file_url === videoUrl);
@@ -157,12 +156,41 @@ async function run() {
     if (video.description) textBody += "\n" + video.description;
 
     const parsedCharts = parseChartTimestamps(textBody);
-    if (parsedCharts.length === 0) {
-      console.log(`[Backfill Snapshots] No charts detected for this video, skipping.`);
-      continue;
-    }
+    if (parsedCharts.length === 0) return;
 
-    console.log(`[Backfill Snapshots] Found ${parsedCharts.length} chart timestamps to extract with +5s offset:`, parsedCharts.map(c => c.timestamp));
+    const resolvedVideoId = extractYoutubeIdHelper(videoUrl, video.id) || video.id;
+    try {
+      const { data: storageFiles, error: storageError } = await supabaseClient.storage
+        .from("snapshots")
+        .list(resolvedVideoId);
+
+      if (storageError) {
+        console.error(`[Backfill Snapshots] Error listing storage files for video ${resolvedVideoId}:`, storageError.message);
+      }
+
+      const existingNames = new Set((storageFiles || []).map((f) => f.name));
+      const missingCharts = parsedCharts.filter(c => !existingNames.has(`${c.seconds}.jpg`));
+
+      if (missingCharts.length > 0) {
+        videosWithMissingSnapshots.push({
+          video,
+          missingCharts,
+          parsedCharts
+        });
+      }
+    } catch (e) {
+      console.error(`[Backfill Snapshots] Failed to check storage for ${resolvedVideoId}:`, e);
+    }
+  }));
+
+  console.log(`[Backfill Snapshots] Pre-filtering complete. Found ${videosWithMissingSnapshots.length} videos needing snapshot extraction out of ${videos.length} total.`);
+
+  for (const { video, missingCharts, parsedCharts } of videosWithMissingSnapshots) {
+    const videoUrl = video.file_url;
+    console.log(`\n--------------------------------------------------------`);
+    console.log(`[Backfill Snapshots] Processing video: "${video.title}"`);
+    console.log(`[Backfill Snapshots] URL: ${videoUrl}`);
+    console.log(`[Backfill Snapshots] Needs ${missingCharts.length} missing snapshots of ${parsedCharts.length} total:`, missingCharts.map(c => c.timestamp));
 
     const resolvedVideoId = extractYoutubeIdHelper(videoUrl, video.id) || video.id;
     const localDir = path.join(process.cwd(), "public", "snapshots", resolvedVideoId);
@@ -192,32 +220,27 @@ async function run() {
 
     let streamUrl = await getStreamUrl();
 
-    for (const chart of parsedCharts) {
+    for (const chart of missingCharts) {
       const outputPath = path.join(localDir, `${chart.seconds}.jpg`);
       const offsetSeconds = chart.seconds + 5;
 
       console.log(`[Backfill Snapshots] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s + 5s offset = ${offsetSeconds}s)...`);
       let success = false;
-      if (fs.existsSync(outputPath)) {
-        console.log(`[Backfill Snapshots] Snapshot at ${chart.timestamp} (${chart.seconds}s) already exists locally, skipping extraction.`);
+      try {
+        const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+        await runCmd(ffmpegCmd);
+        console.log(`[Backfill Snapshots] Saved locally: ${chart.seconds}.jpg`);
         success = true;
-      } else {
+      } catch (err) {
+        console.warn(`[Backfill Snapshots] Ffmpeg failed. Re-resolving stream URL and retrying...`);
         try {
+          streamUrl = await getStreamUrl();
           const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
           await runCmd(ffmpegCmd);
-          console.log(`[Backfill Snapshots] Saved locally: ${chart.seconds}.jpg`);
+          console.log(`[Backfill Snapshots] Saved locally on retry: ${chart.seconds}.jpg`);
           success = true;
-        } catch (err) {
-          console.warn(`[Backfill Snapshots] Ffmpeg failed. Re-resolving stream URL and retrying...`);
-          try {
-            streamUrl = await getStreamUrl();
-            const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
-            await runCmd(ffmpegCmd);
-            console.log(`[Backfill Snapshots] Saved locally on retry: ${chart.seconds}.jpg`);
-            success = true;
-          } catch (retryErr) {
-            console.error(`[Backfill Snapshots] Error processing snapshot for ${chart.seconds}s on retry:`, retryErr);
-          }
+        } catch (retryErr) {
+          console.error(`[Backfill Snapshots] Error processing snapshot for ${chart.seconds}s on retry:`, retryErr);
         }
       }
 
