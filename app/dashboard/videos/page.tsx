@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/set-state-in-effect */
 
 import { useState, useEffect, useRef, useCallback, useId, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { translations } from "@/lib/translations";
 import { 
@@ -3067,6 +3067,7 @@ export default function VideosPage() {
   */
 
   const searchParams = useSearchParams();
+  const router = useRouter();
   const filterChannel = searchParams.get("channel");
   const filterFavorite = searchParams.get("favorite") === "true";
   const videoIdParam = searchParams.get("id") || searchParams.get("video");
@@ -3210,6 +3211,14 @@ export default function VideosPage() {
         if (!isNaN(parsedEnd)) {
           setUrlEndSeconds(parsedEnd);
         }
+      }
+
+      // Automatically update the 'channel' parameter in the URL query so the left sidebar matches the channel of the loaded video
+      if (doc.channel_title && !searchParams.get("channel") && typeof window !== "undefined") {
+        console.log(`[Deep Link] Syncing URL channel query param with video channel title: ${doc.channel_title}`);
+        const params = new URLSearchParams(window.location.search);
+        params.set("channel", doc.channel_title);
+        router.replace(`${window.location.pathname}?${params.toString()}`);
       }
     };
 
