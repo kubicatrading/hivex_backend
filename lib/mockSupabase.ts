@@ -343,6 +343,26 @@ class MockSupabase {
     const userId = session?.user?.id || "demo-user-id";
     const docs = this.getDocuments(userId);
 
+    const getDocValue = (doc: MockDocument, col: string) => {
+      if (col.includes("->>")) {
+        const parts = col.split("->>");
+        let curr: any = doc;
+        for (const p of parts) {
+          curr = curr?.[p];
+        }
+        return curr;
+      }
+      if (col.includes("->")) {
+        const parts = col.split("->");
+        let curr: any = doc;
+        for (const p of parts) {
+          curr = curr?.[p];
+        }
+        return curr;
+      }
+      return doc[col];
+    };
+
     return {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       select: (_query: string = "*") => {
@@ -358,14 +378,54 @@ class MockSupabase {
           builder.currentDocs = currentDocs;
 
           builder.eq = function(column: string, value: any) {
-            const filtered = this.currentDocs.filter((d: MockDocument) => d[column] === value);
+            const filtered = this.currentDocs.filter((d: MockDocument) => {
+              const val = getDocValue(d, column);
+              if (typeof val === "boolean" && typeof value === "string") {
+                return String(val) === value;
+              }
+              if (typeof val === "string" && typeof value === "boolean") {
+                return val === String(value);
+              }
+              return val === value;
+            });
+            return createBuilder(filtered);
+          };
+
+          builder.neq = function(column: string, value: any) {
+            const filtered = this.currentDocs.filter((d: MockDocument) => {
+              const val = getDocValue(d, column);
+              return val !== value;
+            });
+            return createBuilder(filtered);
+          };
+
+          builder.like = function(column: string, pattern: string) {
+            const regexStr = pattern.replace(/%/g, ".*");
+            const regex = new RegExp(`^${regexStr}$`, "i");
+            const filtered = this.currentDocs.filter((d: MockDocument) => {
+              const val = getDocValue(d, column);
+              return typeof val === "string" && regex.test(val);
+            });
+            return createBuilder(filtered);
+          };
+
+          builder.limit = function(count: number) {
+            const limited = this.currentDocs.slice(0, count);
+            return createBuilder(limited);
+          };
+
+          builder.in = function(column: string, values: any[]) {
+            const filtered = this.currentDocs.filter((d: MockDocument) => {
+              const val = getDocValue(d, column);
+              return values.includes(val);
+            });
             return createBuilder(filtered);
           };
 
           builder.order = function(column: string, { ascending = true } = {}) {
             const sorted = [...this.currentDocs].sort((a: MockDocument, b: MockDocument) => {
-              const valA = a[column];
-              const valB = b[column];
+              const valA = getDocValue(a, column);
+              const valB = getDocValue(b, column);
               if (valA === undefined || valB === undefined || valA === null || valB === null) return 0;
               if (valA < valB) return ascending ? -1 : 1;
               if (valA > valB) return ascending ? 1 : -1;
@@ -375,6 +435,16 @@ class MockSupabase {
           };
 
           builder.single = function() {
+            const singlePromise = Promise.resolve({
+              data: table === "profiles"
+                ? { id: userId, email: session?.user?.email || "demo@hivex.com", full_name: session?.user?.user_metadata?.full_name || "Alex Hivex" }
+                : this.currentDocs[0] || null,
+              error: null
+            });
+            return singlePromise;
+          };
+
+          builder.maybeSingle = function() {
             const singlePromise = Promise.resolve({
               data: table === "profiles"
                 ? { id: userId, email: session?.user?.email || "demo@hivex.com", full_name: session?.user?.user_metadata?.full_name || "Alex Hivex" }
@@ -435,61 +505,123 @@ class MockSupabase {
       },
 
       delete: () => {
-        return {
-          eq: async (column: string, value: string) => {
-            // Guarantee absolute persistence of knowledge base items in offline/mock mode
-            const updatedDocs = docs.filter((d: MockDocument) => {
-              const matchesFilter = d[column] === value;
-              return !matchesFilter;
-            });
-            this.setDocuments(userId, updatedDocs);
-
-            if (typeof window !== "undefined") {
-              const keys: string[] = [];
-              for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key) {
-                  keys.push(key);
-                }
+        const filters: { column: string; value: any; type: "eq" | "in" }[] = [];
+        const executeDelete = () => {
+          let updatedDocs = [...docs];
+          updatedDocs = updatedDocs.filter((d: MockDocument) => {
+            const matchesAllFilters = filters.every(f => {
+              const val = getDocValue(d, f.column);
+              if (f.type === "eq") {
+                return val === f.value;
               }
-              for (const key of keys) {
-                if (key.startsWith("hivex_docs_") && key !== "hivex_docs_global") {
-                  try {
-                    const dataStr = localStorage.getItem(key);
-                    if (dataStr) {
-                      const parsed = JSON.parse(dataStr) as MockDocument[];
-                      if (Array.isArray(parsed)) {
-                        const filtered = parsed.filter((d: MockDocument) => {
-                          const matchesFilter = d[column] === value;
-                          return !matchesFilter;
+              if (f.type === "in") {
+                return Array.isArray(f.value) && f.value.includes(val);
+              }
+              return false;
+            });
+            return !matchesAllFilters;
+          });
+
+          this.setDocuments(userId, updatedDocs);
+
+          if (typeof window !== "undefined") {
+            const keys: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key) {
+                keys.push(key);
+              }
+            }
+            for (const key of keys) {
+              if (key.startsWith("hivex_docs_") && key !== "hivex_docs_global") {
+                try {
+                  const dataStr = localStorage.getItem(key);
+                  if (dataStr) {
+                    const parsed = JSON.parse(dataStr) as MockDocument[];
+                    if (Array.isArray(parsed)) {
+                      const filtered = parsed.filter((d: MockDocument) => {
+                        const matchesAll = filters.every(f => {
+                          const val = getDocValue(d, f.column);
+                          if (f.type === "eq") {
+                            return val === f.value;
+                          }
+                          if (f.type === "in") {
+                            return Array.isArray(f.value) && f.value.includes(val);
+                          }
+                          return false;
                         });
-                        localStorage.setItem(key, JSON.stringify(filtered));
-                      }
+                        return !matchesAll;
+                      });
+                      localStorage.setItem(key, JSON.stringify(filtered));
                     }
-                  } catch (e) {
-                    console.warn("[MockSupabase Delete] Error filtering user key:", key, e);
                   }
+                } catch (e) {
+                  console.warn("[MockSupabase Delete] Error filtering user key:", key, e);
                 }
               }
             }
-            return { data: null, error: null };
           }
+          return { data: null, error: null };
         };
+
+        const resultPromise = Promise.resolve().then(executeDelete);
+        const builder = Object.create(resultPromise);
+
+        builder.eq = function(column: string, value: any) {
+          filters.push({ column, value, type: "eq" });
+          const p = Promise.resolve().then(executeDelete);
+          Object.setPrototypeOf(this, p);
+          return this;
+        };
+
+        builder.in = function(column: string, values: any[]) {
+          filters.push({ column, value: values, type: "in" });
+          const p = Promise.resolve().then(executeDelete);
+          Object.setPrototypeOf(this, p);
+          return this;
+        };
+
+        builder.then = function(onfulfilled?: any, onrejected?: any) {
+          const p = Promise.resolve().then(executeDelete);
+          return p.then(onfulfilled, onrejected);
+        };
+
+        return builder;
       },
 
       update: (updateData: Record<string, unknown>) => {
-        return {
-          eq: async (column: string, value: string) => {
-            const updatedDocs = docs.map((d: MockDocument) => {
-              if (d[column] === value) {
-                return { ...d, ...updateData };
-              }
-              return d;
+        const filters: { column: string; value: any }[] = [];
+        const executeUpdate = () => {
+          const updatedDocs = docs.map((d: MockDocument) => {
+            const matchesAllFilters = filters.every(f => {
+              const val = getDocValue(d, f.column);
+              return val === f.value;
             });
-            this.setDocuments(userId, updatedDocs);
-            return { data: null, error: null };
-          }
+            if (matchesAllFilters) {
+              return { ...d, ...updateData };
+            }
+            return d;
+          });
+          this.setDocuments(userId, updatedDocs);
+          return { data: null, error: null };
         };
+
+        const resultPromise = Promise.resolve().then(executeUpdate);
+        const builder = Object.create(resultPromise);
+
+        builder.eq = function(column: string, value: any) {
+          filters.push({ column, value });
+          const p = Promise.resolve().then(executeUpdate);
+          Object.setPrototypeOf(this, p);
+          return this;
+        };
+
+        builder.then = function(onfulfilled?: any, onrejected?: any) {
+          const p = Promise.resolve().then(executeUpdate);
+          return p.then(onfulfilled, onrejected);
+        };
+
+        return builder;
       }
     };
   }

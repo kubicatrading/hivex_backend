@@ -1905,6 +1905,10 @@ export default function VideosPage() {
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number>(-1);
   const [totalSentences, setTotalSentences] = useState<number>(0);
   const [sentenceChunks, setSentenceChunks] = useState<string[]>([]);
+  const [reportActiveSentenceIndex, setReportActiveSentenceIndex] = useState<number>(-1);
+  const [reportTotalSentences, setReportTotalSentences] = useState<number>(0);
+  const [reportSentenceChunks, setReportSentenceChunks] = useState<string[]>([]);
+  const [activeAudioMode, setActiveAudioMode] = useState<'summary' | 'report'>('summary');
   const [audioError, setAudioError] = useState<string | null>(null);
 
   // Voice selection states (premium Gemini voices)
@@ -1922,6 +1926,7 @@ export default function VideosPage() {
   
   // Store preloaded Blob URLs to enable background playback without network requests
   const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
+  const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
 
   const clearPreloadedBlobUrls = () => {
     Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
@@ -1932,21 +1937,31 @@ export default function VideosPage() {
       }
     });
     preloadedBlobUrlsRef.current = {};
+
+    Object.values(reportPreloadedBlobUrlsRef.current).forEach((url) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn("Error revoking blob URL:", err);
+      }
+    });
+    reportPreloadedBlobUrlsRef.current = {};
   };
 
-  const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string) => {
+  const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string, isReport = false) => {
     if (index < 0 || index >= chunks.length) return;
-    if (preloadedBlobUrlsRef.current[index]) return; // Already preloaded!
+    const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
+    if (blobRef.current[index]) return; // Already preloaded!
 
     try {
       const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
-      console.log(`[Gemini Audio Preloader] Prefetching sentence ${index} as local Blob...`);
+      console.log(`[Gemini Audio Preloader] Prefetching ${isReport ? 'report' : 'summary'} sentence ${index} as local Blob...`);
       const res = await fetch(audioSrc);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
-      preloadedBlobUrlsRef.current[index] = blobUrl;
-      console.log(`[Gemini Audio Preloader] Sentence ${index} successfully preloaded as local Blob URL.`);
+      blobRef.current[index] = blobUrl;
+      console.log(`[Gemini Audio Preloader] ${isReport ? 'report' : 'summary'} Sentence ${index} successfully preloaded as local Blob URL.`);
     } catch (err) {
       console.warn(`[Gemini Audio Preloader] Failed to preload sentence ${index}:`, err);
     }
@@ -1982,12 +1997,18 @@ export default function VideosPage() {
 
   const playGeminiSentence = (index: number) => {
     setAudioError(null); // Reset audio error on any new sentence attempt
-    const chunks = sentenceChunksRef.current;
+    const mode = activeAudioModeRef.current;
+    const isReport = mode === 'report';
+    const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+    const activeIndexRef = isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef;
+    const setActiveIndex = isReport ? setReportActiveSentenceIndex : setActiveSentenceIndex;
+    const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
+
     if (index < 0 || index >= chunks.length) {
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
-      setActiveSentenceIndex(-1);
-      activeSentenceIndexRef.current = -1;
+      setActiveIndex(-1);
+      activeIndexRef.current = -1;
       if (typeof window !== "undefined" && "mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "none";
       }
@@ -1996,8 +2017,8 @@ export default function VideosPage() {
 
     setIsPlayingAudio(true);
     setIsPausedAudio(false);
-    setActiveSentenceIndex(index);
-    activeSentenceIndexRef.current = index;
+    setActiveIndex(index);
+    activeIndexRef.current = index;
 
     // Retrieve or initialize the single, persistent Audio element (unlocked by user gesture on Play)
     if (!activeAudioRef.current && domAudioRef.current) {
@@ -2016,7 +2037,7 @@ export default function VideosPage() {
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
     
     // Check if we have a preloaded Blob URL for this sentence
-    let audioSrc = preloadedBlobUrlsRef.current[index];
+    let audioSrc = blobRef.current[index];
     if (!audioSrc) {
       console.log(`[Gemini Audio Queue] No preloaded Blob URL found for sentence ${index}, loading on-demand`);
       audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
@@ -2036,11 +2057,9 @@ export default function VideosPage() {
       if (!isPlayingAudioRef.current) return;
       
       // CRITICAL GUARD: Ensure we only advance if the sentence that just finished
-      // is indeed the currently active sentence. This completely prevents "ghost" or
-      // delayed onended events from jumping backwards or repeating old sentences
-      // after a manual seek or skipping action.
-      if (index !== activeSentenceIndexRef.current) {
-        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onended event for sentence ${index} because active index is now ${activeSentenceIndexRef.current}`);
+      // is indeed the currently active sentence.
+      if (index !== activeIndexRef.current) {
+        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onended event for sentence ${index} because active index is now ${activeIndexRef.current}`);
         return;
       }
       
@@ -2050,8 +2069,8 @@ export default function VideosPage() {
       } else {
         setIsPlayingAudio(false);
         setIsPausedAudio(false);
-        setActiveSentenceIndex(-1);
-        activeSentenceIndexRef.current = -1;
+        setActiveIndex(-1);
+        activeIndexRef.current = -1;
         if (typeof window !== "undefined" && "mediaSession" in navigator) {
           navigator.mediaSession.playbackState = "none";
         }
@@ -2059,8 +2078,8 @@ export default function VideosPage() {
     };
 
     audio.onerror = (e) => {
-      if (index !== activeSentenceIndexRef.current) {
-        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onerror event for sentence ${index} because active index is now ${activeSentenceIndexRef.current}`);
+      if (index !== activeIndexRef.current) {
+        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onerror event for sentence ${index} because active index is now ${activeIndexRef.current}`);
         return;
       }
       console.error("[Gemini Audio Player Error] Failed to play audio URL:", index, e);
@@ -2094,8 +2113,12 @@ export default function VideosPage() {
     // Update Media Session API for Lock Screen metadata and controls
     if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
       try {
+        const trackTitle = isReport 
+          ? (selectedLanguage === "es" ? "Informe de Inversión" : "Investment Report")
+          : (selectedLanguage === "es" ? "Resumen Detallado" : "Detailed Summary");
+
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: selectedVideo.title,
+          title: `${selectedVideo.title} - ${trackTitle}`,
           artist: selectedLanguage === "es" 
             ? `Frase ${index + 1} de ${chunks.length}` 
             : selectedLanguage === "de"
@@ -2123,14 +2146,14 @@ export default function VideosPage() {
         });
 
         navigator.mediaSession.setActionHandler("previoustrack", () => {
-          const prevIdx = activeSentenceIndexRef.current - 1;
+          const prevIdx = activeIndexRef.current - 1;
           if (prevIdx >= 0) {
             playGeminiSentence(prevIdx);
           }
         });
 
         navigator.mediaSession.setActionHandler("nexttrack", () => {
-          const nextIdx = activeSentenceIndexRef.current + 1;
+          const nextIdx = activeIndexRef.current + 1;
           if (nextIdx < chunks.length) {
             playGeminiSentence(nextIdx);
           }
@@ -2141,13 +2164,11 @@ export default function VideosPage() {
     }
 
     // Prefetch subsequent sentences in the background as local Blob URLs.
-    // By preloading future chunks as Blobs, we bypass Safari's background network block,
-    // allowing flawless, uninterrupted track-to-track transitions when the screen is locked/black.
     const prefetchWindowSize = 5;
     for (let w = 1; w <= prefetchWindowSize; w++) {
       const nextIdx = index + w;
       if (nextIdx < chunks.length) {
-        preloadSentenceBlob(nextIdx, chunks, voiceName);
+        preloadSentenceBlob(nextIdx, chunks, voiceName, isReport);
       }
     }
   };
@@ -2169,6 +2190,9 @@ export default function VideosPage() {
   const activeSentenceIndexRef = useRef<number>(-1);
   const playbackRateRef = useRef<number>(1.0);
   const sentenceChunksRef = useRef<string[]>([]);
+  const reportActiveSentenceIndexRef = useRef<number>(-1);
+  const reportSentenceChunksRef = useRef<string[]>([]);
+  const activeAudioModeRef = useRef<'summary' | 'report'>('summary');
 
   useEffect(() => {
     isPlayingAudioRef.current = isPlayingAudio;
@@ -2183,13 +2207,22 @@ export default function VideosPage() {
   }, [activeSentenceIndex]);
 
   useEffect(() => {
+    reportActiveSentenceIndexRef.current = reportActiveSentenceIndex;
+  }, [reportActiveSentenceIndex]);
+
+  useEffect(() => {
+    activeAudioModeRef.current = activeAudioMode;
+  }, [activeAudioMode]);
+
+  useEffect(() => {
     playbackRateRef.current = playbackRate;
   }, [playbackRate]);
 
-  // TTS playback tracking state and estimated duration calculations
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // TTS playback tracking state and estimated duration calculations for Summary and Report
+  const [summaryElapsedSeconds, setSummaryElapsedSeconds] = useState(0);
+  const [reportElapsedSeconds, setReportElapsedSeconds] = useState(0);
 
-  const chunkStarts = useMemo(() => {
+  const summaryChunkStarts = useMemo(() => {
     if (sentenceChunks.length === 0) return [];
     const starts: number[] = [];
     let current = 0;
@@ -2201,7 +2234,19 @@ export default function VideosPage() {
     return starts;
   }, [sentenceChunks]);
 
-  const totalDuration = useMemo(() => {
+  const reportChunkStarts = useMemo(() => {
+    if (reportSentenceChunks.length === 0) return [];
+    const starts: number[] = [];
+    let current = 0;
+    reportSentenceChunks.forEach(chunk => {
+      starts.push(current);
+      const wordCount = chunk.split(/\s+/).filter(Boolean).length;
+      current += Math.max(1.5, wordCount / 2.5);
+    });
+    return starts;
+  }, [reportSentenceChunks]);
+
+  const summaryTotalDuration = useMemo(() => {
     if (sentenceChunks.length === 0) return 0;
     let total = 0;
     sentenceChunks.forEach(chunk => {
@@ -2211,28 +2256,55 @@ export default function VideosPage() {
     return total;
   }, [sentenceChunks]);
 
+  const reportTotalDuration = useMemo(() => {
+    if (reportSentenceChunks.length === 0) return 0;
+    let total = 0;
+    reportSentenceChunks.forEach(chunk => {
+      const wordCount = chunk.split(/\s+/).filter(Boolean).length;
+      total += Math.max(1.5, wordCount / 2.5);
+    });
+    return total;
+  }, [reportSentenceChunks]);
+
   useEffect(() => {
-    if (activeSentenceIndex >= 0 && chunkStarts[activeSentenceIndex] !== undefined) {
-      setElapsedSeconds(chunkStarts[activeSentenceIndex]);
+    if (activeSentenceIndex >= 0 && summaryChunkStarts[activeSentenceIndex] !== undefined) {
+      setSummaryElapsedSeconds(summaryChunkStarts[activeSentenceIndex]);
     } else if (activeSentenceIndex === -1) {
-      setElapsedSeconds(0);
+      setSummaryElapsedSeconds(0);
     }
-  }, [activeSentenceIndex, chunkStarts]);
+  }, [activeSentenceIndex, summaryChunkStarts]);
+
+  useEffect(() => {
+    if (reportActiveSentenceIndex >= 0 && reportChunkStarts[reportActiveSentenceIndex] !== undefined) {
+      setReportElapsedSeconds(reportChunkStarts[reportActiveSentenceIndex]);
+    } else if (reportActiveSentenceIndex === -1) {
+      setReportElapsedSeconds(0);
+    }
+  }, [reportActiveSentenceIndex, reportChunkStarts]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isPlayingAudio && !isPausedAudio) {
       timer = setInterval(() => {
-        setElapsedSeconds(prev => {
-          if (prev < totalDuration) {
-            return prev + 1;
-          }
-          return prev;
-        });
+        if (activeAudioMode === 'summary') {
+          setSummaryElapsedSeconds(prev => {
+            if (prev < summaryTotalDuration) {
+              return prev + 1;
+            }
+            return prev;
+          });
+        } else {
+          setReportElapsedSeconds(prev => {
+            if (prev < reportTotalDuration) {
+              return prev + 1;
+            }
+            return prev;
+          });
+        }
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isPlayingAudio, isPausedAudio, totalDuration]);
+  }, [isPlayingAudio, isPausedAudio, activeAudioMode, summaryTotalDuration, reportTotalDuration]);
 
   const formatElapsed = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -2402,7 +2474,12 @@ export default function VideosPage() {
   }, [activeStudyVideo]);
 
   const startAudioSummary = () => {
-    const chunks = sentenceChunksRef.current;
+    const mode = activeAudioModeRef.current;
+    const isReport = mode === 'report';
+    const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+    const activeIndexRef = isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef;
+    const setActiveIndex = isReport ? setReportActiveSentenceIndex : setActiveSentenceIndex;
+
     if (chunks.length === 0) return;
 
     // Stop any active audio
@@ -2412,12 +2489,12 @@ export default function VideosPage() {
     setIsPlayingAudio(true);
     setIsPausedAudio(false);
 
-    const startIdx = activeSentenceIndexRef.current >= 0 && activeSentenceIndexRef.current < chunks.length
-      ? activeSentenceIndexRef.current
+    const startIdx = activeIndexRef.current >= 0 && activeIndexRef.current < chunks.length
+      ? activeIndexRef.current
       : 0;
 
-    setActiveSentenceIndex(startIdx);
-    activeSentenceIndexRef.current = startIdx;
+    setActiveIndex(startIdx);
+    activeIndexRef.current = startIdx;
 
     playGeminiSentence(startIdx);
   };
@@ -2443,7 +2520,9 @@ export default function VideosPage() {
         console.error("Failed to resume audio:", err);
       });
     } else {
-      playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      const mode = activeAudioModeRef.current;
+      const activeIndexRef = mode === 'summary' ? activeSentenceIndexRef : reportActiveSentenceIndexRef;
+      playGeminiSentence(activeIndexRef.current >= 0 ? activeIndexRef.current : 0);
     }
     if (typeof window !== "undefined" && "mediaSession" in navigator) {
       navigator.mediaSession.playbackState = "playing";
@@ -2459,8 +2538,47 @@ export default function VideosPage() {
     setIsPausedAudio(false);
     setActiveSentenceIndex(-1);
     activeSentenceIndexRef.current = -1;
+    setReportActiveSentenceIndex(-1);
+    reportActiveSentenceIndexRef.current = -1;
     if (typeof window !== "undefined" && "mediaSession" in navigator) {
       navigator.mediaSession.playbackState = "none";
+    }
+  };
+
+  const toggleAudioTrack = (mode: 'summary' | 'report') => {
+    const isCurrentlyActiveMode = activeAudioMode === mode;
+    
+    if (isCurrentlyActiveMode) {
+      if (isPlayingAudio && !isPausedAudio) {
+        pauseAudio();
+      } else if (isPausedAudio) {
+        resumeAudio();
+      } else {
+        setActiveAudioMode(mode);
+        activeAudioModeRef.current = mode;
+        startAudioSummary();
+      }
+    } else {
+      setActiveAudioMode(mode);
+      activeAudioModeRef.current = mode;
+      
+      stopGeminiAudio();
+      setIsPlayingAudio(true);
+      setIsPausedAudio(false);
+      
+      const isReport = mode === 'report';
+      const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+      const activeIndexRef = isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef;
+      const setActiveIndex = isReport ? setReportActiveSentenceIndex : setActiveSentenceIndex;
+      
+      const startIdx = activeIndexRef.current >= 0 && activeIndexRef.current < chunks.length
+        ? activeIndexRef.current
+        : 0;
+        
+      setActiveIndex(startIdx);
+      activeIndexRef.current = startIdx;
+      
+      playGeminiSentence(startIdx);
     }
   };
 
@@ -2468,9 +2586,28 @@ export default function VideosPage() {
     const chunks = sentenceChunksRef.current;
     if (chunks.length === 0) return;
 
+    setActiveAudioMode('summary');
+    activeAudioModeRef.current = 'summary';
+
     const targetIdx = Math.max(0, Math.min(index, chunks.length - 1));
     setActiveSentenceIndex(targetIdx);
     activeSentenceIndexRef.current = targetIdx;
+
+    if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
+      playGeminiSentence(targetIdx);
+    }
+  };
+
+  const handleReportSeek = (index: number) => {
+    const chunks = reportSentenceChunksRef.current;
+    if (chunks.length === 0) return;
+
+    setActiveAudioMode('report');
+    activeAudioModeRef.current = 'report';
+
+    const targetIdx = Math.max(0, Math.min(index, chunks.length - 1));
+    setReportActiveSentenceIndex(targetIdx);
+    reportActiveSentenceIndexRef.current = targetIdx;
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
@@ -2498,9 +2635,10 @@ export default function VideosPage() {
     }
     clearPreloadedBlobUrls();
 
-    // Pre-warm the first three sentences for the new voice!
-    const chunks = sentenceChunksRef.current;
     const voiceName = getVoiceNameFromId(voiceId);
+
+    // Pre-warm the first three sentences of Summary for the new voice!
+    const chunks = sentenceChunksRef.current;
     if (chunks.length > 0) {
       const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
       fetch(src0).catch(() => {});
@@ -2514,9 +2652,26 @@ export default function VideosPage() {
       fetch(src2).catch(() => {});
     }
 
+    // Pre-warm the first three sentences of Investment Report for the new voice!
+    const reportChunks = reportSentenceChunksRef.current;
+    if (reportChunks.length > 0) {
+      const src0 = `/api/videos/speak?text=${encodeURIComponent(reportChunks[0])}&voice=${voiceName}`;
+      fetch(src0).catch(() => {});
+    }
+    if (reportChunks.length > 1) {
+      const src1 = `/api/videos/speak?text=${encodeURIComponent(reportChunks[1])}&voice=${voiceName}`;
+      fetch(src1).catch(() => {});
+    }
+    if (reportChunks.length > 2) {
+      const src2 = `/api/videos/speak?text=${encodeURIComponent(reportChunks[2])}&voice=${voiceName}`;
+      fetch(src2).catch(() => {});
+    }
+
     // If already playing and not paused, apply change immediately
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
-      playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+      const isReport = activeAudioModeRef.current === 'report';
+      const activeIndexRef = isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef;
+      playGeminiSentence(activeIndexRef.current >= 0 ? activeIndexRef.current : 0);
     }
   };
 
@@ -2553,7 +2708,7 @@ export default function VideosPage() {
     };
   }, []);
 
-  // Pre-populate audio chunks and total sentences whenever the study video, selected language, or its transcription text changes
+  // Pre-populate audio chunks and total sentences for both Summary and Report whenever content changes
   useEffect(() => {
     setAudioError(null); // Reset audio error state when content changes
 
@@ -2562,6 +2717,11 @@ export default function VideosPage() {
       setSentenceChunks([]);
       setTotalSentences(0);
       setActiveSentenceIndex(-1);
+
+      reportSentenceChunksRef.current = [];
+      setReportSentenceChunks([]);
+      setReportTotalSentences(0);
+      setReportActiveSentenceIndex(-1);
       return;
     }
 
@@ -2578,16 +2738,14 @@ export default function VideosPage() {
       }
     }
 
-    const { summary, transcription } = splitTranscription(textToUse);
-    const textForSpeech = summary || transcription || textToUse;
+    const { summary, transcription, report } = splitTranscription(textToUse);
 
+    // 1. Process Summary Audio Track
+    const textForSpeech = summary || transcription || textToUse;
     if (textForSpeech) {
       const cleanedText = cleanSummaryForSpeech(textForSpeech);
       const chunks = chunkTextForSpeech(cleanedText);
 
-      // CRITICAL OPTIMIZATION: Only update sentence chunks and reset index if the chunks actually changed!
-      // This prevents background updates to transcriptionStates or translationsCache (like transcription progress bars)
-      // from resetting the user's active audio playback position/state.
       const currentChunks = sentenceChunksRef.current;
       const chunksChanged = currentChunks.length !== chunks.length || 
         chunks.some((chunk, i) => chunk !== currentChunks[i]);
@@ -2619,6 +2777,46 @@ export default function VideosPage() {
         setSentenceChunks([]);
         setTotalSentences(0);
         setActiveSentenceIndex(-1);
+      }
+    }
+
+    // 2. Process Investment Report Audio Track
+    const textForReportSpeech = report || "";
+    if (textForReportSpeech) {
+      const cleanedText = cleanSummaryForSpeech(textForReportSpeech);
+      const chunks = chunkTextForSpeech(cleanedText);
+
+      const currentChunks = reportSentenceChunksRef.current;
+      const chunksChanged = currentChunks.length !== chunks.length || 
+        chunks.some((chunk, i) => chunk !== currentChunks[i]);
+
+      if (chunksChanged) {
+        reportSentenceChunksRef.current = chunks;
+        setReportSentenceChunks(chunks);
+        setReportTotalSentences(chunks.length);
+        setReportActiveSentenceIndex(-1);
+
+        // Pre-warm the first three sentences to make the very first Play click instant!
+        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+        if (chunks.length > 0) {
+          const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
+          fetch(src0).catch(() => {});
+        }
+        if (chunks.length > 1) {
+          const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
+          fetch(src1).catch(() => {});
+        }
+        if (chunks.length > 2) {
+          const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
+          fetch(src2).catch(() => {});
+        }
+      }
+    } else {
+      if (reportSentenceChunksRef.current.length > 0) {
+        reportSentenceChunksRef.current = [];
+        setReportSentenceChunks([]);
+        setReportTotalSentences(0);
+        setReportActiveSentenceIndex(-1);
       }
     }
   }, [activeStudyVideo, selectedLanguage, transcriptionStates, translationsCache]);
@@ -2653,7 +2851,9 @@ export default function VideosPage() {
     if (!activeStudyVideo) return;
 
     const activeState = transcriptionStates[activeStudyVideo.id];
-    const hasTranscription = activeStudyVideo.metadata?.transcription || activeState?.text;
+    // If the state is already defined (even if empty or currently transcribing), we do NOT load/fetch again.
+    // This completely prevents infinite loops if a video's transcription is empty.
+    const hasTranscription = activeStudyVideo.metadata?.transcription || activeState !== undefined;
 
     if (!hasTranscription) {
       const loadTranscription = async () => {
@@ -2672,19 +2872,16 @@ export default function VideosPage() {
             const text = metadata.transcription ? String(metadata.transcription) : "";
             const modelUsed = String(metadata.transcription_model || "Google Vertex AI Gemini 1.5 Pro");
             
-            if (text) {
-              console.log(`[Dynamic Loader] Transcription loaded successfully for: ${activeStudyVideo.title}`);
-              // Re-populate the transcriptionStates so that the UI updates instantly
-              setTranscriptionStates((prev) => ({
-                ...prev,
-                [activeStudyVideo.id]: {
-                  text,
-                  progress: 100,
-                  transcribing: false,
-                  error: null
-                }
-              }));
-            }
+            // Re-populate the transcriptionStates so that the UI updates instantly
+            setTranscriptionStates((prev) => ({
+              ...prev,
+              [activeStudyVideo.id]: {
+                text,
+                progress: 100,
+                transcribing: false,
+                error: null
+              }
+            }));
 
             // Also load any pre-existing translations into the translationsCache!
             if (metadata.translations) {
@@ -2724,9 +2921,30 @@ export default function VideosPage() {
               }
               return prev;
             });
+          } else {
+            // Fallback in case metadata is null to prevent infinite loader loop
+            setTranscriptionStates((prev) => ({
+              ...prev,
+              [activeStudyVideo.id]: {
+                text: "",
+                progress: 100,
+                transcribing: false,
+                error: null
+              }
+            }));
           }
         } catch (err) {
           console.error("[Dynamic Loader] Error fetching video transcription:", err);
+          // Set error state so we don't retry endlessly
+          setTranscriptionStates((prev) => ({
+            ...prev,
+            [activeStudyVideo.id]: {
+              text: "",
+              progress: 100,
+              transcribing: false,
+              error: err instanceof Error ? err.message : "Error loading"
+            }
+          }));
         }
       };
 
@@ -5113,156 +5331,292 @@ export default function VideosPage() {
                               </button>
                             </div>
                           )}
-                          <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4 w-full bg-zinc-950/40 border border-zinc-900/60 p-3.5 md:p-4 rounded-xl md:rounded-2xl select-none">
+                          <div className="flex flex-col gap-5 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 md:p-5 rounded-xl md:rounded-2xl select-none">
                             {/* Hidden DOM Audio Player to prevent iOS Safari background execution suspension */}
                             <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
-                            {/* Controls: Play/Pause, Reset */}
-                            <div className="flex items-center gap-2 md:gap-3 shrink-0 w-full md:w-auto justify-center md:justify-start">
-                              {isPlayingAudio && !isPausedAudio ? (
-                                <button
-                                  onClick={pauseAudio}
-                                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
-                                  title={t.pauseAudio || "Pausar Narración"}
-                                >
-                                  <Pause className="w-4 h-4 md:w-4.5 md:h-4.5 fill-current" />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={isPausedAudio ? resumeAudio : startAudioSummary}
-                                  className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 border border-violet-500/30 text-white flex items-center justify-center shadow-lg shadow-violet-500/20 hover:scale-105 active:scale-95 transition-all group"
-                                  title={t.playTranslatedAudio || "Iniciar Narración"}
-                                >
-                                  <Play className="w-4 h-4 md:w-4.5 md:h-4.5 fill-current ml-0.5" />
-                                </button>
-                              )}
 
-                              <button
-                                onClick={stopAudio}
-                                disabled={!isPlayingAudio && activeSentenceIndex === -1}
-                                className={`w-8 h-8 md:w-9 md:h-9 rounded-xl border flex items-center justify-center transition-all ${
-                                  isPlayingAudio || activeSentenceIndex >= 0
-                                    ? "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800"
-                                    : "bg-zinc-950/20 border-zinc-900/20 text-zinc-600 cursor-not-allowed"
-                                }`}
-                                title={selectedLanguage === "es" ? "Reiniciar Narración" : selectedLanguage === "de" ? "Erzählung zurücksetzen" : selectedLanguage === "tr" ? "Anlatımı Sıfırla" : "Reset Narration"}
-                              >
-                                <RotateCcw className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                              </button>
-                            </div>
-
-                            {/* Progress Scrubber and Metadata Area */}
-                            <div className="w-full flex-grow flex flex-col gap-1.5 md:flex-row md:items-center md:gap-4">
-                              {/* Metadata Line (Only separate above scrubber on mobile, inline on desktop) */}
-                              <div className="flex md:hidden items-center justify-between w-full px-1">
-                                {/* Estimated Playback Timer (Mobile) */}
-                                <div className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-400">
-                                  <span className="text-violet-400">
-                                    {formatElapsed(elapsedSeconds)}
+                            <div className="w-full flex flex-col gap-4.5">
+                              
+                              {/* 1. AUDIORESUMEN DETALLADO TRACK */}
+                              <div className="flex flex-col gap-2 w-full border-b border-zinc-900/40 pb-4 last:border-b-0 last:pb-0">
+                                <div className="flex items-center justify-between px-1">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+                                    <span className={`w-1.5 h-1.5 rounded-full ${activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? 'bg-violet-500 animate-pulse' : 'bg-zinc-600'}`} />
+                                    Audioresumen detallado
                                   </span>
-                                  <span className="text-zinc-600">/</span>
-                                  <span>{formatTotal(totalDuration)}</span>
+                                  {activeAudioMode === 'summary' && isPlayingAudio && (
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/20">En reproducción</span>
+                                  )}
+                                </div>
+                                
+                                <div className="flex flex-col md:flex-row items-center gap-2.5 md:gap-4 w-full">
+                                  {/* Dedicated Inline Play/Pause/Resume Button */}
+                                  <div className="shrink-0 flex items-center gap-2">
+                                    <button
+                                      onClick={() => toggleAudioTrack('summary')}
+                                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 scale-100 hover:scale-105 active:scale-95 ${
+                                        activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio
+                                          ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white shadow-lg shadow-violet-500/20"
+                                          : "bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-zinc-700"
+                                      }`}
+                                      title={activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? "Pausar Audioresumen" : "Reproducir Audioresumen"}
+                                    >
+                                      {activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? (
+                                        <Pause className="w-3.5 h-3.5 fill-current" />
+                                      ) : (
+                                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                                      )}
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        if (activeAudioMode === 'summary') {
+                                          stopAudio();
+                                        } else {
+                                          setActiveSentenceIndex(-1);
+                                          activeSentenceIndexRef.current = -1;
+                                        }
+                                      }}
+                                      disabled={activeSentenceIndex === -1}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeSentenceIndex >= 0
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Reiniciar esta pista"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  </div>
+
+                                  {/* Mobile Metadata */}
+                                  <div className="flex md:hidden items-center justify-between w-full px-1">
+                                    <div className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-400">
+                                      <span className="text-violet-400">{formatElapsed(summaryElapsedSeconds)}</span>
+                                      <span className="text-zinc-600">/</span>
+                                      <span>{formatTotal(summaryTotalDuration)}</span>
+                                    </div>
+                                    <span className="text-xs font-mono font-bold text-violet-400">
+                                      {(() => {
+                                        const percent = totalSentences > 0 
+                                          ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
+                                          : 0;
+                                        return `${percent}%`;
+                                      })()}
+                                    </span>
+                                  </div>
+
+                                  {/* Desktop Timer */}
+                                  <div className="hidden md:flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
+                                    <span className="text-violet-400">{formatElapsed(summaryElapsedSeconds)}</span>
+                                    <span className="text-zinc-600">/</span>
+                                    <span>{formatTotal(summaryTotalDuration)}</span>
+                                  </div>
+
+                                  {/* Scrubber Slider */}
+                                  <div className="flex-1 w-full flex items-center">
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max={Math.max(0, totalSentences - 1)}
+                                      value={activeSentenceIndex >= 0 ? activeSentenceIndex : 0}
+                                      onChange={(e) => handleSeek(parseInt(e.target.value))}
+                                      disabled={totalSentences === 0}
+                                      className="w-full h-1.5 bg-zinc-800/80 rounded-lg appearance-none cursor-pointer accent-violet-500 outline-none transition-all hover:h-2"
+                                      style={{
+                                        background: (() => {
+                                          const percent = totalSentences > 1 
+                                            ? ((activeSentenceIndex >= 0 ? activeSentenceIndex : 0) / (totalSentences - 1)) * 100 
+                                            : 0;
+                                          return `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${percent}%, #27272a ${percent}%, #27272a 100%)`;
+                                        })()
+                                      }}
+                                    />
+                                  </div>
+
+                                  {/* Desktop Percentage Badge */}
+                                  <div className="hidden md:block shrink-0">
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                      {(() => {
+                                        const percent = totalSentences > 0 
+                                          ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
+                                          : 0;
+                                        return `${percent}%`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* 2. AUDIOINFORME DE INVERSIÓN TRACK */}
+                              <div className="flex flex-col gap-2 w-full border-t border-zinc-900/20 pt-4 first:border-t-0 first:pt-0">
+                                <div className="flex items-center justify-between px-1">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+                                    <span className={`w-1.5 h-1.5 rounded-full ${activeAudioMode === 'report' && isPlayingAudio && !isPausedAudio ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-600'}`} />
+                                    Audioinforme de inversión
+                                  </span>
+                                  {activeAudioMode === 'report' && isPlayingAudio && (
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">En reproducción</span>
+                                  )}
                                 </div>
 
-                                {/* Percentage Badge (Mobile) */}
-                                <span className="text-xs font-mono font-bold text-violet-400">
-                                  {(() => {
-                                    const percent = totalSentences > 0 
-                                      ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
-                                      : 0;
-                                    return `${percent}%`;
-                                  })()}
-                                </span>
-                              </div>
+                                <div className="flex flex-col md:flex-row items-center gap-2.5 md:gap-4 w-full">
+                                  {/* Dedicated Inline Play/Pause/Resume Button */}
+                                  <div className="shrink-0 flex items-center gap-2">
+                                    <button
+                                      onClick={() => toggleAudioTrack('report')}
+                                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 scale-100 hover:scale-105 active:scale-95 ${
+                                        activeAudioMode === 'report' && isPlayingAudio && !isPausedAudio
+                                          ? "bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/20"
+                                          : "bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-zinc-700"
+                                      }`}
+                                      title={activeAudioMode === 'report' && isPlayingAudio && !isPausedAudio ? "Pausar Audioinforme" : "Reproducir Audioinforme"}
+                                    >
+                                      {activeAudioMode === 'report' && isPlayingAudio && !isPausedAudio ? (
+                                        <Pause className="w-3.5 h-3.5 fill-current" />
+                                      ) : (
+                                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                                      )}
+                                    </button>
 
-                              {/* Estimated Playback Timer (Desktop only, positioned before scrubber) */}
-                              <div className="hidden md:flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
-                                <span className="text-violet-400">
-                                  {formatElapsed(elapsedSeconds)}
-                                </span>
-                                <span className="text-zinc-600">/</span>
-                                <span>{formatTotal(totalDuration)}</span>
-                              </div>
+                                    <button
+                                      onClick={() => {
+                                        if (activeAudioMode === 'report') {
+                                          stopAudio();
+                                        } else {
+                                          setReportActiveSentenceIndex(-1);
+                                          reportActiveSentenceIndexRef.current = -1;
+                                        }
+                                      }}
+                                      disabled={reportActiveSentenceIndex === -1}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        reportActiveSentenceIndex >= 0
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Reiniciar esta pista"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  </div>
 
-                              {/* Range Slider Scrubber */}
-                              <div className="flex-1 w-full flex items-center">
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max={Math.max(0, totalSentences - 1)}
-                                  value={activeSentenceIndex >= 0 ? activeSentenceIndex : 0}
-                                  onChange={(e) => handleSeek(parseInt(e.target.value))}
-                                  disabled={totalSentences === 0}
-                                  className="w-full h-1.5 bg-zinc-800/80 rounded-lg appearance-none cursor-pointer accent-violet-500 outline-none transition-all hover:h-2"
-                                  style={{
-                                    background: (() => {
-                                      const percent = totalSentences > 1 
-                                        ? ((activeSentenceIndex >= 0 ? activeSentenceIndex : 0) / (totalSentences - 1)) * 100 
-                                        : 0;
-                                      return `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${percent}%, #27272a ${percent}%, #27272a 100%)`;
-                                    })()
-                                  }}
-                                />
-                              </div>
+                                  {/* Mobile Metadata */}
+                                  <div className="flex md:hidden items-center justify-between w-full px-1">
+                                    <div className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-400">
+                                      <span className="text-indigo-400">{formatElapsed(reportElapsedSeconds)}</span>
+                                      <span className="text-zinc-600">/</span>
+                                      <span>{formatTotal(reportTotalDuration)}</span>
+                                    </div>
+                                    <span className="text-xs font-mono font-bold text-indigo-400">
+                                      {(() => {
+                                        const percent = reportTotalSentences > 0 
+                                          ? Math.round(((reportActiveSentenceIndex >= 0 ? reportActiveSentenceIndex + 1 : 0) / reportTotalSentences) * 100)
+                                          : 0;
+                                        return `${percent}%`;
+                                      })()}
+                                    </span>
+                                  </div>
 
-                              {/* Percentage Badge (Desktop only, positioned after scrubber) */}
-                              <div className="hidden md:block shrink-0">
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
-                                  {(() => {
-                                    const percent = totalSentences > 0 
-                                      ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
-                                      : 0;
-                                    return `${percent}%`;
-                                  })()}
-                                </span>
+                                  {/* Desktop Timer */}
+                                  <div className="hidden md:flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
+                                    <span className="text-indigo-400">{formatElapsed(reportElapsedSeconds)}</span>
+                                    <span className="text-zinc-600">/</span>
+                                    <span>{formatTotal(reportTotalDuration)}</span>
+                                  </div>
+
+                                  {/* Scrubber Slider */}
+                                  <div className="flex-1 w-full flex items-center">
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max={Math.max(0, reportTotalSentences - 1)}
+                                      value={reportActiveSentenceIndex >= 0 ? reportActiveSentenceIndex : 0}
+                                      onChange={(e) => handleReportSeek(parseInt(e.target.value))}
+                                      disabled={reportTotalSentences === 0}
+                                      className="w-full h-1.5 bg-zinc-800/80 rounded-lg appearance-none cursor-pointer accent-indigo-500 outline-none transition-all hover:h-2"
+                                      style={{
+                                        background: (() => {
+                                          const percent = reportTotalSentences > 1 
+                                            ? ((reportActiveSentenceIndex >= 0 ? reportActiveSentenceIndex : 0) / (reportTotalSentences - 1)) * 100 
+                                            : 0;
+                                          return `linear-gradient(to right, #6366f1 0%, #6366f1 ${percent}%, #27272a ${percent}%, #27272a 100%)`;
+                                        })()
+                                      }}
+                                    />
+                                  </div>
+
+                                  {/* Desktop Percentage Badge */}
+                                  <div className="hidden md:block shrink-0">
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                      {(() => {
+                                        const percent = reportTotalSentences > 0 
+                                          ? Math.round(((reportActiveSentenceIndex >= 0 ? reportActiveSentenceIndex + 1 : 0) / reportTotalSentences) * 100)
+                                          : 0;
+                                        return `${percent}%`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
 
                           {/* Interactive text bubble showing the active reading sentence */}
                           <div className="h-12 bg-zinc-950/20 border border-zinc-900/60 rounded-xl px-4 flex items-center justify-between gap-4 overflow-hidden relative">
-                            {activeSentenceIndex >= 0 && sentenceChunks[activeSentenceIndex] ? (
-                              <>
-                                <div className="text-xs text-zinc-300 font-medium truncate flex-1 select-none italic">
-                                  &ldquo;{sentenceChunks[activeSentenceIndex]}&rdquo;
+                            {(() => {
+                              const mode = activeAudioMode;
+                              const index = mode === 'summary' ? activeSentenceIndex : reportActiveSentenceIndex;
+                              const chunks = mode === 'summary' ? sentenceChunks : reportSentenceChunks;
+                              
+                              if (index >= 0 && chunks[index]) {
+                                return (
+                                  <>
+                                    <div className="text-xs text-zinc-300 font-medium truncate flex-1 select-none italic">
+                                      &ldquo;{chunks[index]}&rdquo;
+                                    </div>
+                                    {isPlayingAudio && !isPausedAudio && (
+                                      <div className="flex items-center gap-0.5 shrink-0 h-6">
+                                        {[1, 2, 3, 4, 5, 6, 7].map((bar) => {
+                                          const heights = ["h-3", "h-5", "h-2", "h-6", "h-4", "h-5", "h-3"];
+                                          const delays = ["delay-75", "delay-200", "delay-100", "delay-300", "delay-150", "delay-500", "delay-200"];
+                                          return (
+                                            <div
+                                              key={bar}
+                                              className={`w-0.5 bg-indigo-400 rounded-full animate-bounce ${heights[bar - 1]} ${delays[bar - 1]}`}
+                                              style={{
+                                                animationDuration: `${0.6 + bar * 0.15}s`
+                                              }}
+                                            />
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              }
+                              
+                              const total = mode === 'summary' ? totalSentences : reportTotalSentences;
+                              return (
+                                <div className="text-xs text-zinc-500 font-medium select-none italic">
+                                  {total > 0 
+                                    ? (selectedLanguage === "es" 
+                                        ? `${mode === 'summary' ? 'Resumen' : 'Informe'} preparado (${total} frases). Presiona el botón de reproducción para escuchar la locución profesional.` 
+                                        : selectedLanguage === "de" 
+                                        ? `${mode === 'summary' ? 'Zusammenfassung' : 'Bericht'} bereit (${total} Sätze). Drücken Sie die Wiedergabetaste, um die professionelle Erzählung anzuhören.` 
+                                        : selectedLanguage === "tr" 
+                                        ? `${mode === 'summary' ? 'Özet' : 'Rapor'} hazır (${total} cümle). Profesyonel seslendirmeyi dinlemek için oynat düğmesine basın.` 
+                                        : `${mode === 'summary' ? 'Summary' : 'Report'} prepared (${total} sentences). Press the play button to listen to the professional narration.`)
+                                    : (selectedLanguage === "es" 
+                                        ? "No hay audio de narración disponible." 
+                                        : selectedLanguage === "de" 
+                                        ? "Keine Audio-Erzählung verfügbar." 
+                                        : selectedLanguage === "tr" 
+                                        ? "Sesli anlatım bulunmuyor." 
+                                        : "No audio narration available.")
+                                  }
                                 </div>
-                                {isPlayingAudio && !isPausedAudio && (
-                                  <div className="flex items-center gap-0.5 shrink-0 h-6">
-                                    {[1, 2, 3, 4, 5, 6, 7].map((bar) => {
-                                      const heights = ["h-3", "h-5", "h-2", "h-6", "h-4", "h-5", "h-3"];
-                                      const delays = ["delay-75", "delay-200", "delay-100", "delay-300", "delay-150", "delay-500", "delay-200"];
-                                      return (
-                                        <div
-                                          key={bar}
-                                          className={`w-0.5 bg-indigo-400 rounded-full animate-bounce ${heights[bar - 1]} ${delays[bar - 1]}`}
-                                          style={{
-                                            animationDuration: `${0.6 + bar * 0.15}s`
-                                          }}
-                                        />
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </>
-                            ) : (
-                              <div className="text-xs text-zinc-500 font-medium select-none">
-                                {totalSentences > 0 
-                                  ? (selectedLanguage === "es" 
-                                      ? `Resumen preparado (${totalSentences} frases). Presiona el botón de reproducción para escuchar la locución profesional.` 
-                                      : selectedLanguage === "de" 
-                                      ? `Zusammenfassung bereit (${totalSentences} Sätze). Drücken Sie die Wiedergabetaste, um die professionelle Erzählung anzuhören.` 
-                                      : selectedLanguage === "tr" 
-                                      ? `Özet hazır (${totalSentences} cümle). Profesyonel seslendirmeyi dinlemek için oynat düğmesine basın.` 
-                                      : `Summary prepared (${totalSentences} sentences). Press the play button to listen to the professional narration.`)
-                                  : (selectedLanguage === "es" 
-                                      ? "No hay resumen de audio disponible." 
-                                      : selectedLanguage === "de" 
-                                      ? "Keine Audio-Zusammenfassung verfügbar." 
-                                      : selectedLanguage === "tr" 
-                                      ? "Sesli özet bulunmuyor." 
-                                      : "No audio summary available.")
-                                }
-                              </div>
-                            )}
+                              );
+                            })()}
                           </div>
                         </div>
                       )}
