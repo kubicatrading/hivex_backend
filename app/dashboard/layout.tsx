@@ -14,6 +14,7 @@ import { AssistantBotWidget } from "@/components/AssistantBotWidget";
 
 
 interface UserProfile {
+  id?: string;
   email?: string;
   fullName: string;
 }
@@ -82,6 +83,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const [channels, setChannels] = useState<string[]>(DEFAULT_CHANNELS);
   const [channelMaxDates, setChannelMaxDates] = useState<Record<string, string>>({});
   const [lastVisitedDates, setLastVisitedDates] = useState<Record<string, string>>({});
+  const [dbLoaded, setDbLoaded] = useState(false);
 
   // Fetch unique channels dynamically from saved videos
   useEffect(() => {
@@ -127,61 +129,141 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Unified, atomic synchronization of last visited channels to avoid any race conditions
+  // Load last visited dates from DB on startup, merging with local storage
   useEffect(() => {
-    if (typeof window === "undefined" || !profile?.email) return;
+    if (!profile?.id) return;
 
-    try {
-      const key = `hivex_channels_last_visited_${profile.email}`;
-      const saved = localStorage.getItem(key);
-      let parsedSaved: Record<string, string> = {};
-
-      if (saved) {
-        try {
-          parsedSaved = JSON.parse(saved);
-        } catch (e) {
-          parsedSaved = {};
-        }
-      } else {
-        // Fallback/Legacy migration: see if there's a non-scoped old key
-        const legacySaved = localStorage.getItem("hivex_channels_last_visited");
-        if (legacySaved) {
+    const loadFromDB = async () => {
+      try {
+        const key = `hivex_channels_last_visited_${profile.email}`;
+        const savedLocal = localStorage.getItem(key);
+        let localParsed: Record<string, string> = {};
+        if (savedLocal) {
           try {
-            parsedSaved = JSON.parse(legacySaved);
-            localStorage.setItem(key, legacySaved);
+            localParsed = JSON.parse(savedLocal);
           } catch (e) {}
+        } else {
+          // Fallback/Legacy migration: see if there's a non-scoped old key
+          const legacySaved = localStorage.getItem("hivex_channels_last_visited");
+          if (legacySaved) {
+            try {
+              localParsed = JSON.parse(legacySaved);
+              localStorage.setItem(key, legacySaved);
+            } catch (e) {}
+          }
         }
+
+        let dbParsed: Record<string, string> = {};
+        const { data, error } = await supabase
+          .from("documents")
+          .select("metadata")
+          .eq("user_id", profile.id)
+          .eq("type", "knowledge_analysis")
+          .eq("title", "hivex_channels_last_visited")
+          .maybeSingle();
+
+        if (data && data.metadata) {
+          dbParsed = data.metadata as Record<string, string>;
+        }
+
+        // Merge local and DB: keep the most recent date for each channel
+        const merged: Record<string, string> = {};
+        const allKeys = Array.from(new Set([...Object.keys(localParsed), ...Object.keys(dbParsed)]));
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+        allKeys.forEach(k => {
+          const localVal = localParsed[k];
+          const dbVal = dbParsed[k];
+          if (localVal && dbVal) {
+            merged[k] = new Date(localVal) > new Date(dbVal) ? localVal : dbVal;
+          } else {
+            merged[k] = localVal || dbVal || sevenDaysAgo;
+          }
+        });
+
+        // Initialize any missing channels in channels list
+        channels.forEach(ch => {
+          if (!merged[ch]) {
+            merged[ch] = sevenDaysAgo;
+          }
+        });
+
+        // Save merged result back to localStorage
+        localStorage.setItem(key, JSON.stringify(merged));
+        setLastVisitedDates(merged);
+        setDbLoaded(true);
+      } catch (err) {
+        console.error("Failed to load last visited dates from DB:", err);
+        setDbLoaded(true); // Fallback to local-only if DB load fails
       }
+    };
 
-      // Initialize missing channels with a timestamp of 7 days ago to show recent activity
-      let modified = false;
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      channels.forEach(ch => {
-        if (!parsedSaved[ch]) {
-          parsedSaved[ch] = sevenDaysAgo;
-          modified = true;
-        }
-      });
+    loadFromDB();
+  }, [profile?.id, profile?.email, channels]);
 
-      // If we are currently on the videos page, mark the active channel as visited immediately
-      if (pathname === "/dashboard/videos") {
-        const channelParam = searchParams.get("channel") || "Andrei Jikh";
+  // Synchronize subsequent visits/updates to localStorage and Supabase
+  useEffect(() => {
+    if (typeof window === "undefined" || !profile?.id || !dbLoaded) return;
+
+    const syncVisit = async () => {
+      try {
+        const key = `hivex_channels_last_visited_${profile.email}`;
+        let modified = false;
         const nowStr = new Date().toISOString();
-        if (parsedSaved[channelParam] !== nowStr) {
-          parsedSaved[channelParam] = nowStr;
-          modified = true;
+        const updated = { ...lastVisitedDates };
+
+        // If we are currently on the videos page, mark the active channel as visited immediately
+        if (pathname === "/dashboard/videos") {
+          const channelParam = searchParams.get("channel") || "Andrei Jikh";
+          // Check if we need to update the date (avoiding infinite loops if it's identical or very close)
+          const lastDate = updated[channelParam];
+          const isSignificantDiff = !lastDate || (new Date(nowStr).getTime() - new Date(lastDate).getTime() > 10000); // More than 10 seconds difference
+
+          if (isSignificantDiff) {
+            updated[channelParam] = nowStr;
+            modified = true;
+          }
         }
-      }
 
-      if (modified) {
-        localStorage.setItem(key, JSON.stringify(parsedSaved));
-      }
+        if (modified) {
+          // Save to localStorage
+          localStorage.setItem(key, JSON.stringify(updated));
+          // Save to state
+          setLastVisitedDates(updated);
 
-      setLastVisitedDates(parsedSaved);
-    } catch (err) {
-      console.error("Failed to sync last visited channels:", err);
-    }
-  }, [profile?.email, channels, pathname, searchParams]);
+          // Save to Supabase DB (standard insert/update select flow for maximum RLS safety and constraint compatibility)
+          const { data: existingDoc } = await supabase
+            .from("documents")
+            .select("id")
+            .eq("user_id", profile.id)
+            .eq("type", "knowledge_analysis")
+            .eq("title", "hivex_channels_last_visited")
+            .maybeSingle();
+
+          if (existingDoc) {
+            await supabase
+              .from("documents")
+              .update({ metadata: updated })
+              .eq("id", existingDoc.id);
+          } else {
+            await supabase
+              .from("documents")
+              .insert({
+                user_id: profile.id,
+                type: "knowledge_analysis",
+                title: "hivex_channels_last_visited",
+                file_url: "https://hivex.trading/channels_last_visited",
+                metadata: updated
+              });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to sync last visited channel to DB:", err);
+      }
+    };
+
+    syncVisit();
+  }, [profile?.id, profile?.email, pathname, searchParams, dbLoaded]);
 
   // Check auth session on load
   useEffect(() => {
@@ -224,7 +306,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        setProfile({
+         setProfile({
+          id: user.id,
           email: user.email,
           fullName: user.user_metadata?.full_name || "Alex Hivex"
         });
