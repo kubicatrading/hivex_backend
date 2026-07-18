@@ -3253,6 +3253,15 @@ export default function VideosPage() {
         });
 
         setSelectedVideo(prev => (prev && prev.id === matched.id ? prev : matched));
+
+        // Automatically update the 'channel' parameter in the URL query so the left sidebar matches the channel of the loaded video
+        const matchedChannelTitle = matched.metadata?.channel_title;
+        if (matchedChannelTitle && !searchParams.get("channel") && typeof window !== "undefined") {
+          console.log(`[Deep Link Sync] Syncing URL channel query param with matched video channel title: ${matchedChannelTitle}`);
+          const params = new URLSearchParams(window.location.search);
+          params.set("channel", matchedChannelTitle);
+          router.replace(`${window.location.pathname}?${params.toString()}`);
+        }
         
         // Parse start and end parameters for the deep-linked video clip if not already set
         const startVal = searchParams.get("start") || searchParams.get("t");
