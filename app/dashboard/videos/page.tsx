@@ -3434,9 +3434,10 @@ export default function VideosPage() {
 
       // Automatically update the 'channel' parameter in the URL query so the left sidebar matches the channel of the loaded video
       if (doc.channel_title && !searchParams.get("channel") && typeof window !== "undefined") {
-        console.log(`[Deep Link] Syncing URL channel query param with video channel title: ${doc.channel_title}`);
+        const cleanChannel = doc.channel_title.replace(/\s*\(Mock\s+Feed\)/i, "").trim();
+        console.log(`[Deep Link] Syncing URL channel query param with video channel title: ${cleanChannel}`);
         const params = new URLSearchParams(window.location.search);
-        params.set("channel", doc.channel_title);
+        params.set("channel", cleanChannel);
         router.replace(`${window.location.pathname}?${params.toString()}`);
       }
     };
@@ -3476,9 +3477,10 @@ export default function VideosPage() {
         // Automatically update the 'channel' parameter in the URL query so the left sidebar matches the channel of the loaded video
         const matchedChannelTitle = matched.metadata?.channel_title;
         if (matchedChannelTitle && !searchParams.get("channel") && typeof window !== "undefined") {
-          console.log(`[Deep Link Sync] Syncing URL channel query param with matched video channel title: ${matchedChannelTitle}`);
+          const cleanMatchedChannel = matchedChannelTitle.replace(/\s*\(Mock\s+Feed\)/i, "").trim();
+          console.log(`[Deep Link Sync] Syncing URL channel query param with matched video channel title: ${cleanMatchedChannel}`);
           const params = new URLSearchParams(window.location.search);
-          params.set("channel", matchedChannelTitle);
+          params.set("channel", cleanMatchedChannel);
           router.replace(`${window.location.pathname}?${params.toString()}`);
         }
         
@@ -3736,7 +3738,7 @@ export default function VideosPage() {
         if (isFreedomChannel(activeChannel)) {
           query = query.like("metadata->>channel_title", "%Judging Freedom%");
         } else {
-          query = query.eq("metadata->>channel_title", activeChannel);
+          query = query.like("metadata->>channel_title", `${activeChannel}%`);
         }
       }
 
