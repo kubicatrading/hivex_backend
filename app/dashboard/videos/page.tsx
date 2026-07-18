@@ -1896,6 +1896,7 @@ export default function VideosPage() {
   const [chartsExpanded, setChartsExpanded] = useState(false);
   const [reportExpanded, setReportExpanded] = useState(false);
   const studyVideoRef = useRef<HTMLVideoElement | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
 
   // TTS Audio Narrador States
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -4376,7 +4377,7 @@ export default function VideosPage() {
         <div className="max-w-4xl mx-auto space-y-10">
           
           {/* 1. ORIGINAL VIDEO PLAYER CARD */}
-          <div className="space-y-4">
+          <div ref={playerContainerRef} className="space-y-4 scroll-mt-24">
             <div className="flex items-center gap-2 pb-2.5 border-b border-zinc-900">
               <Monitor className="w-4 h-4 text-red-500 animate-pulse" />
               <h3 className="text-xs font-bold text-white uppercase tracking-wider">
@@ -4689,6 +4690,10 @@ export default function VideosPage() {
                                   if (studyVideoRef.current) {
                                     studyVideoRef.current.currentTime = seconds;
                                     studyVideoRef.current.play().catch(err => console.log("Autoplay local video prevented:", err));
+                                  }
+                                  // Smoothly scroll the video player back into view so the user doesn't have to manual scroll up
+                                  if (playerContainerRef.current) {
+                                    playerContainerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
                                   }
                                 }}
                               />
@@ -5358,6 +5363,17 @@ export default function VideosPage() {
                                 )} 
                                 modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
                                 selectedLanguage={selectedLanguage}
+                                onSeek={(seconds) => {
+                                  setPlayerTime(seconds);
+                                  if (studyVideoRef.current) {
+                                    studyVideoRef.current.currentTime = seconds;
+                                    studyVideoRef.current.play().catch(err => console.log("Autoplay local video prevented:", err));
+                                  }
+                                  // Smoothly scroll the video player back into view so the user doesn't have to manual scroll up
+                                  if (playerContainerRef.current) {
+                                    playerContainerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+                                  }
+                                }}
                               />
                             </>
                           )}
