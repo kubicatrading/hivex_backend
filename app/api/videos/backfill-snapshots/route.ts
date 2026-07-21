@@ -106,7 +106,13 @@ async function handleBackfill(request: NextRequest) {
     const { searchParams } = new URL(request.url);
 
     // 1. Authenticate the cron request
-    const cronSecret = searchParams.get("secret") || request.headers.get("x-cron-secret");
+    const authHeader = request.headers.get("authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+    const cronSecret = searchParams.get("secret") || 
+                       request.headers.get("x-cron-secret") || 
+                       bearerToken;
+
     const expectedSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (expectedSecret && cronSecret !== expectedSecret) {

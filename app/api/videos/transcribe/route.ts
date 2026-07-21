@@ -426,9 +426,24 @@ CRITICAL FINANCIAL RIGOR RULE: Financial accuracy is of absolute, strict importa
 
 The "analysis" property MUST be written entirely in English with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
 
+INSTRUCTIONS FOR THE "analysis" SECTIONS:
+1. ### 📝 Detailed Content Summary
+Provide a comprehensive summary and thematic breakdown of what the video covers based on its title and description. Structure your overview with clear paragraphs and bullet points detailing the expected topics, concepts, and market context.
+
+2. ### 📊 Detected Charts & Visualizations
+Write exactly: *No se detectaron gráficos en este vídeo al tratarse de una transmisión en vivo sin transcripción temporalizada.*
+
+3. ### 💼 Investment Analysis Report
+Adopt the persona of a professional investor. Structure strictly under the five headings listed below. Under each of these five headings, you MUST write at least 2-3 detailed bullet points in English using hyphens (-) and bold text to highlight key concepts and strategic insights:
+### 📈 Macroeconomic Trends & Markets
+### 💼 Investment Vehicles & Assets
+### 🌍 Geopolitical Factors & Logistics
+### 🎯 Investment Decisions & Key Signals
+### ⚠️ Risk Alerts & Breaking News
+
 You MUST return a JSON object with exactly the following structure:
 {
-  "analysis": "### 📝 Detailed Content Summary\\n\\n*Este vídeo es una transmisión en vivo y no tiene transcripción disponible.*\\n\\nProvide a comprehensive summary and thematic breakdown of what the video covers based on its title and description. Structure your overview with clear paragraphs and bullet points detailing the expected topics, concepts, and market context.\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\n*No se detectaron gráficos en este vídeo al tratarse de una transmisión en vivo sin transcripción temporalizada.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points in English using hyphens (-) and bold text to highlight key concepts and strategic insights based on the available title and description metadata:\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+  "analysis": "### 📝 Detailed Content Summary\\n\\n*Este vídeo es una transmisión en vivo y no tiene transcripción disponible.*\\n\\n[Write your detailed summary of the expected topics here]\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\n*No se detectaron gráficos en este vídeo al tratarse de una transmisión en vivo sin transcripción temporalizada.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\n### 📈 Macroeconomic Trends & Markets\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### 💼 Investment Vehicles & Assets\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### 🌍 Geopolitical Factors & Logistics\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### 🎯 Investment Decisions & Key Signals\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### ⚠️ Risk Alerts & Breaking News\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]"
 }`;
   } else {
     // Build high-fidelity unified refinement and summary prompt focusing strictly on analysis output to prevent token limits truncation
@@ -439,9 +454,34 @@ CRITICAL FINANCIAL RIGOR RULE: Financial accuracy is of absolute, strict importa
 
 The "analysis" property MUST be written entirely in English with a high-fidelity, extremely detailed narrative adopting the persona of a professional investor and seasoned financial analyst.
 
+INSTRUCTIONS FOR THE "analysis" SECTIONS:
+
+1. ### 📝 Detailed Content Summary
+- CRITICAL FULL COVERAGE RULE: The video lasts a total of ${duration}. It is mandatory to structure the detailed summary sequentially and uniformly covering the entire length of the video from start [00:00] to the end or closing minutes of the video (near ${duration}), ensuring timestamps are balanced across the duration (for example, ${intervalText}) and not just summarizing the beginning or first half.
+- Divide the summary into logical segments with fourth-level chronological headings such as: #### [MM:SS] or #### [HH:MM:SS] **Bold Heading of the Segment** (without bullets or hyphens in the headings).
+- Under each heading, add bulleted sub-paragraphs using hyphens (-) and bold text to highlight key concepts.
+- Strictly objective, neutral, without financial analysis. Do NOT copy the prompt instructions into this section! Write actual summarized content from the transcript!
+
+2. ### 📊 Detected Charts & Visualizations
+- Chronologically identify any chart, data table, diagram, or visual resource shown on screen or discussed.
+- CRITICAL DETECTION RULE: If during the video precise percentages, numbers, or statistical data are mentioned sequentially (for example, yield figures, spreads, interest rates, or projections), assume with total confidence that at that moment a visual card or static data chart with little movement (split screen or fixed data frame for more than 5 seconds) was projected on screen. You must identify these parts as charts or data visualization resources if they are grounded in the actual transcript.
+- GOLDEN RULE OF TRUTHFULNESS & NUMERICAL PRESERVATION: Extract only charts and visualizations that stem realistically and directly from the figures and topics detailed in the video. It is strictly forbidden to hallucinate financial assets, percentages, or specific timestamps that do not appear in the actual transcript. You must report all price levels and metrics exactly as they are detailed in the transcript (e.g., if the transcript says $4,100, do not alter it).
+- For each detected chart, add a section with a chronological heading showing its start and end range like: #### [MM:SS - MM:SS] or #### [HH:MM:SS - HH:MM:SS] **Descriptive Title of the Chart** showing precisely when the chart starts and ends in the video.
+- Under each heading, write a bulleted list (-) describing the key metrics, data, or axes shown.
+- Immediately after the bullets, add a single line in italics: *Legend: [Brief summary explaining the key takeaway at the bottom of the chart].*
+- If the video does not contain charts or data visual resources, write exactly: *No charts were detected in this video.*
+
+3. ### 💼 Investment Analysis Report
+- Adopt the persona of a professional investor. Structure strictly under the five headings listed below. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):
+### 📈 Macroeconomic Trends & Markets
+### 💼 Investment Vehicles & Assets
+### 🌍 Geopolitical Factors & Logistics
+### 🎯 Investment Decisions & Key Signals
+### ⚠️ Risk Alerts & Breaking News
+
 You MUST return a JSON object with exactly the following structure:
 {
-  "analysis": "### 📝 Detailed Content Summary\\n\\nCRITICAL FULL COVERAGE RULE: The video lasts a total of ${duration}. It is mandatory to structure the detailed summary sequentially and uniformly covering the entire length of the video from start [00:00] to the end or closing minutes of the video (near ${duration}), ensuring timestamps are balanced across the duration (for example, ${intervalText}) and not just summarizing the beginning or first half. Divide the summary into logical segments with fourth-level chronological headings such as: #### [MM:SS] or #### [HH:MM:SS] **Bold Heading of the Segment** (without bullets or hyphens in the headings). Under each heading, add bulleted sub-paragraphs using hyphens (-) and bold text to highlight key concepts. Strictly objective, neutral, without financial analysis.\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\nChronologically identify any chart, data table, diagram, or visual resource shown on screen or discussed. CRITICAL DETECTION RULE: If during the video precise percentages, numbers, or statistical data are mentioned sequentially (for example, yield figures, spreads, interest rates, or projections), assume with total confidence that at that moment a visual card or static data chart with little movement (split screen or fixed data frame for more than 5 seconds) was projected on screen. You must identify these parts as charts or data visualization resources if they are grounded in the actual transcript. GOLDEN RULE OF TRUTHFULNESS & NUMERICAL PRESERVATION: Extract only charts and visualizations that stem realistically and directly from the figures and topics detailed in the video. It is strictly forbidden to hallucinate financial assets, percentages, or specific timestamps that do not appear in the actual transcript. You must report all price levels and metrics exactly as they are detailed in the transcript (e.g., if the transcript says $4,100, do not alter it). Illustrative output format example (DO NOT invent these data if they are not in the text): #### [01:23 - 01:55] **Descriptive Title of the Real Chart or Table**. On the other hand, absolutely avoid generating charts at purely conversational points without figures (for example, avoid timestamps where there is only general fluent chat). For each detected chart, add a section with a chronological heading showing its start and end range like: #### [MM:SS - MM:SS] or #### [HH:MM:SS - HH:MM:SS] **Descriptive Title of the Chart** showing precisely when the chart starts and ends in the video. Under each heading, write a bulleted list (-) describing the key metrics, data, or axes shown. Immediately after the bullets, add a single line in italics: *Legend: [Brief summary explaining the key takeaway at the bottom of the chart].* If the video does not contain charts or data visual resources, write exactly: *No charts were detected in this video.*\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\nAdopt the persona of a professional investor. Structure strictly under the following third-level headings. Under each of these five headings, you MUST write at least 2-3 detailed bullet points using hyphens (-) and bold text to highlight key concepts and strategic insights (DO NOT write plain prose paragraphs, use the exact same bulleted structure as the detailed summary):\\n### 📈 Macroeconomic Trends & Markets\\n### 💼 Investment Vehicles & Assets\\n### 🌍 Geopolitical Factors & Logistics\\n### 🎯 Investment Decisions & Key Signals\\n### ⚠️ Risk Alerts & Breaking News"
+  "analysis": "### 📝 Detailed Content Summary\\n\\n[Write your actual sequential, detailed summary covering from [00:00] to the end of the video near ${duration} here. Use headings like #### [MM:SS] **Segment Title** and write bullet points under them]\\n\\n---\\n\\n### 📊 Detected Charts & Visualizations\\n\\n[Write your actual detected charts list here following the format, or say 'No charts were detected in this video']\\n\\n---\\n\\n### 💼 Investment Analysis Report\\n\\n### 📈 Macroeconomic Trends & Markets\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### 💼 Investment Vehicles & Assets\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### 🌍 Geopolitical Factors & Logistics\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### 🎯 Investment Decisions & Key Signals\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]\\n\\n### ⚠️ Risk Alerts & Breaking News\\n- **[Concept 1]** [Detail 1]\\n- **[Concept 2]** [Detail 2]"
 }
 
 Raw transcript text:

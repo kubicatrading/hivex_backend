@@ -3433,12 +3433,15 @@ export default function VideosPage() {
       }
 
       // Automatically update the 'channel' parameter in the URL query so the left sidebar matches the channel of the loaded video
-      if (doc.channel_title && !searchParams.get("channel") && typeof window !== "undefined") {
+      if (doc.channel_title && typeof window !== "undefined") {
         const cleanChannel = doc.channel_title.replace(/\s*\(Mock\s+Feed\)/i, "").trim();
-        console.log(`[Deep Link] Syncing URL channel query param with video channel title: ${cleanChannel}`);
-        const params = new URLSearchParams(window.location.search);
-        params.set("channel", cleanChannel);
-        router.replace(`${window.location.pathname}?${params.toString()}`);
+        const currentQueryChannel = searchParams.get("channel");
+        if (!currentQueryChannel || currentQueryChannel !== cleanChannel) {
+          console.log(`[Deep Link] Syncing URL channel query param with video channel title: ${cleanChannel} (was: ${currentQueryChannel})`);
+          const params = new URLSearchParams(window.location.search);
+          params.set("channel", cleanChannel);
+          router.replace(`${window.location.pathname}?${params.toString()}`);
+        }
       }
     };
 
@@ -3476,12 +3479,15 @@ export default function VideosPage() {
 
         // Automatically update the 'channel' parameter in the URL query so the left sidebar matches the channel of the loaded video
         const matchedChannelTitle = matched.metadata?.channel_title;
-        if (matchedChannelTitle && !searchParams.get("channel") && typeof window !== "undefined") {
+        if (matchedChannelTitle && typeof window !== "undefined") {
           const cleanMatchedChannel = matchedChannelTitle.replace(/\s*\(Mock\s+Feed\)/i, "").trim();
-          console.log(`[Deep Link Sync] Syncing URL channel query param with matched video channel title: ${cleanMatchedChannel}`);
-          const params = new URLSearchParams(window.location.search);
-          params.set("channel", cleanMatchedChannel);
-          router.replace(`${window.location.pathname}?${params.toString()}`);
+          const currentQueryChannel = searchParams.get("channel");
+          if (!currentQueryChannel || currentQueryChannel !== cleanMatchedChannel) {
+            console.log(`[Deep Link Sync] Syncing URL channel query param with matched video channel title: ${cleanMatchedChannel} (was: ${currentQueryChannel})`);
+            const params = new URLSearchParams(window.location.search);
+            params.set("channel", cleanMatchedChannel);
+            router.replace(`${window.location.pathname}?${params.toString()}`);
+          }
         }
         
         // Parse start and end parameters for the deep-linked video clip if not already set

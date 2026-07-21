@@ -67,19 +67,21 @@ async function handleSync(request: Request) {
   try {
     // 1. Validate Secret Auth Token (for cron/scripts) or Supabase user session (for dashboard manual sync)
     const { searchParams } = new URL(request.url);
+    const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
     let isAuthorized = false;
 
     // Check 1: Cron Secret validation
-    const cronSecret = searchParams.get("secret") || request.headers.get("x-cron-secret");
+    const cronSecret = searchParams.get("secret") || 
+                       request.headers.get("x-cron-secret") || 
+                       bearerToken;
+
     const expectedSecret = process.env.CRON_SECRET || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (expectedSecret && cronSecret === expectedSecret) {
       isAuthorized = true;
     }
 
     // Check 2: Supabase active session JWT token validation (for Dashboard manual sync)
-    const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
-    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-    
     if (!isAuthorized && bearerToken) {
       if (bearerToken.startsWith("mock-token-")) {
         isAuthorized = true;
@@ -239,6 +241,17 @@ async function handleSync(request: Request) {
           rawDescription = extractTagContent(entryXml, "description");
         }
 
+        // Check if it's a YouTube Short beforehand
+        const isShort = title.toLowerCase().includes("#shorts") || 
+                        title.toLowerCase().includes("#short") ||
+                        (rawDescription && (rawDescription.toLowerCase().includes("#shorts") || rawDescription.toLowerCase().includes("#short"))) ||
+                        entryXml.includes("/shorts/");
+
+        if (isShort) {
+          console.log(`[Sync] Skipping video because it is classified as a YouTube Short: ${title}`);
+          continue;
+        }
+
         // Fetch actual duration from YouTube watch page
         console.log(`Fetching real duration for YouTube video ${videoId} (${title})...`);
         const { duration: durationSecsResult, isLive } = await fetchRealYoutubeDuration(videoId);
@@ -249,20 +262,13 @@ async function handleSync(request: Request) {
           continue;
         }
 
-        if (durationSecs === 0) {
-          console.warn(`[Sync] Failed to scrape duration for video ${videoId} (${title}). Likely blocked by YouTube. Applying smart fallback.`);
-          
-          // Check if it's a YouTube Short
-          const isShort = title.toLowerCase().includes("#shorts") || 
-                          title.toLowerCase().includes("#short") ||
-                          (rawDescription && (rawDescription.toLowerCase().includes("#shorts") || rawDescription.toLowerCase().includes("#short"))) ||
-                          entryXml.includes("/shorts/");
-          
-          if (isShort) {
-            console.log(`[Sync] Skipping video because it is classified as a YouTube Short: ${title}`);
-            continue;
+        // Fallback for failed or suspicious scraped durations (YouTube serves temporary low durations on new uploads)
+        if (durationSecs === 0 || (durationSecs <= 300 && !isShort)) {
+          if (durationSecs === 0) {
+            console.warn(`[Sync] Failed to scrape duration for video ${videoId} (${title}). Likely blocked by YouTube. Applying smart fallback.`);
+          } else {
+            console.warn(`[Sync] Scraped suspiciously short duration (${durationSecs}s) for non-Short video ${videoId} (${title}). Applying smart fallback.`);
           }
-          
           // Fallback to 900 seconds (15 minutes) for standard videos to pass the duration filter
           durationSecs = 900;
         }
