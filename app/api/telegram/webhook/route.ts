@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
 import { markdownToTelegramHtml, splitMarkdown, sendTelegramMessageWithPhotos, escapeHtml, setTelegramLanguage } from "@/lib/telegram";
 
+export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during complex Gemini queries with Search grounding
+
 export async function POST(request: NextRequest) {
   try {
     const payload = await request.json();
