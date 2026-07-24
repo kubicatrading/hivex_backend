@@ -650,8 +650,19 @@ export async function sendTelegramMessageWithPhotos(
   }
 
   // If no images found, route transparently to standard sendTelegramMessage
+  // but split if the text is long to prevent "message is too long" errors
   if (matches.length === 0) {
-    return sendTelegramMessage(markdownToTelegramHtml(text), chatId);
+    const chunks = splitMarkdown(text, 3000);
+    let lastResult = { success: true, simulated: false };
+    for (const chunk of chunks) {
+      const chunkHtml = markdownToTelegramHtml(chunk);
+      const res = await sendTelegramMessage(chunkHtml, chatId);
+      if (!res.success) {
+        return res;
+      }
+      lastResult = res;
+    }
+    return lastResult;
   }
 
   // Helper to resolve relative snapshot URLs
