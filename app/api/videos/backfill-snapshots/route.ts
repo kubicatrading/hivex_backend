@@ -132,11 +132,12 @@ async function handleBackfill(request: NextRequest) {
 
     console.log("[Backfill API] Fetching documents from Supabase...");
 
-    // Fetch all relevant documents to scan for charts
+    // Fetch all relevant documents to scan for charts, ordered by created_at descending
     const { data: allDocs, error } = await supabaseAdmin
       .from("documents")
       .select("id, title, type, file_url, created_at, metadata, description")
-      .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"]);
+      .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"])
+      .order("created_at", { ascending: false });
 
     if (error || !allDocs) {
       return NextResponse.json({ success: false, error: `Failed to fetch documents: ${error?.message || "No data"}` }, { status: 500 });

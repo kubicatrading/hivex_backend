@@ -114,11 +114,12 @@ function extractYoutubeIdHelper(fileUrl: string, videoId?: string): string | nul
 async function run() {
   console.log("[Backfill Snapshots] Querying database documents from Supabase...");
 
-  // Fetch all documents
+  // Fetch all documents ordered by created_at descending to prioritize newest videos
   const { data: allDocs, error } = await supabaseClient
     .from("documents")
     .select("id, title, type, file_url, created_at, metadata, description")
-    .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"]);
+    .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"])
+    .order("created_at", { ascending: false });
 
   if (error || !allDocs) {
     console.error("[Backfill Snapshots] Failed to fetch documents:", error?.message);
@@ -227,7 +228,7 @@ async function run() {
       console.log(`[Backfill Snapshots] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s + 5s offset = ${offsetSeconds}s)...`);
       let success = false;
       try {
-        const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+        const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 -strict -2 "${outputPath}"`;
         await runCmd(ffmpegCmd);
         console.log(`[Backfill Snapshots] Saved locally: ${chart.seconds}.jpg`);
         success = true;
@@ -235,7 +236,7 @@ async function run() {
         console.warn(`[Backfill Snapshots] Ffmpeg failed. Re-resolving stream URL and retrying...`);
         try {
           streamUrl = await getStreamUrl();
-          const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 "${outputPath}"`;
+          const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 -strict -2 "${outputPath}"`;
           await runCmd(ffmpegCmd);
           console.log(`[Backfill Snapshots] Saved locally on retry: ${chart.seconds}.jpg`);
           success = true;
