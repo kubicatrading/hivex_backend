@@ -8,7 +8,7 @@ import { translations } from "@/lib/translations";
 import { 
   Video, Play, Trash2, UploadCloud, Monitor, Sparkles, AlertCircle, Eye, Clock, Volume2,
   ChevronDown, ChevronUp, BookOpen, Briefcase, FileText, Headphones, Pause, Square, RotateCcw,
-  Languages, Heart, TrendingUp, AlertTriangle, Loader2, EyeOff
+  Languages, Heart, TrendingUp, AlertTriangle, Loader2, EyeOff, SkipBack, SkipForward
 } from "lucide-react";
 
 function isFreedomChannel(channelName: string | null | undefined): boolean {
@@ -2640,31 +2640,25 @@ export default function VideosPage() {
     // Pre-warm the first three sentences of Summary for the new voice!
     const chunks = sentenceChunksRef.current;
     if (chunks.length > 0) {
-      const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
-      fetch(src0).catch(() => {});
+      preloadSentenceBlob(0, chunks, voiceName, false);
     }
     if (chunks.length > 1) {
-      const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
-      fetch(src1).catch(() => {});
+      preloadSentenceBlob(1, chunks, voiceName, false);
     }
     if (chunks.length > 2) {
-      const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
-      fetch(src2).catch(() => {});
+      preloadSentenceBlob(2, chunks, voiceName, false);
     }
 
     // Pre-warm the first three sentences of Investment Report for the new voice!
     const reportChunks = reportSentenceChunksRef.current;
     if (reportChunks.length > 0) {
-      const src0 = `/api/videos/speak?text=${encodeURIComponent(reportChunks[0])}&voice=${voiceName}`;
-      fetch(src0).catch(() => {});
+      preloadSentenceBlob(0, reportChunks, voiceName, true);
     }
     if (reportChunks.length > 1) {
-      const src1 = `/api/videos/speak?text=${encodeURIComponent(reportChunks[1])}&voice=${voiceName}`;
-      fetch(src1).catch(() => {});
+      preloadSentenceBlob(1, reportChunks, voiceName, true);
     }
     if (reportChunks.length > 2) {
-      const src2 = `/api/videos/speak?text=${encodeURIComponent(reportChunks[2])}&voice=${voiceName}`;
-      fetch(src2).catch(() => {});
+      preloadSentenceBlob(2, reportChunks, voiceName, true);
     }
 
     // If already playing and not paused, apply change immediately
@@ -2759,16 +2753,13 @@ export default function VideosPage() {
         // Pre-warm the first three sentences to make the very first Play click instant!
         const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
         if (chunks.length > 0) {
-          const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
-          fetch(src0).catch(() => {});
+          preloadSentenceBlob(0, chunks, voiceName, false);
         }
         if (chunks.length > 1) {
-          const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
-          fetch(src1).catch(() => {});
+          preloadSentenceBlob(1, chunks, voiceName, false);
         }
         if (chunks.length > 2) {
-          const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
-          fetch(src2).catch(() => {});
+          preloadSentenceBlob(2, chunks, voiceName, false);
         }
       }
     } else {
@@ -2799,16 +2790,13 @@ export default function VideosPage() {
         // Pre-warm the first three sentences to make the very first Play click instant!
         const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
         if (chunks.length > 0) {
-          const src0 = `/api/videos/speak?text=${encodeURIComponent(chunks[0])}&voice=${voiceName}`;
-          fetch(src0).catch(() => {});
+          preloadSentenceBlob(0, chunks, voiceName, true);
         }
         if (chunks.length > 1) {
-          const src1 = `/api/videos/speak?text=${encodeURIComponent(chunks[1])}&voice=${voiceName}`;
-          fetch(src1).catch(() => {});
+          preloadSentenceBlob(1, chunks, voiceName, true);
         }
         if (chunks.length > 2) {
-          const src2 = `/api/videos/speak?text=${encodeURIComponent(chunks[2])}&voice=${voiceName}`;
-          fetch(src2).catch(() => {});
+          preloadSentenceBlob(2, chunks, voiceName, true);
         }
       }
     } else {
@@ -5359,7 +5347,27 @@ export default function VideosPage() {
                                 
                                 <div className="flex flex-col md:flex-row items-center gap-2.5 md:gap-4 w-full">
                                   {/* Dedicated Inline Play/Pause/Resume Button */}
-                                  <div className="shrink-0 flex items-center gap-2">
+                                  <div className="shrink-0 flex items-center gap-1.5">
+                                    {/* Previous Sentence Button */}
+                                    <button
+                                      onClick={() => {
+                                        const prevIdx = activeSentenceIndex - 1;
+                                        if (prevIdx >= 0) {
+                                          playGeminiSentence(prevIdx);
+                                        }
+                                      }}
+                                      disabled={activeAudioMode !== 'summary' || activeSentenceIndex <= 0}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeAudioMode === 'summary' && activeSentenceIndex > 0
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-violet-400 hover:bg-zinc-800 active:scale-95"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Frase anterior"
+                                    >
+                                      <SkipBack className="w-3 h-3 fill-current" />
+                                    </button>
+
+                                    {/* Play/Pause Button */}
                                     <button
                                       onClick={() => toggleAudioTrack('summary')}
                                       className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 scale-100 hover:scale-105 active:scale-95 ${
@@ -5376,6 +5384,26 @@ export default function VideosPage() {
                                       )}
                                     </button>
 
+                                    {/* Next Sentence Button */}
+                                    <button
+                                      onClick={() => {
+                                        const nextIdx = activeSentenceIndex + 1;
+                                        if (nextIdx < totalSentences) {
+                                          playGeminiSentence(nextIdx);
+                                        }
+                                      }}
+                                      disabled={activeAudioMode !== 'summary' || totalSentences === 0 || activeSentenceIndex >= totalSentences - 1}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeAudioMode === 'summary' && totalSentences > 0 && activeSentenceIndex < totalSentences - 1
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-violet-400 hover:bg-zinc-800 active:scale-95"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Frase siguiente"
+                                    >
+                                      <SkipForward className="w-3 h-3 fill-current" />
+                                    </button>
+
+                                    {/* Restart Button */}
                                     <button
                                       onClick={() => {
                                         if (activeAudioMode === 'summary') {
@@ -5388,7 +5416,7 @@ export default function VideosPage() {
                                       disabled={activeSentenceIndex === -1}
                                       className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
                                         activeSentenceIndex >= 0
-                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800"
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 active:scale-95"
                                           : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
                                       }`}
                                       title="Reiniciar esta pista"
@@ -5470,7 +5498,27 @@ export default function VideosPage() {
 
                                 <div className="flex flex-col md:flex-row items-center gap-2.5 md:gap-4 w-full">
                                   {/* Dedicated Inline Play/Pause/Resume Button */}
-                                  <div className="shrink-0 flex items-center gap-2">
+                                  <div className="shrink-0 flex items-center gap-1.5">
+                                    {/* Previous Sentence Button */}
+                                    <button
+                                      onClick={() => {
+                                        const prevIdx = reportActiveSentenceIndex - 1;
+                                        if (prevIdx >= 0) {
+                                          playGeminiSentence(prevIdx);
+                                        }
+                                      }}
+                                      disabled={activeAudioMode !== 'report' || reportActiveSentenceIndex <= 0}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeAudioMode === 'report' && reportActiveSentenceIndex > 0
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-indigo-400 hover:bg-zinc-800 active:scale-95"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Frase anterior"
+                                    >
+                                      <SkipBack className="w-3 h-3 fill-current" />
+                                    </button>
+
+                                    {/* Play/Pause Button */}
                                     <button
                                       onClick={() => toggleAudioTrack('report')}
                                       className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 scale-100 hover:scale-105 active:scale-95 ${
@@ -5487,6 +5535,26 @@ export default function VideosPage() {
                                       )}
                                     </button>
 
+                                    {/* Next Sentence Button */}
+                                    <button
+                                      onClick={() => {
+                                        const nextIdx = reportActiveSentenceIndex + 1;
+                                        if (nextIdx < reportTotalSentences) {
+                                          playGeminiSentence(nextIdx);
+                                        }
+                                      }}
+                                      disabled={activeAudioMode !== 'report' || reportTotalSentences === 0 || reportActiveSentenceIndex >= reportTotalSentences - 1}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeAudioMode === 'report' && reportTotalSentences > 0 && reportActiveSentenceIndex < reportTotalSentences - 1
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-indigo-400 hover:bg-zinc-800 active:scale-95"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Frase siguiente"
+                                    >
+                                      <SkipForward className="w-3 h-3 fill-current" />
+                                    </button>
+
+                                    {/* Restart Button */}
                                     <button
                                       onClick={() => {
                                         if (activeAudioMode === 'report') {
@@ -5499,7 +5567,7 @@ export default function VideosPage() {
                                       disabled={reportActiveSentenceIndex === -1}
                                       className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
                                         reportActiveSentenceIndex >= 0
-                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800"
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 active:scale-95"
                                           : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
                                       }`}
                                       title="Reiniciar esta pista"
