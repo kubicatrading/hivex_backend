@@ -642,11 +642,13 @@ function MarkdownRenderer({
   onSeek,
   modelUsed,
   selectedLanguage = "en",
+  activeSentence,
 }: {
   content: string;
   onSeek?: (seconds: number) => void;
   modelUsed?: string;
   selectedLanguage?: string;
+  activeSentence?: string;
 }) {
   if (!content) return null;
 
@@ -837,10 +839,16 @@ function MarkdownRenderer({
             </div>
           );
         } else {
+          const isItemActive = matchesActiveSentence(itemText, activeSentence);
+          const itemClass = isItemActive
+            ? "pl-1 mb-1.5 text-white bg-violet-500/10 border-l-2 border-violet-500 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm text-sm leading-relaxed"
+            : "pl-1 mb-1.5 text-zinc-300 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 text-sm leading-relaxed";
+
           listItems.push(
             <li 
               key={`li-${i}`} 
-              className="pl-1 mb-1.5 text-sm leading-relaxed"
+              className={itemClass}
+              {...(isItemActive ? { "data-active-sentence": "true" } : {})}
             >
               {displayNode}
             </li>
@@ -862,10 +870,16 @@ function MarkdownRenderer({
         const itemText = isNum ? `${listMatch[3]} ${cleanText}` : cleanText;
         const displayNode = parseInlineStyles(itemText);
         
+        const isSubItemActive = matchesActiveSentence(itemText, activeSentence);
+        const subItemClass = isSubItemActive
+          ? "pl-1 mb-1.5 text-white bg-violet-500/10 border-l-2 border-violet-500 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm text-sm leading-relaxed"
+          : "pl-1 mb-1.5 text-zinc-300 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 text-sm leading-relaxed";
+
         listItems.push(
           <li 
             key={`li-${i}`} 
-            className="pl-1 mb-1.5 text-sm leading-relaxed"
+            className={subItemClass}
+            {...(isSubItemActive ? { "data-active-sentence": "true" } : {})}
           >
             {tsStr && onSeek && seconds !== null && (
               <span 
@@ -956,8 +970,17 @@ function MarkdownRenderer({
     }
 
     // Standard line
+    const isParagraphActive = matchesActiveSentence(line, activeSentence);
+    const paragraphClass = isParagraphActive
+      ? "text-white text-sm leading-relaxed mb-2 bg-violet-500/10 border-l-2 border-violet-500 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm"
+      : "text-zinc-300 text-sm leading-relaxed mb-2 border-l-2 border-transparent pl-3 py-1 transition-all duration-300";
+
     elements.push(
-      <p key={i} className="text-zinc-300 text-sm leading-relaxed mb-2">
+      <p 
+        key={i} 
+        className={paragraphClass}
+        {...(isParagraphActive ? { "data-active-sentence": "true" } : {})}
+      >
         {parseInlineStyles(line)}
       </p>
     );
@@ -1048,6 +1071,43 @@ function chunkTextForSpeech(text: string): string[] {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
+
+function matchesActiveSentence(elementText: string, activeSentence: string | undefined): boolean {
+  if (!activeSentence || !elementText) return false;
+
+  // Normalizar una cadena: pasar a minúsculas, remover acentos, puntuación y normalizar espaciados
+  const normalize = (str: string) => {
+    return str
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // Quitar acentos
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'¿¡[\]]/g, "") // Quitar puntuación
+      .replace(/\s+/g, " ") // Colapsar espacios múltiples
+      .trim();
+  };
+
+  const normElement = normalize(elementText);
+  const normActive = normalize(activeSentence);
+
+  if (!normElement || !normActive) return false;
+
+  // Comprobar coincidencia exacta o si el elemento contiene la frase activa
+  if (normElement === normActive || normElement.includes(normActive)) {
+    return true;
+  }
+
+  // Si la frase es larga, comprobar si comparten un prefijo o sufijo significativo para tolerar truncamientos
+  if (normActive.length > 25 && normElement.length > 25) {
+    const startActive = normActive.substring(0, 20);
+    const endActive = normActive.substring(normActive.length - 20);
+    if (normElement.startsWith(startActive) || normElement.endsWith(endActive)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 
 function ShimmerSkeleton() {
   return (
@@ -1972,10 +2032,11 @@ export default function VideosPage() {
     chunks: string[],
     voiceName: string,
     isReport: boolean,
-    generation: number
+    generation: number,
+    startFromIndex = 0
   ) => {
     // We preload in sequence so we don't flood the network
-    for (let i = 0; i < chunks.length; i++) {
+    for (let i = startFromIndex; i < chunks.length; i++) {
       if (generation !== preloadGenerationRef.current) {
         console.log(`[Gemini Audio Preloader] Sequential preloader cancelled for generation ${generation} (current is ${preloadGenerationRef.current})`);
         break;
@@ -2018,7 +2079,7 @@ export default function VideosPage() {
     return "Charon"; // Default
   };
 
-  const playGeminiSentence = (index: number) => {
+  const playGeminiSentence = async (index: number) => {
     setAudioError(null); // Reset audio error on any new sentence attempt
     const mode = activeAudioModeRef.current;
     const isReport = mode === 'report';
@@ -2053,9 +2114,10 @@ export default function VideosPage() {
       return;
     }
 
-    // Temporarily clear event handlers to prevent ghost triggers during source change
+    // Temporarily clear event handlers and pause instantly to prevent overlaps
     audio.onended = null;
     audio.onerror = null;
+    audio.pause();
 
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
     
@@ -2063,7 +2125,41 @@ export default function VideosPage() {
     let audioSrc = blobRef.current[index];
     if (!audioSrc) {
       console.log(`[Gemini Audio Queue] No preloaded Blob URL found for sentence ${index}, loading on-demand`);
-      audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+      try {
+        const url = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
+        const res = await fetch(url);
+        
+        // Guard: If the user clicked seek or skipped to another sentence while we were fetching this one, abort!
+        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) {
+          console.log(`[Gemini Audio Queue] Guard triggered: Aborting on-demand load for sentence ${index} because active index changed`);
+          return;
+        }
+
+        if (!res.ok) {
+          let errMsg = `Error del servidor HTTP ${res.status}`;
+          try {
+            const errData = await res.json();
+            if (errData.error) errMsg = errData.error;
+          } catch {}
+          throw new Error(errMsg);
+        }
+
+        const blob = await res.blob();
+        
+        // Final guard before creating and assigning blob url
+        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) {
+          return;
+        }
+
+        audioSrc = URL.createObjectURL(blob);
+        blobRef.current[index] = audioSrc; // Cache it so it's instant next time!
+      } catch (err: any) {
+        console.error(`[Gemini Audio Queue] On-demand fetch failed for sentence ${index}:`, err);
+        setAudioError(err.message || "Error al sintetizar la voz del fragmento.");
+        setIsPlayingAudio(false);
+        setIsPausedAudio(false);
+        return;
+      }
     } else {
       console.log(`[Gemini Audio Queue] Using preloaded local Blob URL for sentence ${index} (Zero network request!)`);
     }
@@ -2304,6 +2400,26 @@ export default function VideosPage() {
       setReportElapsedSeconds(0);
     }
   }, [reportActiveSentenceIndex, reportChunkStarts]);
+
+  // Auto-scroll centrado en pantalla para la frase activa en reproducción (tipo karaoke)
+  useEffect(() => {
+    const isSummary = activeAudioMode === 'summary';
+    const isExpanded = isSummary ? summaryExpanded : reportExpanded;
+
+    // Solo realizamos el auto-scroll si la tarjeta correspondiente está desplegada/expandida
+    if (!isExpanded) return;
+
+    const activeIdx = isSummary ? activeSentenceIndex : reportActiveSentenceIndex;
+    if (activeIdx >= 0) {
+      const timer = setTimeout(() => {
+        const activeElement = document.querySelector('[data-active-sentence="true"]');
+        if (activeElement) {
+          activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [activeSentenceIndex, reportActiveSentenceIndex, activeAudioMode, summaryExpanded, reportExpanded]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -4652,6 +4768,9 @@ export default function VideosPage() {
             
             return (
               <div className="space-y-6">
+                {/* Persistent Hidden Audio Tag Shared by Both Narration Players */}
+                <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
+
                 {/* A. TRANSCRIPCIÓN LITERAL ORIGINAL */}
                 <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
                   <button
@@ -4827,6 +4946,351 @@ export default function VideosPage() {
                   </div>
                 </div>
 
+                {/* AI-NARRATED AUDIO SUMMARY INDEPENDENT CARD */}
+                {(transcribing || summary || translationLoading) && (
+                  <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
+                    <div className="w-full px-6 py-4 bg-zinc-900/10 border-b border-zinc-900/40 flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                          <Headphones className="w-4 h-4 animate-pulse" />
+                        </div>
+                        <div className="text-left">
+                          <h3 className="text-sm font-extrabold text-white tracking-wide uppercase flex items-center gap-1.5">
+                            {selectedLanguage === "es"
+                              ? "Audio Resumen Narrado por IA"
+                              : selectedLanguage === "de"
+                              ? "KI-narrative Audio-Zusammenfassung"
+                              : selectedLanguage === "tr"
+                              ? "Yapay Zeka Anlatımlı Sesli Özet"
+                              : "AI-Narrated Audio Summary"}
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20 uppercase">
+                              {selectedLanguage === "es" ? "PREMIUM IA" : selectedLanguage === "de" ? "PREMIUM KI" : selectedLanguage === "tr" ? "PREMIUM YZ" : "PREMIUM AI"}
+                            </span>
+                          </h3>
+                          <p className="text-[10px] text-zinc-500 font-medium">
+                            {selectedLanguage === "es"
+                              ? `Navegación Interactiva de Locución ${selectedVoiceId === "gemini-aoede" ? "Femenina" : "Masculina"} Profesional`
+                              : selectedLanguage === "de"
+                              ? `Interaktive Navigation professioneller ${selectedVoiceId === "gemini-aoede" ? "weiblicher" : "männlicher"} Sprecher`
+                              : selectedLanguage === "tr"
+                              ? `Profesyonel ${selectedVoiceId === "gemini-aoede" ? "Kadın" : "Erkek"} Seslendirme ile Etkileşimli Gezinti`
+                              : `Interactive Navigation of Professional ${selectedVoiceId === "gemini-aoede" ? "Female" : "Male"} Voiceover`}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Speed & Voice Selection Options */}
+                      <div className="flex flex-wrap items-center gap-3">
+                        {/* Voice Selector */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                            {selectedLanguage === "es" ? "Voz:" : selectedLanguage === "de" ? "Stimme:" : selectedLanguage === "tr" ? "Ses:" : "Voice:"}
+                          </span>
+                          <select
+                            disabled
+                            value={selectedVoiceId}
+                            onChange={(e) => handleVoiceIdChange(e.target.value)}
+                            className="bg-zinc-950/40 border border-zinc-900 text-zinc-500 px-2.5 py-1 rounded-lg text-xs font-semibold outline-none transition-all select-none cursor-not-allowed opacity-70"
+                          >
+                            <option value="gemini-aoede">
+                              Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzählerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
+                            </option>
+                            <option value="gemini-charon">
+                              Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
+                            </option>
+                            <option value="gemini-puck">
+                              Puck ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
+                            </option>
+                          </select>
+                        </div>
+
+                        {/* Speed Slider Control */}
+                        <div className="flex items-center gap-3 bg-zinc-950/40 border border-zinc-800/30 px-3 py-1.5 rounded-xl select-none">
+                          <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-wider">
+                            {selectedLanguage === "es" ? "Velocidad:" : selectedLanguage === "de" ? "Geschwindigkeit:" : selectedLanguage === "tr" ? "Hız:" : "Speed:"}
+                          </span>
+                          <input
+                            type="range"
+                            min="1.0"
+                            max="2.0"
+                            step="0.1"
+                            value={playbackRate}
+                            onChange={(e) => handleRateChange(parseFloat(e.target.value), false)}
+                            onMouseUp={() => handleRateChange(playbackRate, true)}
+                            onTouchEnd={() => handleRateChange(playbackRate, true)}
+                            className="w-24 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-violet-500 outline-none transition-all hover:accent-violet-400"
+                            style={{
+                              background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${(playbackRate - 1.0) * 100}%, #27272a ${(playbackRate - 1.0) * 100}%, #27272a 100%)`
+                            }}
+                          />
+                          <span className="text-xs font-mono font-bold text-violet-400 w-8 text-right shrink-0">
+                            {playbackRate.toFixed(1)}x
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-6 relative">
+                      <div className="absolute top-0 left-0 w-32 h-32 bg-violet-500/5 blur-[40px] pointer-events-none" />
+                      
+                      {transcribing ? (
+                        <div className="relative z-10 py-8 flex flex-col items-center justify-center text-center space-y-3">
+                          <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 animate-pulse">
+                            <Headphones className="w-8 h-8" />
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-xs font-bold text-zinc-200 animate-pulse">
+                              {selectedLanguage === "es" ? "Generando narración de audio..." : selectedLanguage === "de" ? "Audio-Erzählung wird generiert..." : selectedLanguage === "tr" ? "Sesli anlatım oluşturuluyor..." : "Generating audio narration..."}
+                            </h4>
+                            <p className="text-[10px] text-zinc-500 max-w-xs">
+                              {selectedLanguage === "es" 
+                                ? "Sincronizando el flujo de audio de resumen narrado por el presentador inteligente de HIVEX." 
+                                : selectedLanguage === "de" 
+                                ? "Synchronisieren des vom intelligenten HIVEX-Präsentator gesprochenen Audiostreams." 
+                                : selectedLanguage === "tr" 
+                                ? "HIVEX akıllı sunucusu tarafından seslendirilen ses akışı senkronize ediliyor." 
+                                : "Synchronizing the audio stream narrated by the intelligent HIVEX presenter."}
+                            </p>
+                          </div>
+                        </div>
+                      ) : translationLoading ? (
+                        <div className="relative z-10 py-8 flex flex-col items-center justify-center text-center space-y-3">
+                          <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 animate-bounce">
+                            <Headphones className="w-8 h-8" />
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="text-xs font-bold text-zinc-200">
+                              {selectedLanguage === "es" ? "Traduciendo narración de audio..." : selectedLanguage === "de" ? "Audio-Erzählung wird übersetzt..." : selectedLanguage === "tr" ? "Sesli anlatım çevriliyor..." : "Translating audio narration..."}
+                            </h4>
+                            <p className="text-[10px] text-zinc-500 max-w-xs">
+                              {selectedLanguage === "es" 
+                                ? "Estamos adaptando las marcas de tiempo y el resumen al idioma seleccionado para el narrador de IA." 
+                                : selectedLanguage === "de" 
+                                ? "Wir passen die Zeitstempel und die Zusammenfassung an die für den KI-Erzähler ausgewählte Sprache an." 
+                                : selectedLanguage === "tr" 
+                                ? "Zaman damgalarını ve özeti yapay zeka anlatıcısı için seçilen dile uyarlıyoruz." 
+                                : "We are adapting the timestamps and the summary to the selected language for the AI narrator."}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="relative z-10 flex flex-col gap-4 w-full">
+                          {audioError && activeAudioMode === 'summary' && (
+                            <div className="flex items-center gap-3 text-xs font-semibold text-rose-400 bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl animate-fade-in select-none">
+                              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500 animate-pulse" />
+                              <span className="flex-grow">{audioError}</span>
+                              <button
+                                onClick={() => {
+                                  setAudioError(null);
+                                  playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+                                }}
+                                className="px-3 py-1.5 text-[10px] font-bold bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-lg active:scale-95 transition-all uppercase tracking-wider"
+                              >
+                                Reintentar
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="flex flex-col gap-5 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 md:p-5 rounded-xl md:rounded-2xl select-none">
+                            <div className="w-full flex flex-col gap-4.5">
+                              {/* 1. AUDIORESUMEN DETALLADO TRACK */}
+                              <div className="flex flex-col gap-2 w-full">
+                                <div className="flex items-center justify-between px-1">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
+                                    <span className={`w-1.5 h-1.5 rounded-full ${activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? 'bg-violet-500 animate-pulse' : 'bg-zinc-600'}`} />
+                                    Audioresumen detallado de contenido
+                                  </span>
+                                  {activeAudioMode === 'summary' && isPlayingAudio && (
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/20">En reproducción</span>
+                                  )}
+                                </div>
+                                
+                                <div className="flex flex-col md:flex-row items-center gap-2.5 md:gap-4 w-full">
+                                  {/* Dedicated Inline Play/Pause/Resume Button */}
+                                  <div className="shrink-0 flex items-center gap-1.5">
+                                    {/* Previous Sentence Button */}
+                                    <button
+                                      onClick={() => {
+                                        const prevIdx = activeSentenceIndex - 1;
+                                        if (prevIdx >= 0) {
+                                          playGeminiSentence(prevIdx);
+                                        }
+                                      }}
+                                      disabled={activeAudioMode !== 'summary' || activeSentenceIndex <= 0}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeAudioMode === 'summary' && activeSentenceIndex > 0
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-violet-400 hover:bg-zinc-800 active:scale-95"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Frase anterior"
+                                    >
+                                      <SkipBack className="w-3 h-3 fill-current" />
+                                    </button>
+
+                                    {/* Play/Pause Button */}
+                                    <button
+                                      onClick={() => toggleAudioTrack('summary')}
+                                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 scale-100 hover:scale-105 active:scale-95 ${
+                                        activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio
+                                          ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white shadow-lg shadow-violet-500/20"
+                                          : "bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-zinc-700"
+                                      }`}
+                                      title={activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? "Pausar Audioresumen" : "Reproducir Audioresumen"}
+                                    >
+                                      {activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? (
+                                        <Pause className="w-3.5 h-3.5 fill-current" />
+                                      ) : (
+                                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                                      )}
+                                    </button>
+
+                                    {/* Next Sentence Button */}
+                                    <button
+                                      onClick={() => {
+                                        const nextIdx = activeSentenceIndex + 1;
+                                        if (nextIdx < totalSentences) {
+                                          playGeminiSentence(nextIdx);
+                                        }
+                                      }}
+                                      disabled={activeAudioMode !== 'summary' || totalSentences === 0 || activeSentenceIndex >= totalSentences - 1}
+                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                                        activeAudioMode === 'summary' && totalSentences > 0 && activeSentenceIndex < totalSentences - 1
+                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-violet-400 hover:bg-zinc-800 active:scale-95"
+                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
+                                      }`}
+                                      title="Frase siguiente"
+                                    >
+                                      <SkipForward className="w-3 h-3 fill-current" />
+                                    </button>
+
+                                    {/* Dedicated Independent Restart Button */}
+                                    <button
+                                      onClick={() => {
+                                        setActiveAudioMode('summary');
+                                        activeAudioModeRef.current = 'summary';
+                                        setActiveSentenceIndex(0);
+                                        activeSentenceIndexRef.current = 0;
+                                        playGeminiSentence(0);
+                                      }}
+                                      disabled={totalSentences === 0}
+                                      className="w-7 h-7 rounded-lg flex items-center justify-center transition-all bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 active:scale-95"
+                                      title="Reiniciar reproducción de audioresumen"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                    </button>
+                                  </div>
+
+                                  {/* Mobile Metadata */}
+                                  <div className="flex md:hidden items-center justify-between w-full px-1">
+                                    <div className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-400">
+                                      <span className="text-violet-400">{formatElapsed(summaryElapsedSeconds)}</span>
+                                      <span className="text-zinc-600">/</span>
+                                      <span>{formatTotal(summaryTotalDuration)}</span>
+                                    </div>
+                                    <span className="text-xs font-mono font-bold text-violet-400">
+                                      {(() => {
+                                        const percent = totalSentences > 0 
+                                          ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
+                                          : 0;
+                                        return `${percent}%`;
+                                      })()}
+                                    </span>
+                                  </div>
+
+                                  {/* Desktop Timer */}
+                                  <div className="hidden md:flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
+                                    <span className="text-violet-400">{formatElapsed(summaryElapsedSeconds)}</span>
+                                    <span className="text-zinc-600">/</span>
+                                    <span>{formatTotal(summaryTotalDuration)}</span>
+                                  </div>
+
+                                  {/* Scrubber Slider */}
+                                  <div className="flex-1 w-full flex items-center">
+                                    <input
+                                      type="range"
+                                      min="0"
+                                      max={Math.max(0, totalSentences - 1)}
+                                      value={activeSentenceIndex >= 0 ? activeSentenceIndex : 0}
+                                      onChange={(e) => handleSeek(parseInt(e.target.value))}
+                                      disabled={totalSentences === 0}
+                                      className="w-full h-1.5 bg-zinc-800/80 rounded-lg appearance-none cursor-pointer accent-violet-500 outline-none transition-all hover:h-2"
+                                      style={{
+                                        background: (() => {
+                                          const percent = totalSentences > 1 
+                                            ? ((activeSentenceIndex >= 0 ? activeSentenceIndex : 0) / (totalSentences - 1)) * 100 
+                                            : 0;
+                                          return `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${percent}%, #27272a ${percent}%, #27272a 100%)`;
+                                        })()
+                                      }}
+                                    />
+                                  </div>
+
+                                  {/* Desktop Percentage Badge */}
+                                  <div className="hidden md:block shrink-0">
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                      {(() => {
+                                        const percent = totalSentences > 0 
+                                          ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
+                                          : 0;
+                                        return `${percent}%`;
+                                      })()}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Active Reading Bubble */}
+                          <div className="h-12 bg-zinc-950/20 border border-zinc-900/60 rounded-xl px-4 flex items-center justify-between gap-4 overflow-hidden relative">
+                            {(() => {
+                              if (activeAudioMode === 'summary' && activeSentenceIndex >= 0 && sentenceChunks[activeSentenceIndex]) {
+                                return (
+                                  <>
+                                    <div className="text-xs text-zinc-300 font-medium truncate flex-1 select-none italic">
+                                      &ldquo;{sentenceChunks[activeSentenceIndex]}&rdquo;
+                                    </div>
+                                    {isPlayingAudio && !isPausedAudio && (
+                                      <div className="flex items-center gap-0.5 shrink-0 h-6">
+                                        {[1, 2, 3, 4, 5, 6, 7].map((bar) => {
+                                          const heights = ["h-3", "h-5", "h-2", "h-6", "h-4", "h-5", "h-3"];
+                                          const delays = ["delay-75", "delay-200", "delay-100", "delay-300", "delay-150", "delay-500", "delay-200"];
+                                          return (
+                                            <div
+                                              key={bar}
+                                              className={`w-0.5 bg-violet-400 rounded-full animate-bounce ${heights[bar - 1]} ${delays[bar - 1]}`}
+                                              style={{
+                                                animationDuration: `${0.6 + bar * 0.15}s`
+                                              }}
+                                            />
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              }
+                              
+                              return (
+                                <div className="text-xs text-zinc-500 font-medium select-none italic">
+                                  {totalSentences > 0 
+                                    ? (selectedLanguage === "es" 
+                                        ? "Resumen de audio preparado. Presiona reproducir para escuchar la locución profesional." 
+                                        : "Audio summary prepared. Press play to listen.")
+                                    : (selectedLanguage === "es" 
+                                        ? "No hay audioresumen disponible." 
+                                        : "No audio summary available.")
+                                  }
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* B. RESUMEN DETALLADO DEL CONTENIDO */}
                 {(transcribing || summary || translationLoading || !transcriptionErrorFinal) && (
                   <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
@@ -4906,6 +5370,7 @@ export default function VideosPage() {
                                 content={summary || "No hay resumen detallado disponible."} 
                                 modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
                                 selectedLanguage={selectedLanguage}
+                                activeSentence={activeAudioMode === 'summary' && activeSentenceIndex >= 0 ? sentenceChunks[activeSentenceIndex] : undefined}
                                 onSeek={(seconds) => {
                                   setPlayerTime(seconds);
                                   if (studyVideoRef.current) {
@@ -5189,35 +5654,35 @@ export default function VideosPage() {
                   );
                 })()}
 
-                {/* NEW TTS AUDIO NARRATION SECTION */}
-                {(transcribing || summary || translationLoading) && (
-                  <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
+                {/* NEW TTS AUDIO REPORT SECTION */}
+                {(transcribing || report || translationLoading) && (
+                  <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl mb-6">
                     <div className="w-full px-6 py-4 bg-zinc-900/10 border-b border-zinc-900/40 flex flex-wrap items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                        <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
                           <Headphones className="w-4 h-4 animate-pulse" />
                         </div>
                         <div className="text-left">
                           <h3 className="text-sm font-extrabold text-white tracking-wide uppercase flex items-center gap-1.5">
                             {selectedLanguage === "es"
-                              ? "Audio Resumen Narrado por IA"
+                              ? "Audioinforme de Inversión por IA"
                               : selectedLanguage === "de"
-                              ? "KI-narrative Audio-Zusammenfassung"
+                              ? "KI-Investitions-Audiobericht"
                               : selectedLanguage === "tr"
-                              ? "Yapay Zeka Anlatımlı Sesli Özet"
-                              : "AI-Narrated Audio Summary"}
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-violet-500/10 text-violet-300 border border-violet-500/20 uppercase">
-                              {selectedLanguage === "es" ? "PREMIUM IA" : selectedLanguage === "de" ? "PREMIUM KI" : selectedLanguage === "tr" ? "PREMIUM YZ" : "PREMIUM AI"}
+                              ? "Yapay Zeka Yatırım Ses Raporu"
+                              : "AI Investment Audio Report"}
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 uppercase">
+                              {selectedLanguage === "es" ? "INFORME PREMIUM" : selectedLanguage === "de" ? "PREMIUM BERICHT" : selectedLanguage === "tr" ? "PREMIUM RAPOR" : "PREMIUM REPORT"}
                             </span>
                           </h3>
                           <p className="text-[10px] text-zinc-500 font-medium">
                             {selectedLanguage === "es"
-                              ? `Navegación Interactive de Locución ${selectedVoiceId === "gemini-aoede" ? "Femenina" : "Masculina"} Profesional`
+                              ? `Narración Ejecutiva de Análisis y Perspectivas de Mercado ${selectedVoiceId === "gemini-aoede" ? "(Femenina)" : "(Masculina)"}`
                               : selectedLanguage === "de"
-                              ? `Interaktive Navigation professioneller ${selectedVoiceId === "gemini-aoede" ? "weiblicher" : "männlicher"} Sprecher`
+                              ? `Executive Erzählung von Marktanalysen und Perspektiven ${selectedVoiceId === "gemini-aoede" ? "(Weiblich)" : "(Männlich)"}`
                               : selectedLanguage === "tr"
-                              ? `Profesyonel ${selectedVoiceId === "gemini-aoede" ? "Kadın" : "Erkek"} Seslendirme ile Etkileşimli Gezinti`
-                              : `Interactive Navigation of Professional ${selectedVoiceId === "gemini-aoede" ? "Female" : "Male"} Voiceover`}
+                              ? `Piyasa Analizleri ve Öngörülerinin Yönetici Anlatımı ${selectedVoiceId === "gemini-aoede" ? "(Kadın)" : "(Erkek)"}`
+                              : `Executive Narration of Market Analysis and Insights ${selectedVoiceId === "gemini-aoede" ? "(Female)" : "(Male)"}`}
                           </p>
                         </div>
                       </div>
@@ -5236,7 +5701,7 @@ export default function VideosPage() {
                             className="bg-zinc-950/40 border border-zinc-900 text-zinc-500 px-2.5 py-1 rounded-lg text-xs font-semibold outline-none transition-all select-none cursor-not-allowed opacity-70"
                           >
                             <option value="gemini-aoede">
-                              Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzälerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
+                              Aoede ({selectedLanguage === "es" ? "Narradora Femenina" : selectedLanguage === "de" ? "Weibliche Erzählerin" : selectedLanguage === "tr" ? "Kadın Anlatıcı" : "Female Narrator"})
                             </option>
                             <option value="gemini-charon">
                               Charon ({selectedLanguage === "es" ? "Narrador Masculino" : selectedLanguage === "de" ? "Männlicher Erzähler" : selectedLanguage === "tr" ? "Erkek Anlatıcı" : "Male Narrator"})
@@ -5247,77 +5712,71 @@ export default function VideosPage() {
                           </select>
                         </div>
 
-                        {/* Speed Slider Control */}
-                        <div className="flex items-center gap-3 bg-zinc-950/40 border border-zinc-800/30 px-3 py-1.5 rounded-xl select-none">
-                          <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-wider">
+                        {/* Speed Selector */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
                             {selectedLanguage === "es" ? "Velocidad:" : selectedLanguage === "de" ? "Geschwindigkeit:" : selectedLanguage === "tr" ? "Hız:" : "Speed:"}
                           </span>
-                          <input
-                            type="range"
-                             min="1.0"
-                            max="2.0"
-                            step="0.1"
+                          <select
                             value={playbackRate}
-                            onChange={(e) => handleRateChange(parseFloat(e.target.value), false)}
-                            onMouseUp={() => handleRateChange(playbackRate, true)}
-                            onTouchEnd={() => handleRateChange(playbackRate, true)}
-                            className="w-24 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-violet-500 outline-none transition-all hover:accent-violet-400"
-                            style={{
-                              background: `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${(playbackRate - 1.0) * 100}%, #27272a ${(playbackRate - 1.0) * 100}%, #27272a 100%)`
-                            }}
-                          />
-                          <span className="text-xs font-mono font-bold text-violet-400 w-8 text-right shrink-0">
-                            {playbackRate.toFixed(1)}x
-                          </span>
+                            onChange={(e) => handleRateChange(parseFloat(e.target.value), true)}
+                            className="bg-zinc-950/40 border border-zinc-900 text-zinc-300 px-2.5 py-1 rounded-lg text-xs font-bold outline-none cursor-pointer transition-all hover:bg-zinc-900/60 focus:border-indigo-500/40"
+                          >
+                            <option value="0.75">0.75x</option>
+                            <option value="1.0">1.0x</option>
+                            <option value="1.25">1.25x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2.0">2.0x</option>
+                          </select>
                         </div>
                       </div>
                     </div>
 
-                    <div className="p-6 relative">
-                      <div className="absolute top-0 left-0 w-32 h-32 bg-violet-500/5 blur-[40px] pointer-events-none" />
+                    <div className="relative px-6 py-6 bg-zinc-950/20 backdrop-blur-sm border-b border-zinc-900/10">
+                      <div className="absolute top-0 left-0 w-32 h-32 bg-indigo-500/5 blur-[40px] pointer-events-none" />
                       
                       {transcribing ? (
                         <div className="relative z-10 py-8 flex flex-col items-center justify-center text-center space-y-3">
-                          <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 animate-pulse">
+                          <div className="p-4 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 animate-pulse">
                             <Headphones className="w-8 h-8" />
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-xs font-bold text-zinc-200 animate-pulse">
-                              {selectedLanguage === "es" ? "Generando narración de audio..." : selectedLanguage === "de" ? "Audio-Erzählung wird generiert..." : selectedLanguage === "tr" ? "Sesli anlatım oluşturuluyor..." : "Generating audio narration..."}
+                              {selectedLanguage === "es" ? "Generando audioinforme de inversión..." : selectedLanguage === "de" ? "Audio-Investitionsbericht wird generiert..." : selectedLanguage === "tr" ? "Yatırım ses raporu oluşturuluyor..." : "Generating audio investment report..."}
                             </h4>
                             <p className="text-[10px] text-zinc-500 max-w-xs">
                               {selectedLanguage === "es" 
-                                ? "Sincronizando el flujo de audio narrado por el presentador inteligente de HIVEX." 
+                                ? "Sincronizando la locución ejecutiva del informe financiero de HIVEX." 
                                 : selectedLanguage === "de" 
-                                ? "Synchronisieren des vom intelligenten HIVEX-Präsentator gesprochenen Audiostreams." 
+                                ? "Synchronisieren des gesprochenen Finanzberichts von HIVEX." 
                                 : selectedLanguage === "tr" 
-                                ? "HIVEX akıllı sunucusu tarafından seslendirilen ses akışı senkronize ediliyor." 
-                                : "Synchronizing the audio stream narrated by the intelligent HIVEX presenter."}
+                                ? "HIVEX finansal raporunun seslendirmesi senkronize ediliyor." 
+                                : "Synchronizing the executive narration of the HIVEX financial report."}
                             </p>
                           </div>
                         </div>
                       ) : translationLoading ? (
                         <div className="relative z-10 py-8 flex flex-col items-center justify-center text-center space-y-3">
-                          <div className="p-4 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 animate-bounce">
+                          <div className="p-4 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 animate-bounce">
                             <Headphones className="w-8 h-8" />
                           </div>
                           <div className="space-y-1">
                             <h4 className="text-xs font-bold text-zinc-200">
-                              {selectedLanguage === "es" ? "Traduciendo narración de audio..." : selectedLanguage === "de" ? "Audio-Erzählung wird übersetzt..." : selectedLanguage === "tr" ? "Sesli anlatım çevriliyor..." : "Translating audio narration..."}
+                              {selectedLanguage === "es" ? "Traduciendo audioinforme..." : selectedLanguage === "de" ? "Audiobericht wird übersetzt..." : selectedLanguage === "tr" ? "Ses raporu çevriliyor..." : "Translating audio report..."}
                             </h4>
                             <p className="text-[10px] text-zinc-500 max-w-xs">
                               {selectedLanguage === "es" 
-                                ? "Estamos adaptando las marcas de tiempo y el resumen al idioma seleccionado para el narrador de IA." 
+                                ? "Adaptando las marcas de tiempo y el informe ejecutivo al idioma seleccionado." 
                                 : selectedLanguage === "de" 
-                                ? "Wir passen die Zeitstempel und die Zusammenfassung an die für den KI-Erzähler ausgewählte Sprache an." 
+                                ? "Anpassung der Zeitstempel und des Executive-Berichts an die ausgewählte Sprache." 
                                 : selectedLanguage === "tr" 
-                                ? "Zaman damgalarını ve özeti yapay zeka anlatıcısı için seçilen dile uyarlıyoruz." 
-                                : "We are adapting the timestamps and the summary to the selected language for the AI narrator."}
+                                ? "Zaman damgalarını ve yönetici raporunu seçilen dile uyarlıyoruz." 
+                                : "Adapting the timestamps and executive report to the selected language."}
                             </p>
                           </div>
                         </div>
                       ) : (
-                        /* Premium horizontal scrubber deck */
+                        /* Premium single deck player */
                         <div className="relative z-10 flex flex-col gap-4 w-full">
                           {audioError && (
                             <div className="flex items-center gap-3 text-xs font-semibold text-rose-400 bg-rose-950/20 border border-rose-900/40 p-4 rounded-xl animate-fade-in select-none">
@@ -5326,7 +5785,7 @@ export default function VideosPage() {
                               <button
                                 onClick={() => {
                                   setAudioError(null);
-                                  playGeminiSentence(activeSentenceIndexRef.current >= 0 ? activeSentenceIndexRef.current : 0);
+                                  playGeminiSentence(reportActiveSentenceIndexRef.current >= 0 ? reportActiveSentenceIndexRef.current : 0);
                                 }}
                                 className="px-3 py-1.5 text-[10px] font-bold bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-lg active:scale-95 transition-all uppercase tracking-wider"
                               >
@@ -5335,168 +5794,12 @@ export default function VideosPage() {
                             </div>
                           )}
                           <div className="flex flex-col gap-5 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 md:p-5 rounded-xl md:rounded-2xl select-none">
-                            {/* Hidden DOM Audio Player to prevent iOS Safari background execution suspension */}
-                            <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
-
                             <div className="w-full flex flex-col gap-4.5">
-                              
-                              {/* 1. AUDIORESUMEN DETALLADO TRACK */}
-                              <div className="flex flex-col gap-2 w-full border-b border-zinc-900/40 pb-4 last:border-b-0 last:pb-0">
-                                <div className="flex items-center justify-between px-1">
-                                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
-                                    <span className={`w-1.5 h-1.5 rounded-full ${activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? 'bg-violet-500 animate-pulse' : 'bg-zinc-600'}`} />
-                                    Audioresumen detallado
-                                  </span>
-                                  {activeAudioMode === 'summary' && isPlayingAudio && (
-                                    <span className="text-[9px] font-bold uppercase tracking-wider text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded border border-violet-500/20">En reproducción</span>
-                                  )}
-                                </div>
-                                
-                                <div className="flex flex-col md:flex-row items-center gap-2.5 md:gap-4 w-full">
-                                  {/* Dedicated Inline Play/Pause/Resume Button */}
-                                  <div className="shrink-0 flex items-center gap-1.5">
-                                    {/* Previous Sentence Button */}
-                                    <button
-                                      onClick={() => {
-                                        const prevIdx = activeSentenceIndex - 1;
-                                        if (prevIdx >= 0) {
-                                          playGeminiSentence(prevIdx);
-                                        }
-                                      }}
-                                      disabled={activeAudioMode !== 'summary' || activeSentenceIndex <= 0}
-                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                                        activeAudioMode === 'summary' && activeSentenceIndex > 0
-                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-violet-400 hover:bg-zinc-800 active:scale-95"
-                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
-                                      }`}
-                                      title="Frase anterior"
-                                    >
-                                      <SkipBack className="w-3 h-3 fill-current" />
-                                    </button>
-
-                                    {/* Play/Pause Button */}
-                                    <button
-                                      onClick={() => toggleAudioTrack('summary')}
-                                      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 scale-100 hover:scale-105 active:scale-95 ${
-                                        activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio
-                                          ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white shadow-lg shadow-violet-500/20"
-                                          : "bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-zinc-700"
-                                      }`}
-                                      title={activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? "Pausar Audioresumen" : "Reproducir Audioresumen"}
-                                    >
-                                      {activeAudioMode === 'summary' && isPlayingAudio && !isPausedAudio ? (
-                                        <Pause className="w-3.5 h-3.5 fill-current" />
-                                      ) : (
-                                        <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                                      )}
-                                    </button>
-
-                                    {/* Next Sentence Button */}
-                                    <button
-                                      onClick={() => {
-                                        const nextIdx = activeSentenceIndex + 1;
-                                        if (nextIdx < totalSentences) {
-                                          playGeminiSentence(nextIdx);
-                                        }
-                                      }}
-                                      disabled={activeAudioMode !== 'summary' || totalSentences === 0 || activeSentenceIndex >= totalSentences - 1}
-                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                                        activeAudioMode === 'summary' && totalSentences > 0 && activeSentenceIndex < totalSentences - 1
-                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-violet-400 hover:bg-zinc-800 active:scale-95"
-                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
-                                      }`}
-                                      title="Frase siguiente"
-                                    >
-                                      <SkipForward className="w-3 h-3 fill-current" />
-                                    </button>
-
-                                    {/* Restart Button */}
-                                    <button
-                                      onClick={() => {
-                                        if (activeAudioMode === 'summary') {
-                                          stopAudio();
-                                        } else {
-                                          setActiveSentenceIndex(-1);
-                                          activeSentenceIndexRef.current = -1;
-                                        }
-                                      }}
-                                      disabled={activeSentenceIndex === -1}
-                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                                        activeSentenceIndex >= 0
-                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 active:scale-95"
-                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
-                                      }`}
-                                      title="Reiniciar esta pista"
-                                    >
-                                      <RotateCcw className="w-3 h-3" />
-                                    </button>
-                                  </div>
-
-                                  {/* Mobile Metadata */}
-                                  <div className="flex md:hidden items-center justify-between w-full px-1">
-                                    <div className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-400">
-                                      <span className="text-violet-400">{formatElapsed(summaryElapsedSeconds)}</span>
-                                      <span className="text-zinc-600">/</span>
-                                      <span>{formatTotal(summaryTotalDuration)}</span>
-                                    </div>
-                                    <span className="text-xs font-mono font-bold text-violet-400">
-                                      {(() => {
-                                        const percent = totalSentences > 0 
-                                          ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
-                                          : 0;
-                                        return `${percent}%`;
-                                      })()}
-                                    </span>
-                                  </div>
-
-                                  {/* Desktop Timer */}
-                                  <div className="hidden md:flex items-center gap-1 text-[11px] shrink-0 font-mono font-bold text-zinc-400 bg-zinc-900/60 border border-zinc-800/40 px-2.5 py-1 rounded-lg">
-                                    <span className="text-violet-400">{formatElapsed(summaryElapsedSeconds)}</span>
-                                    <span className="text-zinc-600">/</span>
-                                    <span>{formatTotal(summaryTotalDuration)}</span>
-                                  </div>
-
-                                  {/* Scrubber Slider */}
-                                  <div className="flex-1 w-full flex items-center">
-                                    <input
-                                      type="range"
-                                      min="0"
-                                      max={Math.max(0, totalSentences - 1)}
-                                      value={activeSentenceIndex >= 0 ? activeSentenceIndex : 0}
-                                      onChange={(e) => handleSeek(parseInt(e.target.value))}
-                                      disabled={totalSentences === 0}
-                                      className="w-full h-1.5 bg-zinc-800/80 rounded-lg appearance-none cursor-pointer accent-violet-500 outline-none transition-all hover:h-2"
-                                      style={{
-                                        background: (() => {
-                                          const percent = totalSentences > 1 
-                                            ? ((activeSentenceIndex >= 0 ? activeSentenceIndex : 0) / (totalSentences - 1)) * 100 
-                                            : 0;
-                                          return `linear-gradient(to right, #8b5cf6 0%, #8b5cf6 ${percent}%, #27272a ${percent}%, #27272a 100%)`;
-                                        })()
-                                      }}
-                                    />
-                                  </div>
-
-                                  {/* Desktop Percentage Badge */}
-                                  <div className="hidden md:block shrink-0">
-                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20">
-                                      {(() => {
-                                        const percent = totalSentences > 0 
-                                          ? Math.round(((activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0) / totalSentences) * 100)
-                                          : 0;
-                                        return `${percent}%`;
-                                      })()}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* 2. AUDIOINFORME DE INVERSIÓN TRACK */}
-                              <div className="flex flex-col gap-2 w-full border-t border-zinc-900/20 pt-4 first:border-t-0 first:pt-0">
+                              <div className="flex flex-col gap-2 w-full">
                                 <div className="flex items-center justify-between px-1">
                                   <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
                                     <span className={`w-1.5 h-1.5 rounded-full ${activeAudioMode === 'report' && isPlayingAudio && !isPausedAudio ? 'bg-indigo-500 animate-pulse' : 'bg-zinc-600'}`} />
-                                    Audioinforme de inversión
+                                    Locución Ejecutiva de Inversión
                                   </span>
                                   {activeAudioMode === 'report' && isPlayingAudio && (
                                     <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">En reproducción</span>
@@ -5591,12 +5894,12 @@ export default function VideosPage() {
                                       <span>{formatTotal(reportTotalDuration)}</span>
                                     </div>
                                     <span className="text-xs font-mono font-bold text-indigo-400">
-                                      {(() => {
+                                      {`${(() => {
                                         const percent = reportTotalSentences > 0 
                                           ? Math.round(((reportActiveSentenceIndex >= 0 ? reportActiveSentenceIndex + 1 : 0) / reportTotalSentences) * 100)
                                           : 0;
                                         return `${percent}%`;
-                                      })()}
+                                      })()}`}
                                     </span>
                                   </div>
 
@@ -5631,12 +5934,12 @@ export default function VideosPage() {
                                   {/* Desktop Percentage Badge */}
                                   <div className="hidden md:block shrink-0">
                                     <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                      {(() => {
+                                      {`${(() => {
                                         const percent = reportTotalSentences > 0 
                                           ? Math.round(((reportActiveSentenceIndex >= 0 ? reportActiveSentenceIndex + 1 : 0) / reportTotalSentences) * 100)
                                           : 0;
                                         return `${percent}%`;
-                                      })()}
+                                      })()}`}
                                     </span>
                                   </div>
                                 </div>
@@ -5647,9 +5950,8 @@ export default function VideosPage() {
                           {/* Interactive text bubble showing the active reading sentence */}
                           <div className="h-12 bg-zinc-950/20 border border-zinc-900/60 rounded-xl px-4 flex items-center justify-between gap-4 overflow-hidden relative">
                             {(() => {
-                              const mode = activeAudioMode;
-                              const index = mode === 'summary' ? activeSentenceIndex : reportActiveSentenceIndex;
-                              const chunks = mode === 'summary' ? sentenceChunks : reportSentenceChunks;
+                              const index = reportActiveSentenceIndex;
+                              const chunks = reportSentenceChunks;
                               
                               if (index >= 0 && chunks[index]) {
                                 return (
@@ -5657,7 +5959,7 @@ export default function VideosPage() {
                                     <div className="text-xs text-zinc-300 font-medium truncate flex-1 select-none italic">
                                       &ldquo;{chunks[index]}&rdquo;
                                     </div>
-                                    {isPlayingAudio && !isPausedAudio && (
+                                    {isPlayingAudio && !isPausedAudio && activeAudioMode === 'report' && (
                                       <div className="flex items-center gap-0.5 shrink-0 h-6">
                                         {[1, 2, 3, 4, 5, 6, 7].map((bar) => {
                                           const heights = ["h-3", "h-5", "h-2", "h-6", "h-4", "h-5", "h-3"];
@@ -5678,17 +5980,17 @@ export default function VideosPage() {
                                 );
                               }
                               
-                              const total = mode === 'summary' ? totalSentences : reportTotalSentences;
+                              const total = reportTotalSentences;
                               return (
                                 <div className="text-xs text-zinc-500 font-medium select-none italic">
                                   {total > 0 
                                     ? (selectedLanguage === "es" 
-                                        ? `${mode === 'summary' ? 'Resumen' : 'Informe'} preparado (${total} frases). Presiona el botón de reproducción para escuchar la locución profesional.` 
+                                        ? `Informe de inversión preparado (${total} frases). Presiona el botón de reproducción para escuchar la locución profesional.` 
                                         : selectedLanguage === "de" 
-                                        ? `${mode === 'summary' ? 'Zusammenfassung' : 'Bericht'} bereit (${total} Sätze). Drücken Sie die Wiedergabetaste, um die professionelle Erzählung anzuhören.` 
+                                        ? `Investitionsbericht bereit (${total} Sätze). Drücken Sie die Wiedergabetaste, um die professionelle Erzählung anzuhören.` 
                                         : selectedLanguage === "tr" 
-                                        ? `${mode === 'summary' ? 'Özet' : 'Rapor'} hazır (${total} cümle). Profesyonel seslendirmeyi dinlemek için oynat düğmesine basın.` 
-                                        : `${mode === 'summary' ? 'Summary' : 'Report'} prepared (${total} sentences). Press the play button to listen to the professional narration.`)
+                                        ? `Yatırım raporu hazır (${total} cümle). Profesyonel seslendirmeyi dinlemek için oynat düğmesine basın.` 
+                                        : `Investment report prepared (&{total} sentences). Press the play button to listen to the professional narration.`)
                                     : (selectedLanguage === "es" 
                                         ? "No hay audio de narración disponible." 
                                         : selectedLanguage === "de" 
@@ -5706,7 +6008,6 @@ export default function VideosPage() {
                     </div>
                   </div>
                 )}
-
                 {/* D. INFORME DE ANÁLISIS DE INVERSIÓN */}
                 {(transcribing || report || translationLoading || !transcriptionErrorFinal) && (
                   <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
@@ -5800,6 +6101,7 @@ export default function VideosPage() {
                                 )} 
                                 modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
                                 selectedLanguage={selectedLanguage}
+                                activeSentence={activeAudioMode === 'report' && reportActiveSentenceIndex >= 0 ? reportSentenceChunks[reportActiveSentenceIndex] : undefined}
                                 onSeek={(seconds) => {
                                   setPlayerTime(seconds);
                                   if (studyVideoRef.current) {
