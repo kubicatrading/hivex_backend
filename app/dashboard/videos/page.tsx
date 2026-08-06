@@ -1927,6 +1927,7 @@ export default function VideosPage() {
   // Store preloaded Blob URLs to enable background playback without network requests
   const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
   const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
+  const preloadGenerationRef = useRef<number>(0);
 
   const clearPreloadedBlobUrls = () => {
     Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
@@ -1964,6 +1965,29 @@ export default function VideosPage() {
       console.log(`[Gemini Audio Preloader] ${isReport ? 'report' : 'summary'} Sentence ${index} successfully preloaded as local Blob URL.`);
     } catch (err) {
       console.warn(`[Gemini Audio Preloader] Failed to preload sentence ${index}:`, err);
+    }
+  };
+
+  const preloadAllSentencesSequentially = async (
+    chunks: string[],
+    voiceName: string,
+    isReport: boolean,
+    generation: number
+  ) => {
+    // We preload in sequence so we don't flood the network
+    for (let i = 0; i < chunks.length; i++) {
+      if (generation !== preloadGenerationRef.current) {
+        console.log(`[Gemini Audio Preloader] Sequential preloader cancelled for generation ${generation} (current is ${preloadGenerationRef.current})`);
+        break;
+      }
+      
+      const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
+      if (blobRef.current[i]) continue; // Already preloaded!
+
+      await preloadSentenceBlob(i, chunks, voiceName, isReport);
+      
+      // Small sleep of 100ms between requests to be gentle on the browser/network
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   };
 
@@ -2637,28 +2661,18 @@ export default function VideosPage() {
 
     const voiceName = getVoiceNameFromId(voiceId);
 
-    // Pre-warm the first three sentences of Summary for the new voice!
     const chunks = sentenceChunksRef.current;
-    if (chunks.length > 0) {
-      preloadSentenceBlob(0, chunks, voiceName, false);
-    }
-    if (chunks.length > 1) {
-      preloadSentenceBlob(1, chunks, voiceName, false);
-    }
-    if (chunks.length > 2) {
-      preloadSentenceBlob(2, chunks, voiceName, false);
-    }
-
-    // Pre-warm the first three sentences of Investment Report for the new voice!
     const reportChunks = reportSentenceChunksRef.current;
+
+    preloadGenerationRef.current += 1;
+    const gen = preloadGenerationRef.current;
+
+    // Trigger full background sequential preloading for both tracks with the new voice
+    if (chunks.length > 0) {
+      preloadAllSentencesSequentially(chunks, voiceName, false, gen);
+    }
     if (reportChunks.length > 0) {
-      preloadSentenceBlob(0, reportChunks, voiceName, true);
-    }
-    if (reportChunks.length > 1) {
-      preloadSentenceBlob(1, reportChunks, voiceName, true);
-    }
-    if (reportChunks.length > 2) {
-      preloadSentenceBlob(2, reportChunks, voiceName, true);
+      preloadAllSentencesSequentially(reportChunks, voiceName, true, gen);
     }
 
     // If already playing and not paused, apply change immediately
@@ -2734,11 +2748,18 @@ export default function VideosPage() {
 
     const { summary, transcription, report } = splitTranscription(textToUse);
 
+    // Increment preload generation so any stale preloading loops are stopped
+    preloadGenerationRef.current += 1;
+    const gen = preloadGenerationRef.current;
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+
     // 1. Process Summary Audio Track
     const textForSpeech = summary || transcription || textToUse;
+    let finalSummaryChunks: string[] = [];
     if (textForSpeech) {
       const cleanedText = cleanSummaryForSpeech(textForSpeech);
       const chunks = chunkTextForSpeech(cleanedText);
+      finalSummaryChunks = chunks;
 
       const currentChunks = sentenceChunksRef.current;
       const chunksChanged = currentChunks.length !== chunks.length || 
@@ -2749,18 +2770,6 @@ export default function VideosPage() {
         setSentenceChunks(chunks);
         setTotalSentences(chunks.length);
         setActiveSentenceIndex(-1);
-
-        // Pre-warm the first three sentences to make the very first Play click instant!
-        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-        if (chunks.length > 0) {
-          preloadSentenceBlob(0, chunks, voiceName, false);
-        }
-        if (chunks.length > 1) {
-          preloadSentenceBlob(1, chunks, voiceName, false);
-        }
-        if (chunks.length > 2) {
-          preloadSentenceBlob(2, chunks, voiceName, false);
-        }
       }
     } else {
       if (sentenceChunksRef.current.length > 0) {
@@ -2773,9 +2782,11 @@ export default function VideosPage() {
 
     // 2. Process Investment Report Audio Track
     const textForReportSpeech = report || "";
+    let finalReportChunks: string[] = [];
     if (textForReportSpeech) {
       const cleanedText = cleanSummaryForSpeech(textForReportSpeech);
       const chunks = chunkTextForSpeech(cleanedText);
+      finalReportChunks = chunks;
 
       const currentChunks = reportSentenceChunksRef.current;
       const chunksChanged = currentChunks.length !== chunks.length || 
@@ -2786,18 +2797,6 @@ export default function VideosPage() {
         setReportSentenceChunks(chunks);
         setReportTotalSentences(chunks.length);
         setReportActiveSentenceIndex(-1);
-
-        // Pre-warm the first three sentences to make the very first Play click instant!
-        const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-        if (chunks.length > 0) {
-          preloadSentenceBlob(0, chunks, voiceName, true);
-        }
-        if (chunks.length > 1) {
-          preloadSentenceBlob(1, chunks, voiceName, true);
-        }
-        if (chunks.length > 2) {
-          preloadSentenceBlob(2, chunks, voiceName, true);
-        }
       }
     } else {
       if (reportSentenceChunksRef.current.length > 0) {
@@ -2806,6 +2805,14 @@ export default function VideosPage() {
         setReportTotalSentences(0);
         setReportActiveSentenceIndex(-1);
       }
+    }
+
+    // Trigger full background sequential preloading for both tracks with the new generation
+    if (finalSummaryChunks.length > 0) {
+      preloadAllSentencesSequentially(finalSummaryChunks, voiceName, false, gen);
+    }
+    if (finalReportChunks.length > 0) {
+      preloadAllSentencesSequentially(finalReportChunks, voiceName, true, gen);
     }
   }, [activeStudyVideo, selectedLanguage, transcriptionStates, translationsCache]);
 
