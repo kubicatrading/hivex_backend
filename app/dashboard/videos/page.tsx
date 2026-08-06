@@ -1986,7 +1986,6 @@ export default function VideosPage() {
       URL.revokeObjectURL(activeObjectUrlRef.current);
       activeObjectUrlRef.current = null;
     }
-    clearPreloadedBlobUrls();
   };
 
   const getVoiceNameFromId = (id: string): string => {
@@ -2470,6 +2469,7 @@ export default function VideosPage() {
   useEffect(() => {
     return () => {
       stopGeminiAudio();
+      clearPreloadedBlobUrls();
     };
   }, [activeStudyVideo]);
 
