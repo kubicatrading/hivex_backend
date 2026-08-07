@@ -1065,10 +1065,44 @@ function cleanSummaryForSpeech(summaryStr: string): string {
 
 function chunkTextForSpeech(text: string): string[] {
   if (!text) return [];
-  // Split by common sentence endings (. ? !) while preserving the punctuation
-  const sentences = text.match(/[^.!?]+[.!?]*/g) || [text];
+
+  // Protegemos decimales (ej: 1.5, 100.25)
+  let protectedText = text.replace(/(\d)\.(\d)/g, "$1_DEC_DOT_$2");
+
+  // Protegemos siglas comunes con letras separadas por puntos (ej: U.S., U.S.A., a.m., p.m.)
+  protectedText = protectedText.replace(/\b([A-Za-z])\.([A-Za-z])\b/g, "$1_ACR_DOT_$2");
+  protectedText = protectedText.replace(/\b([A-Za-z])\.([A-Za-z])\.([A-Za-z])\b/g, "$1_ACR_DOT_$2_ACR_DOT_$3");
+  
+  // Protegemos siglas específicas que tengan puntos finales (ej: u.s., u.s.a.)
+  const commonAcronyms = ["u.s.", "u.s.a.", "e.g.", "i.e.", "a.m.", "p.m.", "e.u.", "u.k.", "b.c.", "a.d.", "etc."];
+  commonAcronyms.forEach(acronym => {
+    const escaped = acronym.replace(/\./g, "\\.");
+    const regex = new RegExp(`\\b${escaped}`, "gi");
+    protectedText = protectedText.replace(regex, (match) => match.replace(/\./g, "_ACR_DOT_"));
+  });
+
+  // Protegemos abreviaciones conocidas (ej: Mr., Fed., Corp., etc.)
+  const abbrevs = ["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "fed", "corp", "inc", "co", "ltd", "bros", "ca", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  abbrevs.forEach(abbrev => {
+    const regex = new RegExp(`\\b(${abbrev})\\.(?=\\s|$)`, "gi");
+    protectedText = protectedText.replace(regex, "$1_ABB_DOT_");
+  });
+
+  // Protegemos iniciales de nombres de una sola letra (ej: J. F. Kennedy)
+  protectedText = protectedText.replace(/\b([A-Z])\.(?=\s+[A-Z])/g, "$1_INI_DOT_");
+
+  // Dividimos por signos tradicionales de puntuación (. ? !) preservándolos
+  const sentences = protectedText.match(/[^.!?]+[.!?]*/g) || [protectedText];
+
   return sentences
-    .map((s) => s.trim())
+    .map((s) => {
+      return s
+        .replace(/_DEC_DOT_/g, ".")
+        .replace(/_ACR_DOT_/g, ".")
+        .replace(/_ABB_DOT_/g, ".")
+        .replace(/_INI_DOT_/g, ".")
+        .trim();
+    })
     .filter((s) => s.length > 0);
 }
 
@@ -1091,9 +1125,23 @@ function matchesActiveSentence(elementText: string, activeSentence: string | und
 
   if (!normElement || !normActive) return false;
 
-  // Comprobar coincidencia exacta o si el elemento contiene la frase activa
-  if (normElement === normActive || normElement.includes(normActive)) {
+  // Comprobar coincidencia exacta o coincidencia controlada según la longitud de la frase activa
+  if (normElement === normActive) {
     return true;
+  }
+
+  if (normActive.length <= 4) {
+    // Si la frase es muy corta (ej: siglas o fragmentos de 4 caracteres o menos),
+    // exigimos coincidencia por límite de palabra completa (\b) para evitar encendidos accidentales
+    const regex = new RegExp(`\\b${normActive}\\b`);
+    if (regex.test(normElement)) {
+      return true;
+    }
+  } else {
+    // Si la frase es larga, permitimos la contención normal para mayor flexibilidad
+    if (normElement.includes(normActive)) {
+      return true;
+    }
   }
 
   // Si la frase es larga, comprobar si comparten un prefijo o sufijo significativo para tolerar truncamientos
