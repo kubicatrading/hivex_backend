@@ -1062,6 +1062,14 @@ function cleanSummaryForSpeech(summaryStr: string): string {
   let text = summaryStr.replace(/\[CHART:\s*[\s\S]*?\]/gi, "");
   // 2. Remove timestamps in brackets like [MM:SS] or [H:MM:SS]
   text = text.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "");
+
+  // Add a period to any markdown header lines to force sentence boundaries
+  text = text.replace(/^(#+\s+[^.\n\r]+?)(?=\r?\n|$)/gm, "$1.");
+
+  // Add a period to list items to force sentence boundaries
+  text = text.replace(/^(\s*[\-\*]\s+[^.\n\r]+?)(?=\r?\n|$)/gm, "$1.");
+  text = text.replace(/^(\s*\d+\.\s+[^.\n\r]+?)(?=\r?\n|$)/gm, "$1.");
+
   // 3. Remove markdown title indicators (###, ##, #)
   text = text.replace(/#+\s+/g, "");
   // 4. Remove inline styles like **, *, _, `
