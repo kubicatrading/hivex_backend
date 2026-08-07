@@ -643,12 +643,16 @@ function MarkdownRenderer({
   modelUsed,
   selectedLanguage = "en",
   activeSentence,
+  highlightColor = "violet",
+  onSentenceClick,
 }: {
   content: string;
   onSeek?: (seconds: number) => void;
   modelUsed?: string;
   selectedLanguage?: string;
   activeSentence?: string;
+  highlightColor?: "violet" | "indigo";
+  onSentenceClick?: (sentenceText: string) => void;
 }) {
   if (!content) return null;
 
@@ -840,15 +844,18 @@ function MarkdownRenderer({
           );
         } else {
           const isItemActive = matchesActiveSentence(itemText, activeSentence);
+          const activeBgClass = highlightColor === "indigo" ? "bg-indigo-500/10 border-indigo-500" : "bg-violet-500/10 border-violet-500";
+          const hoverClass = onSentenceClick ? "cursor-pointer hover:bg-zinc-800/20 dark:hover:bg-white/5" : "";
           const itemClass = isItemActive
-            ? "pl-1 mb-1.5 text-white bg-violet-500/10 border-l-2 border-violet-500 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm text-sm leading-relaxed"
-            : "pl-1 mb-1.5 text-zinc-300 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 text-sm leading-relaxed";
+            ? `pl-1 mb-1.5 text-white ${activeBgClass} border-l-2 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm text-sm leading-relaxed ${hoverClass}`
+            : `pl-1 mb-1.5 text-zinc-300 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 text-sm leading-relaxed ${hoverClass}`;
 
           listItems.push(
             <li 
               key={`li-${i}`} 
               className={itemClass}
               {...(isItemActive ? { "data-active-sentence": "true" } : {})}
+              onClick={onSentenceClick ? () => onSentenceClick(itemText) : undefined}
             >
               {displayNode}
             </li>
@@ -871,15 +878,18 @@ function MarkdownRenderer({
         const displayNode = parseInlineStyles(itemText);
         
         const isSubItemActive = matchesActiveSentence(itemText, activeSentence);
+        const activeBgClass = highlightColor === "indigo" ? "bg-indigo-500/10 border-indigo-500" : "bg-violet-500/10 border-violet-500";
+        const hoverClass = onSentenceClick ? "cursor-pointer hover:bg-zinc-800/20 dark:hover:bg-white/5" : "";
         const subItemClass = isSubItemActive
-          ? "pl-1 mb-1.5 text-white bg-violet-500/10 border-l-2 border-violet-500 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm text-sm leading-relaxed"
-          : "pl-1 mb-1.5 text-zinc-300 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 text-sm leading-relaxed";
+          ? `pl-1 mb-1.5 text-white ${activeBgClass} border-l-2 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm text-sm leading-relaxed ${hoverClass}`
+          : `pl-1 mb-1.5 text-zinc-300 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 text-sm leading-relaxed ${hoverClass}`;
 
         listItems.push(
           <li 
             key={`li-${i}`} 
             className={subItemClass}
             {...(isSubItemActive ? { "data-active-sentence": "true" } : {})}
+            onClick={onSentenceClick ? () => onSentenceClick(itemText) : undefined}
           >
             {tsStr && onSeek && seconds !== null && (
               <span 
@@ -971,15 +981,18 @@ function MarkdownRenderer({
 
     // Standard line
     const isParagraphActive = matchesActiveSentence(line, activeSentence);
+    const activeBgClass = highlightColor === "indigo" ? "bg-indigo-500/10 border-indigo-500" : "bg-violet-500/10 border-violet-500";
+    const hoverClass = onSentenceClick ? "cursor-pointer hover:bg-zinc-800/20 dark:hover:bg-white/5" : "";
     const paragraphClass = isParagraphActive
-      ? "text-white text-sm leading-relaxed mb-2 bg-violet-500/10 border-l-2 border-violet-500 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm"
-      : "text-zinc-300 text-sm leading-relaxed mb-2 border-l-2 border-transparent pl-3 py-1 transition-all duration-300";
+      ? `text-white text-sm leading-relaxed mb-2 ${activeBgClass} border-l-2 pl-3 py-1 rounded-r-lg transition-all duration-300 font-semibold shadow-sm ${hoverClass}`
+      : `text-zinc-300 text-sm leading-relaxed mb-2 border-l-2 border-transparent pl-3 py-1 transition-all duration-300 ${hoverClass}`;
 
     elements.push(
       <p 
         key={i} 
         className={paragraphClass}
         {...(isParagraphActive ? { "data-active-sentence": "true" } : {})}
+        onClick={onSentenceClick ? () => onSentenceClick(line) : undefined}
       >
         {parseInlineStyles(line)}
       </p>
@@ -1069,20 +1082,13 @@ function chunkTextForSpeech(text: string): string[] {
   // Protegemos decimales (ej: 1.5, 100.25)
   let protectedText = text.replace(/(\d)\.(\d)/g, "$1_DEC_DOT_$2");
 
-  // Protegemos siglas comunes con letras separadas por puntos (ej: U.S., U.S.A., a.m., p.m.)
-  protectedText = protectedText.replace(/\b([A-Za-z])\.([A-Za-z])\b/g, "$1_ACR_DOT_$2");
-  protectedText = protectedText.replace(/\b([A-Za-z])\.([A-Za-z])\.([A-Za-z])\b/g, "$1_ACR_DOT_$2_ACR_DOT_$3");
-  
-  // Protegemos siglas específicas que tengan puntos finales (ej: u.s., u.s.a.)
-  const commonAcronyms = ["u.s.", "u.s.a.", "e.g.", "i.e.", "a.m.", "p.m.", "e.u.", "u.k.", "b.c.", "a.d.", "etc."];
-  commonAcronyms.forEach(acronym => {
-    const escaped = acronym.replace(/\./g, "\\.");
-    const regex = new RegExp(`\\b${escaped}`, "gi");
-    protectedText = protectedText.replace(regex, (match) => match.replace(/\./g, "_ACR_DOT_"));
+  // Protegemos cualquier sigla o secuencia de letras separadas por puntos (ej: U.S., U.S.A., EE.UU., a.m., p.m.)
+  protectedText = protectedText.replace(/\b([A-Za-z]{1,4}(?:\.[A-Za-z]{1,4})+)\b\.?/gi, (match) => {
+    return match.replace(/\./g, "_ACR_DOT_");
   });
 
   // Protegemos abreviaciones conocidas (ej: Mr., Fed., Corp., etc.)
-  const abbrevs = ["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "fed", "corp", "inc", "co", "ltd", "bros", "ca", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const abbrevs = ["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "fed", "corp", "inc", "co", "ltd", "bros", "ca", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "etc"];
   abbrevs.forEach(abbrev => {
     const regex = new RegExp(`\\b(${abbrev})\\.(?=\\s|$)`, "gi");
     protectedText = protectedText.replace(regex, "$1_ABB_DOT_");
@@ -2799,6 +2805,30 @@ export default function VideosPage() {
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
+    }
+  };
+
+  const handleSentenceClick = (sentenceText: string, isReport: boolean) => {
+    const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+    if (chunks.length === 0) return;
+
+    const index = chunks.findIndex(chunk => {
+      return matchesActiveSentence(sentenceText, chunk) || matchesActiveSentence(chunk, sentenceText);
+    });
+
+    if (index >= 0) {
+      if (isReport) {
+        setActiveAudioMode('report');
+        activeAudioModeRef.current = 'report';
+        setReportActiveSentenceIndex(index);
+        reportActiveSentenceIndexRef.current = index;
+      } else {
+        setActiveAudioMode('summary');
+        activeAudioModeRef.current = 'summary';
+        setActiveSentenceIndex(index);
+        activeSentenceIndexRef.current = index;
+      }
+      playGeminiSentence(index);
     }
   };
 
@@ -5419,6 +5449,8 @@ export default function VideosPage() {
                                 modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
                                 selectedLanguage={selectedLanguage}
                                 activeSentence={activeAudioMode === 'summary' && activeSentenceIndex >= 0 ? sentenceChunks[activeSentenceIndex] : undefined}
+                                highlightColor="violet"
+                                onSentenceClick={(sentenceText) => handleSentenceClick(sentenceText, false)}
                                 onSeek={(seconds) => {
                                   setPlayerTime(seconds);
                                   if (studyVideoRef.current) {
@@ -5760,22 +5792,28 @@ export default function VideosPage() {
                           </select>
                         </div>
 
-                        {/* Speed Selector */}
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                        {/* Speed Slider Control */}
+                        <div className="flex items-center gap-3 bg-zinc-950/40 border border-zinc-800/30 px-3 py-1.5 rounded-xl select-none">
+                          <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-wider">
                             {selectedLanguage === "es" ? "Velocidad:" : selectedLanguage === "de" ? "Geschwindigkeit:" : selectedLanguage === "tr" ? "Hız:" : "Speed:"}
                           </span>
-                          <select
+                          <input
+                            type="range"
+                            min="1.0"
+                            max="2.0"
+                            step="0.1"
                             value={playbackRate}
-                            onChange={(e) => handleRateChange(parseFloat(e.target.value), true)}
-                            className="bg-zinc-950/40 border border-zinc-900 text-zinc-300 px-2.5 py-1 rounded-lg text-xs font-bold outline-none cursor-pointer transition-all hover:bg-zinc-900/60 focus:border-indigo-500/40"
-                          >
-                            <option value="0.75">0.75x</option>
-                            <option value="1.0">1.0x</option>
-                            <option value="1.25">1.25x</option>
-                            <option value="1.5">1.5x</option>
-                            <option value="2.0">2.0x</option>
-                          </select>
+                            onChange={(e) => handleRateChange(parseFloat(e.target.value), false)}
+                            onMouseUp={() => handleRateChange(playbackRate, true)}
+                            onTouchEnd={() => handleRateChange(playbackRate, true)}
+                            className="w-24 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 outline-none transition-all hover:accent-indigo-400"
+                            style={{
+                              background: `linear-gradient(to right, #6366f1 0%, #6366f1 ${(playbackRate - 1.0) * 100}%, #27272a ${(playbackRate - 1.0) * 100}%, #27272a 100%)`
+                            }}
+                          />
+                          <span className="text-xs font-mono font-bold text-indigo-400 w-8 text-right shrink-0">
+                            {playbackRate.toFixed(1)}x
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -5915,19 +5953,14 @@ export default function VideosPage() {
                                     {/* Restart Button */}
                                     <button
                                       onClick={() => {
-                                        if (activeAudioMode === 'report') {
-                                          stopAudio();
-                                        } else {
-                                          setReportActiveSentenceIndex(-1);
-                                          reportActiveSentenceIndexRef.current = -1;
-                                        }
+                                        setActiveAudioMode('report');
+                                        activeAudioModeRef.current = 'report';
+                                        setReportActiveSentenceIndex(0);
+                                        reportActiveSentenceIndexRef.current = 0;
+                                        playGeminiSentence(0);
                                       }}
-                                      disabled={reportActiveSentenceIndex === -1}
-                                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                                        reportActiveSentenceIndex >= 0
-                                          ? "bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 active:scale-95"
-                                          : "bg-zinc-950/20 text-zinc-600 cursor-not-allowed border border-transparent"
-                                      }`}
+                                      disabled={reportTotalSentences === 0}
+                                      className="w-7 h-7 rounded-lg flex items-center justify-center transition-all bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 active:scale-95"
                                       title="Reiniciar esta pista"
                                     >
                                       <RotateCcw className="w-3 h-3" />
@@ -6150,6 +6183,8 @@ export default function VideosPage() {
                                 modelUsed={transcriptionModel || "Google Vertex AI Gemini 1.5 Pro"}
                                 selectedLanguage={selectedLanguage}
                                 activeSentence={activeAudioMode === 'report' && reportActiveSentenceIndex >= 0 ? reportSentenceChunks[reportActiveSentenceIndex] : undefined}
+                                highlightColor="indigo"
+                                onSentenceClick={(sentenceText) => handleSentenceClick(sentenceText, true)}
                                 onSeek={(seconds) => {
                                   setPlayerTime(seconds);
                                   if (studyVideoRef.current) {
