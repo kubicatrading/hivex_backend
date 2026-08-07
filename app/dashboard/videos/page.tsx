@@ -2114,6 +2114,22 @@ export default function VideosPage() {
     }
   };
 
+  const startBackgroundPreloadingForActiveTrack = (specificIndex?: number) => {
+    // Increment generation count to stop any ongoing loops instantly
+    preloadGenerationRef.current += 1;
+    const gen = preloadGenerationRef.current;
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+
+    const isReport = activeAudioModeRef.current === 'report';
+    const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+
+    if (chunks.length > 0) {
+      const startIndex = typeof specificIndex === 'number' ? specificIndex : 0;
+      console.log(`[Gemini Audio Preloader] Prioritizing preloading for active track: ${isReport ? 'report' : 'summary'} starting from sentence ${startIndex} (generation ${gen})`);
+      preloadAllSentencesSequentially(chunks, voiceName, isReport, gen, startIndex);
+    }
+  };
+
   const stopGeminiAudio = () => {
     const audio = activeAudioRef.current || domAudioRef.current;
     if (audio) {
@@ -2780,6 +2796,9 @@ export default function VideosPage() {
       setActiveIndex(startIdx);
       activeIndexRef.current = startIdx;
       
+      // Prioritize background preloading for the newly activated track starting from startIdx
+      startBackgroundPreloadingForActiveTrack(startIdx);
+      
       playGeminiSentence(startIdx);
     }
   };
@@ -2794,6 +2813,9 @@ export default function VideosPage() {
     const targetIdx = Math.max(0, Math.min(index, chunks.length - 1));
     setActiveSentenceIndex(targetIdx);
     activeSentenceIndexRef.current = targetIdx;
+
+    // Prioritize background preloading starting from the new seek position
+    startBackgroundPreloadingForActiveTrack(targetIdx);
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
@@ -2810,6 +2832,9 @@ export default function VideosPage() {
     const targetIdx = Math.max(0, Math.min(index, chunks.length - 1));
     setReportActiveSentenceIndex(targetIdx);
     reportActiveSentenceIndexRef.current = targetIdx;
+
+    // Prioritize background preloading starting from the new seek position
+    startBackgroundPreloadingForActiveTrack(targetIdx);
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
@@ -2836,6 +2861,10 @@ export default function VideosPage() {
         setActiveSentenceIndex(index);
         activeSentenceIndexRef.current = index;
       }
+
+      // Prioritize background preloading starting from the clicked sentence
+      startBackgroundPreloadingForActiveTrack(index);
+
       playGeminiSentence(index);
     }
   };
@@ -2861,21 +2890,7 @@ export default function VideosPage() {
     }
     clearPreloadedBlobUrls();
 
-    const voiceName = getVoiceNameFromId(voiceId);
-
-    const chunks = sentenceChunksRef.current;
-    const reportChunks = reportSentenceChunksRef.current;
-
-    preloadGenerationRef.current += 1;
-    const gen = preloadGenerationRef.current;
-
-    // Trigger full background sequential preloading for both tracks with the new voice
-    if (chunks.length > 0) {
-      preloadAllSentencesSequentially(chunks, voiceName, false, gen);
-    }
-    if (reportChunks.length > 0) {
-      preloadAllSentencesSequentially(reportChunks, voiceName, true, gen);
-    }
+    startBackgroundPreloadingForActiveTrack();
 
     // If already playing and not paused, apply change immediately
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
@@ -2950,10 +2965,7 @@ export default function VideosPage() {
 
     const { summary, transcription, report } = splitTranscription(textToUse);
 
-    // Increment preload generation so any stale preloading loops are stopped
-    preloadGenerationRef.current += 1;
-    const gen = preloadGenerationRef.current;
-    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+
 
     // 1. Process Summary Audio Track
     const textForSpeech = summary || transcription || textToUse;
@@ -3009,13 +3021,8 @@ export default function VideosPage() {
       }
     }
 
-    // Trigger full background sequential preloading for both tracks with the new generation
-    if (finalSummaryChunks.length > 0) {
-      preloadAllSentencesSequentially(finalSummaryChunks, voiceName, false, gen);
-    }
-    if (finalReportChunks.length > 0) {
-      preloadAllSentencesSequentially(finalReportChunks, voiceName, true, gen);
-    }
+    // Trigger prioritized background preloading for the active track
+    startBackgroundPreloadingForActiveTrack();
   }, [activeStudyVideo, selectedLanguage, transcriptionStates, translationsCache]);
 
   // Trigger translation automatically when video, selected language, or original transcription changes
@@ -5256,6 +5263,7 @@ export default function VideosPage() {
                                         activeAudioModeRef.current = 'summary';
                                         setActiveSentenceIndex(0);
                                         activeSentenceIndexRef.current = 0;
+                                        startBackgroundPreloadingForActiveTrack(0);
                                         playGeminiSentence(0);
                                       }}
                                       disabled={totalSentences === 0}
@@ -5965,6 +5973,7 @@ export default function VideosPage() {
                                         activeAudioModeRef.current = 'report';
                                         setReportActiveSentenceIndex(0);
                                         reportActiveSentenceIndexRef.current = 0;
+                                        startBackgroundPreloadingForActiveTrack(0);
                                         playGeminiSentence(0);
                                       }}
                                       disabled={reportTotalSentences === 0}
