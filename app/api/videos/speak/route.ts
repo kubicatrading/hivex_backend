@@ -46,6 +46,30 @@ function addWavHeader(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, bi
 }
 
 /**
+ * Formatting helper to translate decimal points into spoken equivalents (point / coma)
+ * depending on the language of the text. This prevents Gemini TTS from treating
+ * decimal periods as sentence-ending marks and introducing awkward silent gaps.
+ */
+function formatDecimalsForTTS(text: string, voice: string): string {
+  // Simple vocabulary frequency count to identify English vs Spanish text
+  const englishWords = /\b(the|of|and|to|in|is|that|with|for|it|on|as|by|at|an|be|this|are|from)\b/gi;
+  const spanishWords = /\b(el|la|los|las|de|en|y|que|un|una|con|para|lo|del|al|por|su|es|como|se)\b/gi;
+  
+  const englishCount = (text.match(englishWords) || []).length;
+  const spanishCount = (text.match(spanishWords) || []).length;
+  
+  const isEnglish = englishCount >= spanishCount;
+
+  if (isEnglish) {
+    // For English: replace e.g. "2.2" with "2 point 2"
+    return text.replace(/(\d+)\.(\d+)/g, "$1 point $2");
+  } else {
+    // For Spanish: replace e.g. "2.2" with "2 coma 2"
+    return text.replace(/(\d+)\.(\d+)/g, "$1 coma $2");
+  }
+}
+
+/**
  * Core speech synthesis handler supporting both GET and POST requests.
  */
 async function synthesizeSpeech(text: string, voice: string, request?: Request) {
@@ -56,6 +80,9 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
       { status: 500 }
     );
   }
+
+  // Pre-process decimals to prevent TTS from introducing awkward pauses on decimal dots
+  const processedText = formatDecimalsForTTS(text, voice);
 
   // Sequence of dedicated Gemini TTS models to attempt
   const models = [
@@ -79,7 +106,7 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
           {
             parts: [
               {
-                text: text.trim()
+                text: processedText.trim()
               }
             ]
           }
