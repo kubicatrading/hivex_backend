@@ -2368,9 +2368,9 @@ export default function NewsPage() {
                                   return (
                                     <div
                                       key={pIdx}
-                                      className={`p-3.5 rounded-xl border transition-all duration-300 ${
+                                      className={`p-3.5 rounded-xl border transition-colors duration-200 ${
                                         isAnySentenceInParaActive
-                                          ? "bg-zinc-950/80 border-amber-500/40 shadow-lg shadow-amber-950/20"
+                                          ? "bg-zinc-950/80 border-amber-500/30"
                                           : "bg-zinc-950/40 border-zinc-900/60 text-zinc-300 hover:bg-zinc-900/50 hover:border-zinc-800"
                                       }`}
                                     >
@@ -2396,10 +2396,10 @@ export default function NewsPage() {
                                                     const chunkIdx = chunkTargetElementIdsRef.current.indexOf(sentenceTargetId);
                                                     if (chunkIdx >= 0) playCabinSentence(chunkIdx);
                                                   }}
-                                                  className={`inline transition-all duration-200 cursor-pointer rounded px-1 py-0.5 my-0.5 ${
+                                                  className={`inline transition-colors duration-150 cursor-pointer rounded px-1 py-0.5 box-decoration-clone ${
                                                     isSentenceActive
-                                                      ? "bg-amber-500/30 text-amber-100 font-semibold ring-1 ring-amber-400/60 border-b-2 border-amber-400 shadow-md shadow-amber-500/20"
-                                                      : "text-zinc-300 hover:text-white hover:bg-zinc-800/60"
+                                                      ? "bg-amber-500/25 text-amber-200 font-normal border border-amber-400/50"
+                                                      : "text-zinc-300 hover:text-white hover:bg-zinc-800/50"
                                                   }`}
                                                 >
                                                   {sText}{" "}
