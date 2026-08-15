@@ -493,39 +493,35 @@ ${rawTranscriptText}`;
   const projectNumber = clientId.split("-")[0] || "558326121700";
 
   const attempts = [
-    // 1. Google AI Studio Gemini 3.5 Flash (v1beta) - PRIORITIZED FIRST
+    {
+      name: "Google AI Studio Gemini 3.6 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent`
+    },
     {
       name: "Google AI Studio Gemini 3.5 Flash (v1beta)",
       type: "google-ai",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
     },
-    // 2. Vertex AI Gemini 3.5 Flash - PRIORITIZED FIRST
     {
-      name: "Vertex AI Gemini 3.5 Flash",
-      type: "vertex",
-      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-3.5-flash:generateContent`
+      name: "Google AI Studio Gemini 3.0 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent`
     },
-    // 3. Fallbacks - Google AI Studio
     {
       name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
       type: "google-ai",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 2.5 Pro (v1beta)",
+      name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
       type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`
-    },
-    // 4. Fallbacks - Vertex AI
-    {
-      name: "Vertex AI Gemini 2.5 Flash",
-      type: "vertex",
-      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent`
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
     },
     {
-      name: "Vertex AI Gemini 2.5 Pro",
-      type: "vertex",
-      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent`
+      name: "Google AI Studio Gemini 1.5 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`
     }
   ];
 

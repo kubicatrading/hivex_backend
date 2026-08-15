@@ -425,6 +425,43 @@ function formatSecondsToDuration(totalSeconds: number): string {
 // Helper to fetch and extract actual YouTube video duration
 async function fetchRealYoutubeDuration(videoId: string): Promise<{ duration: number; isLive: boolean }> {
   try {
+    // 1. Primary: Query YouTube Internal Player API (100% accurate lengthSeconds)
+    const playerRes = await fetch("https://www.youtube.com/youtubei/v1/player", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      },
+      body: JSON.stringify({
+        videoId: videoId,
+        context: {
+          client: {
+            clientName: "WEB",
+            clientVersion: "2.20240101.00.00",
+            hl: "en",
+            gl: "US"
+          }
+        }
+      })
+    });
+
+    if (playerRes.ok) {
+      const playerData = await playerRes.json();
+      const isLive = Boolean(
+        playerData?.videoDetails?.isLiveContent ||
+        playerData?.videoDetails?.isLive ||
+        playerData?.playabilityStatus?.liveStreamability
+      );
+      const lengthSecondsStr = playerData?.videoDetails?.lengthSeconds;
+      if (lengthSecondsStr) {
+        const secs = parseInt(lengthSecondsStr, 10);
+        if (secs > 0) {
+          return { duration: secs, isLive };
+        }
+      }
+    }
+
+    // 2. Fallback: Fetch Watch Page HTML
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const response = await fetch(url, {
       headers: {
@@ -449,7 +486,7 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<{ duration: nu
       return { duration: 0, isLive: true };
     }
 
-    // 1. Try meta tag itemprop="duration"
+    // Try meta tag itemprop="duration"
     const metaMatch = /itemprop="duration"\s+content="([^"]+)"/i.exec(html) ||
                       /<meta\s+itemprop="duration"\s+content="([^"]+)"/i.exec(html) ||
                       /content="([^"]+)"\s+itemprop="duration"/i.exec(html);
@@ -461,7 +498,7 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<{ duration: nu
       }
     }
 
-    // 2. Try lengthSeconds inside ytInitialPlayerResponse
+    // Try lengthSeconds inside ytInitialPlayerResponse
     const playerResponseMatch = /ytInitialPlayerResponse\s*=\s*({[\s\S]*?});/.exec(html) ||
                                 /ytInitialPlayerResponse\s*=\s*({[\s\S]*?})</.exec(html);
     if (playerResponseMatch) {
@@ -480,7 +517,7 @@ async function fetchRealYoutubeDuration(videoId: string): Promise<{ duration: nu
       }
     }
 
-    // 3. Fallback direct regex on entire HTML
+    // Fallback direct regex on entire HTML
     const directMatch = /"lengthSeconds"\s*:\s*"(\d+)"/.exec(html);
     if (directMatch) {
       return { duration: parseInt(directMatch[1], 10), isLive: false };

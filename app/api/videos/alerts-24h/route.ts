@@ -358,6 +358,10 @@ ${JSON.stringify(videoContexts, null, 2)}
 
   const attempts = [
     {
+      name: "Gemini 3.6 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+    },
+    {
       name: "Gemini 3.5 Flash (v1beta)",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
     },

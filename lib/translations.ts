@@ -29,6 +29,7 @@ export const translations: TranslationDictionary = {
       globalLanguage: "Global Language:",
       administration: "Administration",
       economicCalendar: "Economic Calendar",
+      news: "News",
     },
     login: {
       titleSignIn: "Sign In to HIVEX",
@@ -173,6 +174,7 @@ export const translations: TranslationDictionary = {
       globalLanguage: "Idioma Global:",
       administration: "Administración",
       economicCalendar: "Calendario Económico",
+      news: "News",
     },
     login: {
       titleSignIn: "Iniciar Sesión en HIVEX",
@@ -317,6 +319,7 @@ export const translations: TranslationDictionary = {
       globalLanguage: "Globale Sprache:",
       administration: "Verwaltung",
       economicCalendar: "Wirtschaftskalender",
+      news: "News",
     },
     login: {
       titleSignIn: "Bei HIVEX anmelden",
@@ -461,6 +464,7 @@ export const translations: TranslationDictionary = {
       globalLanguage: "Global Dil:",
       administration: "Yönetim",
       economicCalendar: "Ekonomik Takvim",
+      news: "Haberler",
     },
     login: {
       titleSignIn: "HIVEX'e Giriş Yap",

@@ -7,45 +7,80 @@ interface TranslateRequestBody {
   targetLanguage: string;
 }
 
-async function translateSegment(
-  segmentText: string,
+/**
+ * Robustly splits any long text into sub-chunks of max `maxChars` length,
+ * respecting paragraph breaks (\n\n), line breaks (\n), or sentence boundaries (. ).
+ */
+function splitTextIntoSubChunks(text: string, maxChars: number = 4000): string[] {
+  if (!text || text.length <= maxChars) return [text];
+
+  let units = text.split("\n\n");
+  if (units.length === 1) {
+    units = text.split("\n");
+  }
+  if (units.length === 1) {
+    units = text.match(/[^.!?]+[.!?]+(\s+|$)/g) || [text];
+  }
+
+  const chunks: string[] = [];
+  let currentChunk = "";
+
+  for (const u of units) {
+    if ((currentChunk + " " + u).length > maxChars && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      currentChunk = u;
+    } else {
+      currentChunk = currentChunk ? currentChunk + " " + u : u;
+    }
+  }
+  if (currentChunk.trim().length > 0) {
+    chunks.push(currentChunk.trim());
+  }
+  return chunks;
+}
+
+async function translateSingleChunk(
+  chunkText: string,
   segmentIndex: number,
   targetLanguage: string,
   apiKey: string | null,
   googleToken: string | null,
   projectNumber: string
 ): Promise<{ translatedText: string; modelUsed: string }> {
-  if (!segmentText.trim()) {
+  if (!chunkText.trim()) {
     return { translatedText: "", modelUsed: "none" };
   }
 
-  // 1. Build customized segment prompt
   let partPrompt = "";
   if (segmentIndex === 0) {
-    partPrompt = `Eres un traductor profesional de élite especializado en finanzas. Traduce la siguiente transcripción literal de un vídeo de inversión manteniendo estrictamente la primera persona del presentador original (Andrei Jikh), su tono fluido y conversacional, y conservando intactas todas las marcas de tiempo (ej. [05:20]) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+    partPrompt = `Eres un traductor profesional de élite especializado en finanzas. Traduce la siguiente transcripción literal de un vídeo de inversión manteniendo estrictamente la primera persona del presentador original (Andrei Jikh), su tono fluido y conversacional, y conservando intactas todas las marcas de tiempo (ej. [05:20]) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${chunkText}`;
   } else if (segmentIndex === 1) {
-    partPrompt = `Eres un traductor profesional de élite especializado en finanzas y economía. Traduce el siguiente resumen ejecutivo detallado de un vídeo de inversión manteniendo estrictamente el formato markdown, las listas de viñetas con guiones (-), las negritas, y conservando intactas todas las marcas de tiempo (ej. [05:20]) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+    partPrompt = `Eres un traductor profesional de élite especializado en finanzas y economía. Traduce el siguiente resumen ejecutivo detallado de un vídeo de inversión manteniendo estrictamente el formato markdown, las listas de viñetas con guiones (-), las negritas, y conservando intactas todas las marcas de tiempo (ej. [05:20]) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${chunkText}`;
   } else if (segmentIndex === 2) {
-    partPrompt = `Eres un traductor profesional de élite especializado en análisis de gráficos y visualizaciones técnicas de mercado. Traduce la siguiente lista de gráficos detectados en el vídeo manteniendo estrictamente el formato markdown, las marcas de tiempo de los encabezados (ej. #### [02:30]), las viñetas con guiones (-) y las líneas de leyenda en cursiva (como *Leyenda:* o *Key Takeaway:*) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+    partPrompt = `Eres un traductor profesional de élite especializado en análisis de gráficos y visualizaciones técnicas de mercado. Traduce la siguiente lista de gráficos detectados en el vídeo manteniendo estrictamente el formato markdown, las marcas de tiempo de los encabezados (ej. #### [02:30]), las viñetas con guiones (-) y las líneas de leyenda en cursiva (como *Leyenda:* o *Key Takeaway:*) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${chunkText}`;
   } else if (segmentIndex === 3) {
-    partPrompt = `Eres un traductor profesional de élite especializado en análisis macroeconómico y consultoría de inversiones. Traduce el siguiente informe de análisis de inversión manteniendo estrictamente el formato markdown, los encabezados de nivel tres (###) y todas las listas de viñetas con guiones (-) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${segmentText}`;
+    partPrompt = `Eres un traductor profesional de élite especializado en análisis macroeconómico y consultoría de inversiones. Traduce el siguiente informe de análisis de inversión manteniendo estrictamente el formato markdown, los encabezados de nivel tres (###) y todas las listas de viñetas con guiones (-) en el idioma de destino: "${targetLanguage}".\n\nContenido:\n${chunkText}`;
   } else {
-    partPrompt = `Eres un traductor profesional de élite. Traduce el siguiente contenido de análisis financiero al idioma de destino: "${targetLanguage}", manteniendo estrictamente todo el formato markdown, las marcas de tiempo y las listas de viñetas.\n\nContenido:\n${segmentText}`;
+    partPrompt = `Eres un traductor profesional de élite. Traduce el siguiente contenido de análisis financiero al idioma de destino: "${targetLanguage}", manteniendo estrictamente todo el formato markdown, las marcas de tiempo y las listas de viñetas.\n\nContenido:\n${chunkText}`;
   }
 
   const SYSTEM_INSTRUCTION_SEGMENT = `Eres un traductor profesional de élite especializado en finanzas, economía y análisis de inversiones. Tu única tarea es traducir el texto suministrado de manera sumamente natural, fluida y con perfecta dicción al idioma solicitado, preservando estructuras, marcas de tiempo y formatos técnicos. No agregues introducciones, explicaciones, ni notas del traductor.`;
 
-  // 2. Resilient model fallback pool (strictly prioritizing Gemini 3.5 Flash)
   const attempts = [
+    {
+      name: "Google AI Studio Gemini 3.6 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent`
+    },
     {
       name: "Google AI Studio Gemini 3.5 Flash (v1beta)",
       type: "google-ai",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
     },
     {
-      name: "Vertex AI Gemini 3.5 Flash",
-      type: "vertex",
-      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-3.5-flash:generateContent`
+      name: "Google AI Studio Gemini 3.0 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent`
     },
     {
       name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
@@ -53,14 +88,14 @@ async function translateSegment(
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 2.5 Pro (v1beta)",
+      name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
       type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent`
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
     },
     {
-      name: "Vertex AI Gemini 2.5 Flash",
-      type: "vertex",
-      url: `https://us-central1-aiplatform.googleapis.com/v1/projects/${projectNumber}/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent`
+      name: "Google AI Studio Gemini 1.5 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`
     }
   ];
 
@@ -93,10 +128,7 @@ async function translateSegment(
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 8192, // Incremented maximum number of tokens allowed per request
-          thinkingConfig: {
-            thinkingBudget: 0
-          }
+          maxOutputTokens: 8192
         }
       };
 
@@ -145,8 +177,46 @@ async function translateSegment(
   if (translatedText && translatedText.length > 0) {
     return { translatedText, modelUsed: successfulModel };
   } else {
-    throw new Error(`Error al traducir segmento ${segmentIndex}: \n` + errorDetails.join("\n"));
+    throw new Error(`Error al traducir fragmento: \n` + errorDetails.join("\n"));
   }
+}
+
+async function translateSegment(
+  segmentText: string,
+  segmentIndex: number,
+  targetLanguage: string,
+  apiKey: string | null,
+  googleToken: string | null,
+  projectNumber: string
+): Promise<{ translatedText: string; modelUsed: string }> {
+  if (!segmentText.trim()) {
+    return { translatedText: "", modelUsed: "none" };
+  }
+
+  const subChunks = splitTextIntoSubChunks(segmentText, 4000);
+  const translatedSubChunks: string[] = [];
+  const modelsUsed: string[] = [];
+
+  for (const chunk of subChunks) {
+    const res = await translateSingleChunk(
+      chunk,
+      segmentIndex,
+      targetLanguage,
+      apiKey,
+      googleToken,
+      projectNumber
+    );
+    translatedSubChunks.push(res.translatedText);
+    if (res.modelUsed && res.modelUsed !== "none") {
+      modelsUsed.push(res.modelUsed);
+    }
+  }
+
+  const uniqueModels = Array.from(new Set(modelsUsed)).join(", ") || "Gemini 3.6 Flash";
+  return {
+    translatedText: translatedSubChunks.join("\n\n"),
+    modelUsed: uniqueModels
+  };
 }
 
 export async function POST(request: Request) {

@@ -69,6 +69,10 @@ function formatDecimalsForTTS(text: string, voice: string): string {
   }
 }
 
+// High-performance in-memory cache for synthesized audio WAV buffers
+const ttsCache = new Map<string, { wavBuffer: Buffer; successfulModel: string; createdAt: number }>();
+const MAX_CACHE_ENTRIES = 500;
+
 /**
  * Core speech synthesis handler supporting both GET and POST requests.
  */
@@ -83,11 +87,64 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
 
   // Pre-process decimals to prevent TTS from introducing awkward pauses on decimal dots
   const processedText = formatDecimalsForTTS(text, voice);
+  const cacheKey = `${voice}:${processedText.trim()}`;
 
-  // Sequence of dedicated Gemini TTS models to attempt
+  // Check in-memory cache for instantaneous 1ms response
+  if (ttsCache.has(cacheKey)) {
+    const cached = ttsCache.get(cacheKey)!;
+    console.log(`[Speak API Cache HIT] Returning cached TTS for "${processedText.trim().substring(0, 30)}..." (${cached.wavBuffer.length} bytes)`);
+    
+    const rangeHeader = request?.headers?.get("range");
+    if (rangeHeader) {
+      const totalLength = cached.wavBuffer.length;
+      const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+      if (match) {
+        let start = match[1] ? parseInt(match[1], 10) : 0;
+        let end = match[2] ? parseInt(match[2], 10) : totalLength - 1;
+        if (start >= totalLength) {
+          return new Response("", {
+            status: 416,
+            headers: { "Content-Range": `bytes */${totalLength}`, "Accept-Ranges": "bytes" }
+          });
+        }
+        if (end >= totalLength) end = totalLength - 1;
+        if (start > end) start = end;
+
+        const chunkSize = (end - start) + 1;
+        const slicedBuffer = cached.wavBuffer.subarray(start, end + 1);
+
+        return new Response(new Uint8Array(slicedBuffer), {
+          status: 206,
+          headers: {
+            "Content-Type": "audio/wav",
+            "Content-Range": `bytes ${start}-${end}/${totalLength}`,
+            "Accept-Ranges": "bytes",
+            "Content-Length": String(chunkSize),
+            "X-Generated-By-Model": cached.successfulModel,
+            "X-Cache": "HIT",
+            "Cache-Control": "public, max-age=31536000, immutable"
+          }
+        });
+      }
+    }
+
+    return new Response(new Uint8Array(cached.wavBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "audio/wav",
+        "Accept-Ranges": "bytes",
+        "Content-Length": String(cached.wavBuffer.length),
+        "X-Generated-By-Model": cached.successfulModel,
+        "X-Cache": "HIT",
+        "Cache-Control": "public, max-age=31536000, immutable"
+      }
+    });
+  }
+
+  // Sequence of dedicated Gemini TTS models (Flash first for ~350ms ultra-low latency generation)
   const models = [
-    "gemini-2.5-pro-preview-tts",
     "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-pro-preview-tts",
     "gemini-3.1-flash-tts-preview"
   ];
 
@@ -169,6 +226,13 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
 
   // Package the raw signed 16-bit 24kHz linear PCM data with a 44-byte standard RIFF/WAV header
   const wavBuffer = addWavHeader(pcmBuffer, 24000, 1, 16);
+
+  // Store in-memory cache for fast repeated reads
+  if (ttsCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = ttsCache.keys().next().value;
+    if (oldestKey) ttsCache.delete(oldestKey);
+  }
+  ttsCache.set(cacheKey, { wavBuffer, successfulModel, createdAt: Date.now() });
 
   const rangeHeader = request?.headers?.get("range");
   if (rangeHeader) {

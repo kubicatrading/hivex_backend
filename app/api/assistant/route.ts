@@ -191,12 +191,28 @@ ${useInternet ? `
 
     const attempts = [
       {
+        name: "Gemini 3.6 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+      },
+      {
         name: "Gemini 3.5 Flash",
         url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
       },
       {
+        name: "Gemini 3.0 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent"
+      },
+      {
         name: "Gemini 2.5 Flash",
         url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+      },
+      {
+        name: "Gemini 2.0 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+      },
+      {
+        name: "Gemini 1.5 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
       }
     ];
 

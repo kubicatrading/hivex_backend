@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase, isUsingMock } from "@/lib/supabase";
 import { 
   Music, Video, LayoutDashboard, LogOut, Menu, X, User, Sparkles, Loader2,
-  Radio, ChevronDown, ChevronRight, Heart, Settings, Calendar
+  Radio, ChevronDown, ChevronRight, Heart, Settings, Calendar, Newspaper
 } from "lucide-react";
 import { translations } from "@/lib/translations";
 import { Logo } from "@/components/Logo";
@@ -355,6 +355,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { name: t.overview || "Resumen General", path: "/dashboard", icon: LayoutDashboard },
+    { name: t.news || "News", path: "/dashboard/news", icon: Newspaper },
     { name: t.audioStation || "Estación de Audio", path: "/dashboard/audios", icon: Music },
     { name: t.favorites || "Vídeos preferidos", path: "/dashboard/videos?favorite=true", icon: Heart },
     { name: t.favoriteCharts || "Charts Favoritos", path: "/dashboard/charts-favorites", icon: Heart },
@@ -573,7 +574,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       {/* MAIN VIEWPORT */}
       <main className="flex-grow flex flex-col min-w-0 relative z-10 pt-16 md:pt-0">
         {/* GLOBAL TOP NAVIGATION & LANGUAGE BAR */}
-        <header className="hidden md:flex sticky top-0 z-30 w-full border-b border-zinc-900/60 bg-zinc-950/70 backdrop-blur-md px-10 py-3.5 items-center justify-between">
+        <header className="flex sticky top-0 z-30 w-full border-b border-zinc-900/60 bg-zinc-950/70 backdrop-blur-md px-4 sm:px-6 md:px-10 py-3.5 items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-xs font-semibold tracking-wider text-zinc-400 uppercase">{t.controlConsole || "Consola de Control HIVEX"}</span>
             <span className="text-xs text-zinc-600">|</span>

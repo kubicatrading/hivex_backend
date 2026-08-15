@@ -3157,8 +3157,8 @@ export default function VideosPage() {
   }, [activeStudyVideo, transcriptionStates]);
 
   // Asynchronous background transcription runner for smart automatic sync transcribing
-  const triggerBackgroundTranscription = useCallback(async (videoDoc: VideoDocument) => {
-    if (videoDoc.metadata?.transcription) {
+  const triggerBackgroundTranscription = useCallback(async (videoDoc: VideoDocument, forceFresh: boolean = false) => {
+    if (!forceFresh && videoDoc.metadata?.transcription) {
       console.log(`[Asíncrono] El vídeo ya tiene transcripción en BBDD: ${videoDoc.title}. Asegurando presencia en base de conocimiento y disparando extracción de snapshots...`);
       saveVideoKnowledgeBase(videoDoc, videoDoc.metadata.transcription);
       
@@ -3182,8 +3182,8 @@ export default function VideosPage() {
       return;
     }
 
-    // Comprobar la caché global persistente antes de lanzar la simulación de carga o la petición de red
-    if (typeof window !== "undefined") {
+    // Comprobar la caché global persistente antes de lanzar la simulación de carga o la petición de red (omitir si es re-análisis forzado)
+    if (!forceFresh && typeof window !== "undefined") {
       const cacheKey = getGlobalCacheKey({ id: videoDoc.id, file_url: videoDoc.file_url });
       const cachedDataStr = localStorage.getItem(cacheKey);
       if (cachedDataStr) {
@@ -4355,8 +4355,8 @@ export default function VideosPage() {
       setSelectedVideo(prev => prev && prev.id === videoDoc.id ? cleanedVideoDoc : prev);
       setActiveStudyVideo(cleanedVideoDoc);
 
-      // 5. Trigger asynchronously
-      triggerBackgroundTranscription(cleanedVideoDoc);
+      // 5. Trigger asynchronously with forceFresh = true to force a clean new AI execution
+      triggerBackgroundTranscription(cleanedVideoDoc, true);
 
     } catch (err) {
       console.error("Error trigger background re-analysis:", err);
