@@ -179,9 +179,14 @@ const newsTranslations: Record<string, any> = {
 };
 
 function getValidCoverUrl(coverUrl?: string, slug?: string): string {
-  if (coverUrl && coverUrl.startsWith("http")) return coverUrl;
+  if (coverUrl && coverUrl.startsWith("http") && !coverUrl.includes("trendsjournal.com")) {
+    return coverUrl;
+  }
+  if (coverUrl && coverUrl.startsWith("/")) {
+    return coverUrl;
+  }
   const s = slug || "4-august-2026";
-  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
+  return `/covers/${s}.jpg`;
 }
 
 const getLocalizedTitle = (title: string, lang: string) => {
@@ -2370,6 +2375,16 @@ export default function NewsPage() {
                     src={getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug)}
                     alt={selectedIssue.title}
                     className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      const s = selectedIssue.metadata?.slug || "4-august-2026";
+                      if (!target.src.includes("supabase.co")) {
+                        target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
+                      } else {
+                        target.src = "/covers/4-august-2026.jpg";
+                      }
+                    }}
                   />
                 </div>
 
@@ -2514,6 +2529,16 @@ export default function NewsPage() {
                           src={getValidCoverUrl(issue.metadata?.cover_url, issue.metadata?.slug)}
                           alt={getLocalizedTitle(issue.title, selectedLanguage)}
                           className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            const s = issue.metadata?.slug || "4-august-2026";
+                            if (!target.src.includes("supabase.co")) {
+                              target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
+                            } else {
+                              target.src = "/covers/4-august-2026.jpg";
+                            }
+                          }}
                         />
 
                         <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded bg-black/80 text-[7.5px] font-bold text-zinc-300 font-mono tracking-wide">
