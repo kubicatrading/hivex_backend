@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import {
   Newspaper, RefreshCw, Calendar, BookOpen, Clock, Heart, Trash2, Search,
   ArrowLeft, FileText, ChevronRight, Sparkles, BookOpenCheck, UploadCloud,
-  Plus, Eye, Monitor, AlertCircle, Play, CheckCircle2, ExternalLink,
+  Plus, Eye, Monitor, AlertCircle, Play, CheckCircle2, ExternalLink, X, Download,
   Pause, Volume2, ChevronDown, ChevronUp, Loader2, SkipBack, SkipForward,
   RotateCcw, Headphones, AlertTriangle
 } from "lucide-react";
@@ -1741,8 +1741,20 @@ export default function NewsPage() {
                     </div>
                   )}
 
-                  {/* Page Tag at bottom-right of the cover window */}
+                  {/* Page Tag & External Link at bottom-right of the cover window */}
                   <div className="absolute bottom-4 right-4 flex items-center gap-2 z-20">
+                    {activeCabinIssue.file_url && (
+                      <a
+                        href={`${activeCabinIssue.file_url}#page=${cabinSelectedPage}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/50 text-xs font-mono font-bold text-indigo-200 shadow-xl backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95"
+                        title={selectedLanguage === "es" ? "Abrir esta página en pestaña nueva" : "Open this page in a new tab"}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>{selectedLanguage === "es" ? "Abrir Pág. Directa" : "Open Direct Pg."}</span>
+                      </a>
+                    )}
                     <span className="px-3 py-1.5 rounded-xl bg-zinc-950/90 border border-indigo-500/40 text-xs font-mono font-bold text-indigo-300 shadow-xl backdrop-blur-md">
                       {selectedLanguage === "es" ? `Página ${cabinSelectedPage}` : selectedLanguage === "de" ? `Seite ${cabinSelectedPage}` : selectedLanguage === "tr" ? `Sayfa ${cabinSelectedPage}` : `Page ${cabinSelectedPage}`}
                     </span>
@@ -2776,6 +2788,83 @@ export default function NewsPage() {
         </div>
 
       </div>
+
+      {/* FULL PUBLICATION READER OVERLAY MODAL */}
+      {activeReaderIssue && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col animate-fadeIn">
+          {/* TOP CONTROL BAR */}
+          <div className="px-4 sm:px-6 py-3.5 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-red-600/20 border border-red-500/40 flex items-center justify-center flex-shrink-0">
+                <BookOpen className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-base font-bold text-white truncate">
+                  {getLocalizedTitle(activeReaderIssue.title, selectedLanguage)}
+                </h2>
+                <p className="text-[11px] text-zinc-400 truncate">
+                  {currTrans.publishedOn}: {new Date(activeReaderIssue.metadata?.published_at || activeReaderIssue.created_at).toLocaleDateString(selectedLanguage === "es" ? "es-ES" : "en-US")} • {activeReaderIssue.metadata?.page_count || 158} {currTrans.pagesShort}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+              {/* DIRECT DOWNLOAD / OPEN IN NEW TAB BUTTON */}
+              {activeReaderIssue.file_url && (
+                <a
+                  href={activeReaderIssue.file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="hidden sm:inline">{selectedLanguage === "es" ? "Descargar / Abrir PDF" : "Download / Open PDF"}</span>
+                </a>
+              )}
+
+              {/* ENTER STUDY CABIN BUTTON */}
+              <button
+                onClick={() => {
+                  const issue = activeReaderIssue;
+                  setActiveReaderIssue(null);
+                  setActiveCabinIssue(issue);
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-black text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span className="hidden xs:inline">{selectedLanguage === "es" ? "Abrir Cabina de Estudio" : "Open Study Cabin"}</span>
+              </button>
+
+              {/* CLOSE MODAL BUTTON */}
+              <button
+                onClick={() => setActiveReaderIssue(null)}
+                className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white transition-all"
+                title="Cerrar visor"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* IFRAME / READER CONTAINER */}
+          <div className="flex-1 w-full h-full bg-zinc-950 relative flex items-center justify-center p-2 sm:p-4">
+            {activeReaderIssue.file_url ? (
+              <iframe
+                src={activeReaderIssue.file_url}
+                className="w-full h-full rounded-xl border border-zinc-900 shadow-2xl bg-zinc-950"
+                title={activeReaderIssue.title}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center p-8">
+                <AlertCircle className="w-12 h-12 text-amber-500 mb-3" />
+                <p className="text-sm font-bold text-zinc-300">
+                  {selectedLanguage === "es" ? "No hay archivo PDF disponible para esta edición." : "No PDF file available for this issue."}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );
