@@ -178,6 +178,12 @@ const newsTranslations: Record<string, any> = {
   }
 };
 
+function getValidCoverUrl(coverUrl?: string, slug?: string): string {
+  if (coverUrl && coverUrl.startsWith("http")) return coverUrl;
+  const s = slug || "4-august-2026";
+  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
+}
+
 const getLocalizedTitle = (title: string, lang: string) => {
   if (!title) return "";
   let res = title;
@@ -2183,6 +2189,10 @@ export default function NewsPage() {
                                   <h4
                                     id={headerTargetId}
                                     onClick={() => {
+                                      const p = Number(art.metadata?.start_page || 1);
+                                      setCabinSelectedPage(p);
+                                      topFrameRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
                                       const chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
                                       if (chunkIdx >= 0) playCabinSentence(chunkIdx);
                                     }}
@@ -2348,27 +2358,19 @@ export default function NewsPage() {
               <div className="absolute inset-0 w-full h-full flex items-center justify-center relative">
                 
                 {/* Widescreen backdrop blur background utilizing cover url */}
-                {selectedIssue.metadata?.cover_url && (
-                  <div 
-                    className="absolute inset-0 bg-cover bg-center blur-3xl opacity-40 select-none pointer-events-none"
-                    style={{ backgroundImage: `url(${selectedIssue.metadata.cover_url})` }}
-                  />
-                )}
+                <div 
+                  className="absolute inset-0 bg-cover bg-center blur-3xl opacity-40 select-none pointer-events-none"
+                  style={{ backgroundImage: `url(${getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug)})` }}
+                />
 
                 {/* Sharp vertical centered cover representational display */}
                 <div className="h-[96%] aspect-[3/4.2] relative z-10 rounded-lg overflow-hidden border border-zinc-800 shadow-2xl flex-shrink-0">
-                  {selectedIssue.metadata?.cover_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={selectedIssue.metadata.cover_url}
-                      alt={selectedIssue.title}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-zinc-900 to-zinc-950">
-                      <BookOpen className="w-12 h-12 text-zinc-700" />
-                    </div>
-                  )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug)}
+                    alt={selectedIssue.title}
+                    className="w-full h-full object-cover"
+                  />
                 </div>
 
                 {/* Absolute View Full Publication Button inside widescreen previewer container */}
@@ -2507,18 +2509,12 @@ export default function NewsPage() {
                     >
                       {/* Cover Miniature representation */}
                       <div className="w-18 h-24 bg-zinc-950 flex-shrink-0 relative rounded-lg overflow-hidden border border-zinc-900 shadow-inner">
-                        {issue.metadata?.cover_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={issue.metadata.cover_url}
-                            alt={getLocalizedTitle(issue.title, selectedLanguage)}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-zinc-900 to-zinc-950">
-                            <BookOpen className="w-7 h-7 text-zinc-700" />
-                          </div>
-                        )}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={getValidCoverUrl(issue.metadata?.cover_url, issue.metadata?.slug)}
+                          alt={getLocalizedTitle(issue.title, selectedLanguage)}
+                          className="w-full h-full object-cover"
+                        />
 
                         <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded bg-black/80 text-[7.5px] font-bold text-zinc-300 font-mono tracking-wide">
                           {issue.metadata?.page_count || 158} {currTrans.pagesShort}
