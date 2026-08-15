@@ -885,13 +885,13 @@ export default function NewsPage() {
               if (cleanP.length > 0) {
                 const sentences = splitParagraphIntoSentences(cleanP);
                 if (sentences.length > 0) {
-                  sentences.forEach((sentence: string) => {
+                  sentences.forEach((sentence: string, sIdx: number) => {
                     chunks.push(sentence);
-                    targetElementIds.push(`paragraph-${art.id}-${pIdx}`);
+                    targetElementIds.push(`sentence-${art.id}-${pIdx}-${sIdx}`);
                   });
                 } else {
                   chunks.push(cleanP);
-                  targetElementIds.push(`paragraph-${art.id}-${pIdx}`);
+                  targetElementIds.push(`sentence-${art.id}-${pIdx}-0`);
                 }
               }
             });
@@ -1683,7 +1683,7 @@ export default function NewsPage() {
     const dateSubtitle = titleParts.length > 1 ? titleParts.slice(1).join(" - ").trim() : "";
 
     return (
-      <div className="space-y-8 animate-fade-in pb-12">
+      <div className="min-h-screen text-slate-100 p-6 md:p-8 space-y-8 animate-fade-in relative pb-12">
         {/* Invisible background audio element */}
         <audio ref={cabinAudioRef} className="hidden" />
 
@@ -2361,25 +2361,21 @@ export default function NewsPage() {
                             <div className="space-y-3">
                               {locArt.paragraphs && locArt.paragraphs.length > 0 ? (
                                 locArt.paragraphs.map((para: string, pIdx: number) => {
-                                  const paraTargetId = `paragraph-${art.id}-${pIdx}`;
+                                  const sentences = splitParagraphIntoSentences(para);
                                   const activeTargetId = activeSentenceIdx >= 0 ? chunkTargetElementIdsRef.current[activeSentenceIdx] : null;
-                                  const isParaActive = activeTargetId === paraTargetId && isPlayingAudio;
+                                  const isAnySentenceInParaActive = sentences.some((_, sIdx) => `sentence-${art.id}-${pIdx}-${sIdx}` === activeTargetId) && isPlayingAudio;
+
                                   return (
                                     <div
                                       key={pIdx}
-                                      id={paraTargetId}
-                                      onClick={() => {
-                                        const chunkIdx = chunkTargetElementIdsRef.current.indexOf(paraTargetId);
-                                        if (chunkIdx >= 0) playCabinSentence(chunkIdx);
-                                      }}
-                                      className={`p-3.5 rounded-xl border transition-all duration-300 cursor-pointer ${
-                                        isParaActive
-                                          ? "bg-amber-500/15 border-amber-500/60 shadow-lg shadow-amber-950/50 ring-1 ring-amber-500/40 text-amber-100 font-medium"
+                                      className={`p-3.5 rounded-xl border transition-all duration-300 ${
+                                        isAnySentenceInParaActive
+                                          ? "bg-zinc-950/80 border-amber-500/40 shadow-lg shadow-amber-950/20"
                                           : "bg-zinc-950/40 border-zinc-900/60 text-zinc-300 hover:bg-zinc-900/50 hover:border-zinc-800"
                                       }`}
                                     >
                                       <div className="flex items-start gap-3">
-                                        {isParaActive && (
+                                        {isAnySentenceInParaActive && (
                                           <div className="flex items-center gap-0.5 mt-1 shrink-0 h-4">
                                             <span className="w-1 h-3 bg-amber-400 rounded-full animate-pulse" style={{ animationDelay: "0ms" }} />
                                             <span className="w-1 h-4 bg-amber-400 rounded-full animate-pulse" style={{ animationDelay: "150ms" }} />
@@ -2387,7 +2383,42 @@ export default function NewsPage() {
                                           </div>
                                         )}
                                         <p className="text-xs leading-relaxed text-justify flex-1">
-                                          {para}
+                                          {sentences.length > 0 ? (
+                                            sentences.map((sText: string, sIdx: number) => {
+                                              const sentenceTargetId = `sentence-${art.id}-${pIdx}-${sIdx}`;
+                                              const isSentenceActive = activeTargetId === sentenceTargetId && isPlayingAudio;
+                                              return (
+                                                <span
+                                                  key={sIdx}
+                                                  id={sentenceTargetId}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const chunkIdx = chunkTargetElementIdsRef.current.indexOf(sentenceTargetId);
+                                                    if (chunkIdx >= 0) playCabinSentence(chunkIdx);
+                                                  }}
+                                                  className={`inline transition-all duration-200 cursor-pointer rounded px-1 py-0.5 my-0.5 ${
+                                                    isSentenceActive
+                                                      ? "bg-amber-500/30 text-amber-100 font-semibold ring-1 ring-amber-400/60 border-b-2 border-amber-400 shadow-md shadow-amber-500/20"
+                                                      : "text-zinc-300 hover:text-white hover:bg-zinc-800/60"
+                                                  }`}
+                                                >
+                                                  {sText}{" "}
+                                                </span>
+                                              );
+                                            })
+                                          ) : (
+                                            <span
+                                              id={`sentence-${art.id}-${pIdx}-0`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${art.id}-${pIdx}-0`);
+                                                if (chunkIdx >= 0) playCabinSentence(chunkIdx);
+                                              }}
+                                              className="cursor-pointer hover:text-white"
+                                            >
+                                              {para}
+                                            </span>
+                                          )}
                                         </p>
                                       </div>
                                     </div>
