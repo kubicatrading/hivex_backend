@@ -881,15 +881,18 @@ export default function NewsPage() {
           // Paragraph Chunks - Split each paragraph into acronym-safe sentence chunks
           if (locArt.paragraphs && locArt.paragraphs.length > 0) {
             locArt.paragraphs.forEach((para: string, pIdx: number) => {
-              const cleanP = cleanSummaryForSpeech(para);
-              if (cleanP.length > 0) {
-                const sentences = splitParagraphIntoSentences(cleanP);
-                if (sentences.length > 0) {
-                  sentences.forEach((sentence: string, sIdx: number) => {
-                    chunks.push(sentence);
+              const sentences = splitParagraphIntoSentences(para);
+              if (sentences.length > 0) {
+                sentences.forEach((sentence: string, sIdx: number) => {
+                  const speechSentence = cleanSummaryForSpeech(sentence);
+                  if (speechSentence.length > 0) {
+                    chunks.push(speechSentence);
                     targetElementIds.push(`sentence-${art.id}-${pIdx}-${sIdx}`);
-                  });
-                } else {
+                  }
+                });
+              } else {
+                const cleanP = cleanSummaryForSpeech(para);
+                if (cleanP.length > 0) {
                   chunks.push(cleanP);
                   targetElementIds.push(`sentence-${art.id}-${pIdx}-0`);
                 }
@@ -1348,12 +1351,6 @@ export default function NewsPage() {
           setTranscriptionCollapsed(false);
           setTimeout(() => {
             element.scrollIntoView({ behavior: "smooth", block: "center" });
-            
-            // Flash premium glow effect
-            element.classList.add("bg-amber-500/10", "border-amber-500/30", "scale-[1.01]", "px-4", "py-2.5", "rounded-xl", "border");
-            setTimeout(() => {
-              element.classList.remove("bg-amber-500/10", "border-amber-500/30", "scale-[1.01]", "px-4", "py-2.5", "rounded-xl", "border");
-            }, 3000);
           }, 150);
           return;
         }
@@ -1390,18 +1387,12 @@ export default function NewsPage() {
 
     // Score > 1 ensures we matches at least 2 relevant words to avoid false positive jumps
     if (bestMatch.score > 1) {
-      const elementId = `paragraph-${bestMatch.articleId}-${bestMatch.pIdx}`;
+      const elementId = `sentence-${bestMatch.articleId}-${bestMatch.pIdx}-0`;
       const element = document.getElementById(elementId);
       if (element) {
         setTranscriptionCollapsed(false);
         setTimeout(() => {
           element.scrollIntoView({ behavior: "smooth", block: "center" });
-          
-          // Flash premium glow effect
-          element.classList.add("bg-amber-500/10", "border-amber-500/30", "scale-[1.01]", "px-4", "py-2.5", "rounded-xl", "border");
-          setTimeout(() => {
-            element.classList.remove("bg-amber-500/10", "border-amber-500/30", "scale-[1.01]", "px-4", "py-2.5", "rounded-xl", "border");
-          }, 3000);
         }, 150);
       }
     }
