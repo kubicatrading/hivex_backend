@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   Newspaper, RefreshCw, Calendar, BookOpen, Clock, Heart, Trash2, Search,
-  ArrowLeft, FileText, ChevronRight, Sparkles, BookOpenCheck, UploadCloud,
+  ArrowLeft, FileText, ChevronRight, ChevronLeft, Sparkles, BookOpenCheck, UploadCloud,
   Plus, Eye, Monitor, AlertCircle, Play, CheckCircle2, ExternalLink,
   Pause, Volume2, ChevronDown, ChevronUp, Loader2, SkipBack, SkipForward,
   RotateCcw, Headphones, AlertTriangle
@@ -1856,8 +1856,37 @@ export default function NewsPage() {
                     </div>
                   )}
 
+                  {/* Left Side: Prev Page Floating Control */}
+                  {activeCabinIssue.file_url && (
+                    <button
+                      onClick={() => setCabinSelectedPage(prev => Math.max(1, prev - 1))}
+                      disabled={cabinSelectedPage <= 1}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer group/prev select-none"
+                      title={selectedLanguage === "es" ? "Página Anterior" : "Previous Page"}
+                    >
+                      <ChevronLeft className="w-4 h-4 text-indigo-400 group-hover/prev:-translate-x-0.5 transition-transform shrink-0" />
+                      <span className="hidden md:inline font-mono tracking-tight text-[11px]">
+                        {selectedLanguage === "es" ? "Pág. Anterior" : selectedLanguage === "de" ? "Zurück" : selectedLanguage === "tr" ? "Önceki" : "Prev Page"}
+                      </span>
+                    </button>
+                  )}
+
+                  {/* Right Side: Next Page Floating Control */}
+                  {activeCabinIssue.file_url && (
+                    <button
+                      onClick={() => setCabinSelectedPage(prev => prev + 1)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold cursor-pointer group/next select-none"
+                      title={selectedLanguage === "es" ? "Página Siguiente" : "Next Page"}
+                    >
+                      <span className="hidden md:inline font-mono tracking-tight text-[11px]">
+                        {selectedLanguage === "es" ? "Pág. Siguiente" : selectedLanguage === "de" ? "Weiter" : selectedLanguage === "tr" ? "Sonraki" : "Next Page"}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-indigo-400 group-hover/next:translate-x-0.5 transition-transform shrink-0" />
+                    </button>
+                  )}
+
                   {/* Page Tag at bottom-right of the cover window */}
-                  <div className="absolute bottom-4 right-4 flex items-center gap-2 z-20">
+                  <div className="absolute bottom-4 right-4 flex items-center gap-2 z-20 select-none">
                     <span className="px-3 py-1.5 rounded-xl bg-zinc-950/90 border border-indigo-500/40 text-xs font-mono font-bold text-indigo-300 shadow-xl backdrop-blur-md">
                       {selectedLanguage === "es" ? `Página ${cabinSelectedPage}` : selectedLanguage === "de" ? `Seite ${cabinSelectedPage}` : selectedLanguage === "tr" ? `Sayfa ${cabinSelectedPage}` : `Page ${cabinSelectedPage}`}
                     </span>
