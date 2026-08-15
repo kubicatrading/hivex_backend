@@ -359,6 +359,123 @@ const toHungarianTitleCase = (str: string): string => {
     .join(" ");
 };
 
+interface PdfViewerProps {
+  url: string;
+  page: number;
+}
+
+function PdfViewer({ url, page }: PdfViewerProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [useCanvas, setUseCanvas] = useState(false);
+  const pdfDocRef = useRef<any>(null);
+
+  useEffect(() => {
+    // Detect iPad / iOS / touch devices where native Safari iframe does not support PDF fragment #page=XX
+    const isTouchOrIPad = typeof window !== "undefined" && (
+      ("ontouchstart" in window) ||
+      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) ||
+      /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+      (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+    );
+
+    setUseCanvas(Boolean(isTouchOrIPad));
+  }, []);
+
+  useEffect(() => {
+    if (!useCanvas || !url) return;
+
+    let isCancelled = false;
+
+    async function loadAndRender() {
+      setLoading(true);
+      try {
+        if (!(window as any).pdfjsLib) {
+          await new Promise<void>((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+            script.onload = () => {
+              if ((window as any).pdfjsLib) {
+                (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
+                  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+              }
+              resolve();
+            };
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+        }
+
+        const pdfjsLib = (window as any).pdfjsLib;
+        if (!pdfjsLib) return;
+
+        if (!pdfDocRef.current || pdfDocRef.current._url !== url) {
+          const loadingTask = pdfjsLib.getDocument(url);
+          pdfDocRef.current = await loadingTask.promise;
+          pdfDocRef.current._url = url;
+        }
+
+        const pdf = pdfDocRef.current;
+        const pageNum = Math.min(Math.max(1, page), pdf.numPages);
+        const pdfPage = await pdf.getPage(pageNum);
+
+        if (isCancelled || !canvasRef.current) return;
+
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d");
+        if (!context) return;
+
+        const containerWidth = canvas.parentElement?.clientWidth || 800;
+        const unscaledViewport = pdfPage.getViewport({ scale: 1 });
+        const scale = containerWidth / unscaledViewport.width;
+        const viewport = pdfPage.getViewport({ scale: Math.max(scale, 1.5) });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport,
+        };
+
+        await pdfPage.render(renderContext).promise;
+      } catch (err) {
+        console.error("PDF.js render error:", err);
+      } finally {
+        if (!isCancelled) setLoading(false);
+      }
+    }
+
+    loadAndRender();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [useCanvas, url, page]);
+
+  if (!useCanvas) {
+    return (
+      <iframe
+        key={`cabin-top-iframe-${page}`}
+        src={`${url}#page=${page}`}
+        className="w-full h-full border-0 bg-zinc-950"
+        title="Publicación Real de Estudio"
+      />
+    );
+  }
+
+  return (
+    <div className="relative w-full h-full flex items-center justify-center overflow-auto bg-zinc-950 p-2">
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 z-10 text-indigo-400 text-xs font-mono">
+          Cargando página {page}...
+        </div>
+      )}
+      <canvas ref={canvasRef} className="max-w-full max-h-full object-contain shadow-2xl rounded" />
+    </div>
+  );
+}
+
 export default function NewsPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [issues, setIssues] = useState<MagazineIssue[]>([]);
@@ -1727,13 +1844,11 @@ export default function NewsPage() {
                     </div>
                   )}
 
-                  {/* Interactive Live PDF Iframe displaying real publication at exact page */}
+                  {/* Interactive Live PDF Viewer displaying real publication at exact page */}
                   {activeCabinIssue.file_url ? (
-                    <iframe
-                      key={`cabin-top-iframe-${cabinSelectedPage}`}
-                      src={`${activeCabinIssue.file_url}#page=${cabinSelectedPage}`}
-                      className="w-full h-full border-0 bg-zinc-950"
-                      title="Publicación Real de Estudio"
+                    <PdfViewer
+                      url={activeCabinIssue.file_url}
+                      page={cabinSelectedPage}
                     />
                   ) : (
                     <div className="relative z-10 w-full h-full flex items-center justify-center bg-gradient-to-b from-zinc-900 to-zinc-950 rounded-xl">
@@ -2390,7 +2505,7 @@ export default function NewsPage() {
 
                 {/* Absolute View Full Publication Button inside widescreen previewer container */}
                 <button
-                  onClick={() => setActiveReaderIssue(selectedIssue)}
+                  onClick={() => setActiveCabinIssue(selectedIssue)}
                   className="absolute bottom-4 right-4 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-extrabold transition-all shadow-[0_4px_20px_rgba(220,38,38,0.4)] flex items-center gap-2 z-20 hover:scale-105 active:scale-95 duration-200"
                 >
                   <svg className="w-4 h-4 fill-current flex-shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
