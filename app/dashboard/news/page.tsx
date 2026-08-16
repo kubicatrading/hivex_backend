@@ -362,9 +362,10 @@ const toHungarianTitleCase = (str: string): string => {
 interface PdfViewerProps {
   url: string;
   page: number;
+  onPageClick?: () => void;
 }
 
-function PdfViewer({ url, page }: PdfViewerProps) {
+function PdfViewer({ url, page, onPageClick }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [useCanvas, setUseCanvas] = useState(false);
@@ -465,13 +466,17 @@ function PdfViewer({ url, page }: PdfViewerProps) {
   }
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center overflow-auto bg-zinc-950 p-2">
+    <div
+      onClick={onPageClick}
+      className="relative w-full h-full flex items-center justify-center overflow-auto bg-zinc-950 p-2 cursor-pointer group/canvas select-none"
+      title="Hacer clic para reproducir el primer título de esta página"
+    >
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 z-10 text-indigo-400 text-xs font-mono">
           Cargando página {page}...
         </div>
       )}
-      <canvas ref={canvasRef} className="max-w-full max-h-full object-contain shadow-2xl rounded" />
+      <canvas ref={canvasRef} className="max-w-full max-h-full object-contain shadow-2xl rounded group-hover/canvas:ring-2 group-hover/canvas:ring-amber-500/50 transition-all" />
     </div>
   );
 }
@@ -1169,6 +1174,46 @@ export default function NewsPage() {
     if (cabinAudioRef.current) cabinAudioRef.current.playbackRate = newRate;
   };
 
+  const playFirstArticleForPage = (pageNumber: number) => {
+    if (!cabinArticles || cabinArticles.length === 0) return;
+
+    // 1. Try exact match on start_page
+    let targetArticle = cabinArticles.find(
+      (art) => Number(art.metadata?.start_page) === pageNumber
+    );
+
+    // 2. Try match within page range (start_page <= page <= end_page)
+    if (!targetArticle) {
+      targetArticle = cabinArticles.find((art) => {
+        const start = Number(art.metadata?.start_page || 0);
+        const end = Number(art.metadata?.end_page || start);
+        return start > 0 && pageNumber >= start && pageNumber <= end;
+      });
+    }
+
+    // 3. Try first article starting AFTER pageNumber
+    if (!targetArticle) {
+      targetArticle = cabinArticles.find(
+        (art) => Number(art.metadata?.start_page || 0) > pageNumber
+      );
+    }
+
+    // 4. Fallback to first article
+    if (!targetArticle) {
+      targetArticle = cabinArticles[0];
+    }
+
+    if (targetArticle) {
+      const headerTargetId = `article-title-${targetArticle.id}`;
+      const chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+      if (chunkIdx >= 0) {
+        playCabinSentence(chunkIdx);
+      } else if (sentenceChunksRef.current.length > 0) {
+        playCabinSentence(0);
+      }
+    }
+  };
+
   const handleTriggerSummarize = async () => {
     if (!activeCabinIssue) return;
     setGeneratingSummary(true);
@@ -1753,15 +1798,39 @@ export default function NewsPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-zinc-900 bg-black overflow-hidden relative shadow-2xl group">
-                <div className="px-4 py-2.5 bg-zinc-900/40 border-b border-zinc-900/80 flex items-center justify-between">
+              <div className="rounded-2xl border border-zinc-900 bg-zinc-900/20 overflow-hidden relative shadow-2xl">
+                <div className="px-4 py-2.5 bg-zinc-900/40 border-b border-zinc-900/80 flex items-center justify-between flex-wrap gap-2">
                   <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
                     <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
                     {selectedLanguage === "es" ? "Visualización de Publicación Real en Vivo" : "Live Full Publication View"}
                   </span>
-                  <span className="text-[9px] text-zinc-500 font-mono">
-                    ID: {activeCabinIssue.metadata?.slug || activeCabinIssue.id || "magazine"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {activeCabinIssue.file_url && (
+                      <div className="flex items-center gap-1.5 bg-zinc-950/80 border border-zinc-800 rounded-lg px-2 py-1">
+                        <button
+                          onClick={() => setCabinSelectedPage(prev => Math.max(1, prev - 1))}
+                          disabled={cabinSelectedPage <= 1}
+                          className="p-1 rounded hover:bg-zinc-800 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                          title={selectedLanguage === "es" ? "Página Anterior" : "Previous Page"}
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="text-[11px] font-mono font-bold text-indigo-300 min-w-[50px] text-center">
+                          {selectedLanguage === "es" ? `Pág. ${cabinSelectedPage}` : `Pg. ${cabinSelectedPage}`}
+                        </span>
+                        <button
+                          onClick={() => setCabinSelectedPage(prev => prev + 1)}
+                          className="p-1 rounded hover:bg-zinc-800 text-zinc-300 transition-colors cursor-pointer"
+                          title={selectedLanguage === "es" ? "Página Siguiente" : "Next Page"}
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    <span className="text-[9px] text-zinc-500 font-mono hidden sm:inline">
+                      ID: {activeCabinIssue.metadata?.slug || activeCabinIssue.id || "magazine"}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="relative w-full h-[380px] xs:h-[460px] sm:h-[580px] md:h-[680px] bg-zinc-950 flex items-center justify-center overflow-hidden">
@@ -1847,37 +1916,47 @@ export default function NewsPage() {
                     </div>
                   )}
 
-                  {/* Left Side: Prev Page Floating Control (Hidden on Desktop) */}
+                  {/* Left Side: Prev Page Floating Control */}
                   {activeCabinIssue.file_url && (
                     <button
                       onClick={() => setCabinSelectedPage(prev => Math.max(1, prev - 1))}
                       disabled={cabinSelectedPage <= 1}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex md:hidden items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer group/prev select-none"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer group/prev select-none"
                       title={selectedLanguage === "es" ? "Página Anterior" : "Previous Page"}
                     >
                       <ChevronLeft className="w-4 h-4 text-indigo-400 group-hover/prev:-translate-x-0.5 transition-transform shrink-0" />
-                      <span className="font-mono tracking-tight text-[11px]">
+                      <span className="font-mono tracking-tight text-[11px] hidden sm:inline">
                         {selectedLanguage === "es" ? "Pág. Anterior" : selectedLanguage === "de" ? "Zurück" : selectedLanguage === "tr" ? "Önceki" : "Prev Page"}
                       </span>
                     </button>
                   )}
 
-                  {/* Right Side: Next Page Floating Control (Hidden on Desktop) */}
+                  {/* Right Side: Next Page Floating Control */}
                   {activeCabinIssue.file_url && (
                     <button
                       onClick={() => setCabinSelectedPage(prev => prev + 1)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex md:hidden items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold cursor-pointer group/next select-none"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold cursor-pointer group/next select-none"
                       title={selectedLanguage === "es" ? "Página Siguiente" : "Next Page"}
                     >
-                      <span className="font-mono tracking-tight text-[11px]">
+                      <span className="font-mono tracking-tight text-[11px] hidden sm:inline">
                         {selectedLanguage === "es" ? "Pág. Siguiente" : selectedLanguage === "de" ? "Weiter" : selectedLanguage === "tr" ? "Sonraki" : "Next Page"}
                       </span>
                       <ChevronRight className="w-4 h-4 text-indigo-400 group-hover/next:translate-x-0.5 transition-transform shrink-0" />
                     </button>
                   )}
 
-                  {/* Page Tag at bottom-right of the cover window */}
+                  {/* Bottom Control Bar: Audio for Current Page & Page Badge */}
                   <div className="absolute bottom-4 right-4 flex items-center gap-2 z-20 select-none">
+                    {activeCabinIssue.file_url && (
+                      <button
+                        onClick={() => playFirstArticleForPage(cabinSelectedPage)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500/90 hover:bg-amber-500 border border-amber-400/80 text-xs font-bold text-zinc-950 shadow-xl backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                        title={selectedLanguage === "es" ? "Escuchar audio de esta página" : "Play audio for this page"}
+                      >
+                        <Volume2 className="w-3.5 h-3.5 text-zinc-950" />
+                        <span>{selectedLanguage === "es" ? "Escuchar Pág." : "Play Page Audio"}</span>
+                      </button>
+                    )}
                     <span className="px-3 py-1.5 rounded-xl bg-zinc-950/90 border border-indigo-500/40 text-xs font-mono font-bold text-indigo-300 shadow-xl backdrop-blur-md">
                       {selectedLanguage === "es" ? `Página ${cabinSelectedPage}` : selectedLanguage === "de" ? `Seite ${cabinSelectedPage}` : selectedLanguage === "tr" ? `Sayfa ${cabinSelectedPage}` : `Page ${cabinSelectedPage}`}
                     </span>
