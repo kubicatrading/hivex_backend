@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   Newspaper, RefreshCw, Calendar, BookOpen, Clock, Heart, Trash2, Search,
   ArrowLeft, FileText, ChevronRight, ChevronLeft, Sparkles, BookOpenCheck, UploadCloud,
   Plus, Eye, Monitor, AlertCircle, Play, CheckCircle2, ExternalLink,
   Pause, Volume2, ChevronDown, ChevronUp, Loader2, SkipBack, SkipForward,
-  RotateCcw, Headphones, AlertTriangle
+  RotateCcw, Headphones, AlertTriangle, Maximize2, Minimize2
 } from "lucide-react";
 import { translations } from "@/lib/translations";
+import { cleanSummaryForSpeech, splitParagraphIntoSentences } from "@/lib/magazineSentences";
 
 interface MagazineIssue {
   id: string;
@@ -28,6 +29,13 @@ interface MagazineIssue {
     author?: string;
     transcription_model?: string;
     summary_model?: string;
+    audio_status?: string;
+    audio_progress_percent?: number;
+    audio_url?: string;
+    audio_voice?: string;
+    audio_language?: string;
+    sentence_timestamps?: any[];
+    audios?: Record<string, any>;
   };
 }
 
@@ -362,34 +370,32 @@ const toHungarianTitleCase = (str: string): string => {
 interface PdfViewerProps {
   url: string;
   page: number;
-  onPageClick?: () => void;
+  onPageChange?: (pageNum: number) => void;
+  onPageClick?: (pageNum: number) => void;
 }
 
-function PdfViewer({ url, page, onPageClick }: PdfViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [useCanvas, setUseCanvas] = useState(false);
+function PdfViewer({ url, page, onPageChange, onPageClick }: PdfViewerProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const pdfDocRef = useRef<any>(null);
+  const [numPages, setNumPages] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // Zoom state
+  const [zoomScale, setZoomScale] = useState<number>(1.0);
+
+  // Scroll / Swipe page flipping cooldown
+  const scrollCooldownRef = useRef<boolean>(false);
+  const touchStartYRef = useRef<number | null>(null);
+
+  // Load PDF document using PDF.js
   useEffect(() => {
-    // Detect iPad / iOS / touch devices where native Safari iframe does not support PDF fragment #page=XX
-    const isTouchOrIPad = typeof window !== "undefined" && (
-      ("ontouchstart" in window) ||
-      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) ||
-      /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
-      (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
-    );
-
-    setUseCanvas(Boolean(isTouchOrIPad));
-  }, []);
-
-  useEffect(() => {
-    if (!useCanvas || !url) return;
-
+    if (!url) return;
     let isCancelled = false;
 
-    async function loadAndRender() {
+    async function loadPdf() {
       setLoading(true);
+      setError(null);
       try {
         if (!(window as any).pdfjsLib) {
           await new Promise<void>((resolve, reject) => {
@@ -410,73 +416,218 @@ function PdfViewer({ url, page, onPageClick }: PdfViewerProps) {
         const pdfjsLib = (window as any).pdfjsLib;
         if (!pdfjsLib) return;
 
-        if (!pdfDocRef.current || pdfDocRef.current._url !== url) {
-          const loadingTask = pdfjsLib.getDocument(url);
-          pdfDocRef.current = await loadingTask.promise;
-          pdfDocRef.current._url = url;
-        }
+        const loadingTask = pdfjsLib.getDocument(url);
+        const pdf = await loadingTask.promise;
+        if (isCancelled) return;
 
-        const pdf = pdfDocRef.current;
-        const pageNum = Math.min(Math.max(1, page), pdf.numPages);
-        const pdfPage = await pdf.getPage(pageNum);
-
-        if (isCancelled || !canvasRef.current) return;
-
-        const canvas = canvasRef.current;
-        const context = canvas.getContext("2d");
-        if (!context) return;
-
-        const containerWidth = canvas.parentElement?.clientWidth || 800;
-        const unscaledViewport = pdfPage.getViewport({ scale: 1 });
-        const scale = containerWidth / unscaledViewport.width;
-        const viewport = pdfPage.getViewport({ scale: Math.max(scale, 1.5) });
-
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport,
-        };
-
-        await pdfPage.render(renderContext).promise;
-      } catch (err) {
-        console.error("PDF.js render error:", err);
+        pdfDocRef.current = pdf;
+        setNumPages(pdf.numPages);
+      } catch (err: any) {
+        console.error("PDF.js doc load error:", err);
+        if (!isCancelled) setError(err?.message || "Error al cargar la publicación");
       } finally {
         if (!isCancelled) setLoading(false);
       }
     }
 
-    loadAndRender();
+    loadPdf();
 
     return () => {
       isCancelled = true;
     };
-  }, [useCanvas, url, page]);
+  }, [url]);
 
-  if (!useCanvas) {
-    return (
-      <iframe
-        key={`cabin-top-iframe-${page}`}
-        src={`${url}#page=${page}`}
-        className="w-full h-full border-0 bg-zinc-950"
-        title="Publicación Real de Estudio"
-      />
-    );
-  }
+  // Render current single PDF page
+  useEffect(() => {
+    if (!pdfDocRef.current || numPages === 0 || !containerRef.current) return;
+
+    let isCancelled = false;
+    const pdf = pdfDocRef.current;
+
+    async function renderPage() {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const containerWidth = Math.max(container.clientWidth - 32, 320);
+      const containerHeight = Math.max(container.clientHeight - 48, 400);
+
+      const pageNum = Math.min(Math.max(1, page), numPages);
+      const pageCanvas = container.querySelector<HTMLCanvasElement>(`#canvas-pdf-page-${pageNum}`);
+      if (!pageCanvas) return;
+
+      try {
+        const pdfPage = await pdf.getPage(pageNum);
+        if (isCancelled) return;
+
+        const unscaledViewport = pdfPage.getViewport({ scale: 1 });
+        const scaleW = containerWidth / unscaledViewport.width;
+        const scaleH = containerHeight / unscaledViewport.height;
+        const baseScale = Math.min(scaleW, scaleH);
+        const finalScale = Math.max(baseScale * zoomScale, 0.6);
+
+        const viewport = pdfPage.getViewport({ scale: finalScale * 1.5 }); // High-DPI rendering
+
+        pageCanvas.width = viewport.width;
+        pageCanvas.height = viewport.height;
+        pageCanvas.style.width = `${unscaledViewport.width * finalScale}px`;
+        pageCanvas.style.height = `${unscaledViewport.height * finalScale}px`;
+
+        const ctx = pageCanvas.getContext("2d");
+        if (ctx) {
+          await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+        }
+      } catch (e) {
+        console.error(`Error rendering PDF page ${pageNum}:`, e);
+      }
+    }
+
+    renderPage();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [numPages, url, page, zoomScale]);
+
+  // Handle Mouse Wheel Scroll -> Page Flip with non-passive preventDefault
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onWheelListener = (e: WheelEvent) => {
+      // Prevent main webpage from scrolling when mouse wheel is used over the PDF viewer
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (scrollCooldownRef.current || numPages <= 1) return;
+      if (Math.abs(e.deltaY) < 10) return;
+
+      if (e.deltaY > 0) {
+        if (page < numPages) {
+          scrollCooldownRef.current = true;
+          onPageChange?.(page + 1);
+          setTimeout(() => {
+            scrollCooldownRef.current = false;
+          }, 350);
+        }
+      } else if (e.deltaY < 0) {
+        if (page > 1) {
+          scrollCooldownRef.current = true;
+          onPageChange?.(page - 1);
+          setTimeout(() => {
+            scrollCooldownRef.current = false;
+          }, 350);
+        }
+      }
+    };
+
+    container.addEventListener("wheel", onWheelListener, { passive: false });
+
+    return () => {
+      container.removeEventListener("wheel", onWheelListener);
+    };
+  }, [numPages, page, onPageChange]);
+
+  // Touch Swipe -> Page Flip
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStartYRef.current === null || scrollCooldownRef.current || numPages <= 1) return;
+    const deltaY = touchStartYRef.current - e.changedTouches[0].clientY;
+    touchStartYRef.current = null;
+
+    if (Math.abs(deltaY) < 25) return;
+
+    if (deltaY > 0) {
+      if (page < numPages) {
+        scrollCooldownRef.current = true;
+        onPageChange?.(page + 1);
+        setTimeout(() => {
+          scrollCooldownRef.current = false;
+        }, 350);
+      }
+    } else if (deltaY < 0) {
+      if (page > 1) {
+        scrollCooldownRef.current = true;
+        onPageChange?.(page - 1);
+        setTimeout(() => {
+          scrollCooldownRef.current = false;
+        }, 350);
+      }
+    }
+  };
 
   return (
-    <div
-      onClick={onPageClick}
-      className="relative w-full h-full flex items-center justify-center overflow-auto bg-zinc-950 p-2 cursor-pointer group/canvas select-none"
-      title="Hacer clic para reproducir el primer título de esta página"
-    >
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 z-10 text-indigo-400 text-xs font-mono">
-          Cargando página {page}...
+    <div className="relative w-full h-full flex flex-col bg-zinc-950 select-none overflow-hidden">
+      {/* Viewer Header Toolbar: Zoom Controls */}
+      <div className="px-3 py-1.5 bg-zinc-950/95 border-b border-zinc-900 flex items-center justify-between text-[11px] font-mono text-zinc-400 z-10 shadow-sm shrink-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider hidden xs:inline mr-1">Zoom:</span>
+          <button
+            onClick={() => setZoomScale((prev) => Math.max(0.6, Number((prev - 0.15).toFixed(2))))}
+            className="w-6 h-6 rounded hover:bg-zinc-800 text-zinc-300 font-bold transition-colors flex items-center justify-center cursor-pointer border border-zinc-800"
+            title="Alejar Zoom (-)"
+          >
+            -
+          </button>
+          <button
+            onClick={() => setZoomScale(1.0)}
+            className="px-2 py-0.5 rounded hover:bg-zinc-800 text-amber-400 font-bold transition-colors cursor-pointer border border-zinc-800 text-[10px]"
+            title="Restablecer Zoom (100%)"
+          >
+            {Math.round(zoomScale * 100)}%
+          </button>
+          <button
+            onClick={() => setZoomScale((prev) => Math.min(2.5, Number((prev + 0.15).toFixed(2))))}
+            className="w-6 h-6 rounded hover:bg-zinc-800 text-zinc-300 font-bold transition-colors flex items-center justify-center cursor-pointer border border-zinc-800"
+            title="Acercar Zoom (+)"
+          >
+            +
+          </button>
         </div>
-      )}
-      <canvas ref={canvasRef} className="max-w-full max-h-full object-contain shadow-2xl rounded group-hover/canvas:ring-2 group-hover/canvas:ring-amber-500/50 transition-all" />
+
+        {numPages > 0 && (
+          <span className="text-[10px] font-mono text-amber-400 font-bold">
+            Pág. {page} / {numPages}
+          </span>
+        )}
+      </div>
+
+      <div
+        ref={containerRef}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        className="relative w-full flex-1 bg-zinc-950 p-3 flex flex-col items-center justify-center overflow-hidden"
+      >
+        {loading && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-indigo-400 font-mono text-xs py-12">
+            <RefreshCw className="w-6 h-6 animate-spin text-amber-500" />
+            <span>Cargando publicación y preparando página...</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-rose-400 text-xs py-12">
+            <AlertCircle className="w-8 h-8 text-rose-500" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!loading && !error && numPages > 0 && (
+          <div
+            key={`pdf-single-wrapper-${page}`}
+            onClick={() => onPageClick?.(page)}
+            className="relative flex flex-col items-center justify-center bg-zinc-900/60 rounded-xl border border-amber-500/80 p-2 shadow-[0_0_25px_rgba(245,158,11,0.2)] transition-all cursor-pointer group/page max-h-full"
+            title={`Página ${page} - Clic para escuchar`}
+          >
+            <canvas
+              id={`canvas-pdf-page-${page}`}
+              className="max-w-full h-auto rounded shadow-2xl group-hover/page:ring-2 group-hover/page:ring-amber-500/40 transition-all object-contain"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -499,6 +650,39 @@ export default function NewsPage() {
 
   // Active Study Cabin states
   const [activeCabinIssue, setActiveCabinIssue] = useState<MagazineIssue | null>(null);
+
+  // Re-fetch fresh activeCabinIssue metadata from Supabase when entering or switching study cabin issue
+  useEffect(() => {
+    if (!activeCabinIssue?.id) return;
+    let isSubscribed = true;
+    (async () => {
+      try {
+        const { data: freshDoc } = await supabase
+          .from("documents")
+          .select("*")
+          .eq("id", activeCabinIssue.id)
+          .single();
+        if (isSubscribed && freshDoc && freshDoc.metadata) {
+          setActiveCabinIssue((prev) => {
+            if (!prev || prev.id !== freshDoc.id) return prev;
+            return {
+              ...prev,
+              metadata: {
+                ...(prev.metadata || {}),
+                ...freshDoc.metadata
+              }
+            };
+          });
+        }
+      } catch (err) {
+        console.warn("[Study Cabin] Error fetching fresh issue doc:", err);
+      }
+    })();
+    return () => {
+      isSubscribed = false;
+    };
+  }, [activeCabinIssue?.id]);
+
   const [cabinArticles, setCabinArticles] = useState<any[]>([]);
   const [cabinSelectedPage, setCabinSelectedPage] = useState<number>(1);
   const topFrameRef = useRef<HTMLDivElement>(null);
@@ -549,22 +733,20 @@ export default function NewsPage() {
     };
   };
 
-  // Audio engine refs
-  const domAudioRef = useRef<HTMLAudioElement | null>(null);
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
-  const cabinAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Single Audio Engine State & Refs (Magazine MP3 + Timestamps)
+  const singleAudioRef = useRef<HTMLAudioElement | null>(null);
   const sentenceChunksRef = useRef<string[]>([]);
   const chunkTargetElementIdsRef = useRef<string[]>([]);
-  const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
-  const audioObjectsRef = useRef<Record<number, HTMLAudioElement>>({});
-  const preloadGenerationRef = useRef(0);
   const activeSentenceIndexRef = useRef(-1);
   const isPlayingAudioRef = useRef(false);
   const playbackRateRef = useRef(1.0);
-  const fetchingIndexesRef = useRef<Set<number>>(new Set());
-  const inFlightPromisesRef = useRef<Record<number, Promise<string> | undefined>>({});
-  const inFlightControllersRef = useRef<Record<number, AbortController | undefined>>({});
-  const lastPreloadStartRef = useRef<number>(-1);
+
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [sentenceTimestamps, setSentenceTimestamps] = useState<Array<{ sentenceIdx: number, text: string, startTime: number, endTime: number }>>([]);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [audioProgressPercent, setAudioProgressPercent] = useState<number>(0);
+  const [audioCurrentTime, setAudioTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
 
   // 1. Handle activeCabinIssue changes and fetch articles for this issue
   useEffect(() => {
@@ -702,174 +884,99 @@ export default function NewsPage() {
     }
   }, [activeCabinIssue, selectedLanguage, cabinArticles.length]);
 
-  const cleanSummaryForSpeech = (summaryStr: string): string => {
-    if (!summaryStr) return "";
-    let text = summaryStr.replace(/\[CHART:\s*[\s\S]*?\]/gi, "");
-    text = text.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "");
-    text = text.replace(/^(#+\s+[^.\n\r]+?)(?=\r?\n|$)/gm, "$1.");
-    text = text.replace(/^(\s*[\-\*]\s+[^.\n\r]+?)(?=\r?\n|$)/gm, "$1.");
-    text = text.replace(/^(\s*\d+\.\s+[^.\n\r]+?)(?=\r?\n|$)/gm, "$1.");
-    text = text.replace(/#+\s+/g, "");
-    text = text.replace(/[\*\_`]/g, "");
-    text = text.replace(/^\s*[\-\*]\s+/gm, "");
-    text = text.replace(/^\s*\d+\.\s+/gm, "");
-    text = text.replace(/^\s*>\s*/gm, "");
-    text = text.replace(/\s+/g, " ").trim();
-    return text;
-  };
 
-  // Helper: Safely splits a paragraph into sentences using the exact chunkTextForSpeech logic from the Video Study Cabin
-  const splitParagraphIntoSentences = (text: string): string[] => {
-    if (!text) return [];
 
-    // Protegemos decimales (ej: 1.5, 100.25)
-    let protectedText = text.replace(/(\d)\.(\d)/g, "$1_DEC_DOT_$2");
+  // Single Audio Time Update Sync Handler
+  const handleAudioTimeUpdate = () => {
+    if (!singleAudioRef.current) return;
+    const curr = singleAudioRef.current.currentTime;
+    setAudioTime(curr);
+    setAudioDuration(singleAudioRef.current.duration || 0);
 
-    // Protegemos cualquier sigla o secuencia de letras separadas por puntos (ej: U.S., U.S.A., EE.UU., a.m., p.m.)
-    protectedText = protectedText.replace(/\b([A-Za-z]{1,4}(?:\.[A-Za-z]{1,4})+)\b\.?/gi, (match) => {
-      return match.replace(/\./g, "_ACR_DOT_");
-    });
-
-    // Protegemos abreviaciones conocidas (ej: Mr., Fed., Corp., etc.)
-    const abbrevs = ["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "fed", "corp", "inc", "co", "ltd", "bros", "ca", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "etc"];
-    abbrevs.forEach(abbrev => {
-      const regex = new RegExp(`\\b(${abbrev})\\.(?=\\s|$)`, "gi");
-      protectedText = protectedText.replace(regex, "$1_ABB_DOT_");
-    });
-
-    // Protegemos iniciales de nombres de una sola letra (ej: J. F. Kennedy)
-    protectedText = protectedText.replace(/\b([A-Z])\.(?=\s+[A-Z])/g, "$1_INI_DOT_");
-
-    // Dividimos por signos tradicionales de puntuación (. ? !) preservándolos
-    const sentences = protectedText.match(/[^.!?]+[.!?]*/g) || [protectedText];
-
-    return sentences
-      .map((s) => {
-        return s
-          .replace(/_DEC_DOT_/g, ".")
-          .replace(/_ACR_DOT_/g, ".")
-          .replace(/_ABB_DOT_/g, ".")
-          .replace(/_INI_DOT_/g, ".")
-          .trim();
-      })
-      .filter((s) => s.length > 0);
-  };
-
-  // Unified Blob URL manager with request deduplication and AbortController handling
-  const getOrFetchSentenceBlobUrl = async (idx: number, isPriorityTarget = false): Promise<string> => {
-    if (preloadedBlobUrlsRef.current[idx]) {
-      return preloadedBlobUrlsRef.current[idx];
-    }
-
-    // Check if there is an active in-flight promise for this sentence
-    if (inFlightPromisesRef.current[idx]) {
-      try {
-        return await inFlightPromisesRef.current[idx]!;
-      } catch (err: any) {
-        // If the in-flight promise was aborted or failed, clear stale references
-        delete inFlightPromisesRef.current[idx];
-        delete inFlightControllersRef.current[idx];
-        // If caller needs this as priority target or retry, fall through to make a fresh fetch!
-        if (err.name !== "AbortError" && !isPriorityTarget) {
-          throw err;
-        }
-      }
-    }
-
-    const chunks = sentenceChunksRef.current;
-    if (idx < 0 || idx >= chunks.length) {
-      throw new Error("Index out of bounds");
-    }
-
-    const controller = new AbortController();
-    if (!isPriorityTarget) {
-      inFlightControllersRef.current[idx] = controller;
-    }
-
-    const fetchPromise = (async () => {
-      try {
-        const speakUrl = `/api/videos/speak?text=${encodeURIComponent(chunks[idx])}&voice=${selectedVoice}`;
-        const res = await fetch(speakUrl, { signal: isPriorityTarget ? undefined : controller.signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        preloadedBlobUrlsRef.current[idx] = blobUrl;
-        return blobUrl;
-      } catch (err: any) {
-        delete inFlightPromisesRef.current[idx];
-        delete inFlightControllersRef.current[idx];
-        throw err;
-      } finally {
-        delete inFlightPromisesRef.current[idx];
-        delete inFlightControllersRef.current[idx];
-      }
-    })();
-
-    inFlightPromisesRef.current[idx] = fetchPromise;
-    return fetchPromise;
-  };
-
-  // High-throughput background preloader using 3-worker concurrent streams with smart pipeline preservation
-  const startBackgroundPreloading = (startFromIdx = 0, forceReset = false) => {
-    const isDiscontinuousJump = forceReset || lastPreloadStartRef.current < 0 || Math.abs(startFromIdx - lastPreloadStartRef.current) > 2;
-    lastPreloadStartRef.current = startFromIdx;
-
-    if (isDiscontinuousJump) {
-      preloadGenerationRef.current += 1;
-      // Instantly abort stale in-flight fetches for sentences far behind or ahead
-      Object.keys(inFlightControllersRef.current).forEach((keyStr) => {
-        const idx = parseInt(keyStr, 10);
-        if (idx < startFromIdx - 1 || idx > startFromIdx + 20) {
-          try {
-            inFlightControllersRef.current[idx]?.abort();
-          } catch {}
-          delete inFlightControllersRef.current[idx];
-          delete inFlightPromisesRef.current[idx];
-        }
+    if (sentenceTimestamps.length > 0) {
+      const match = sentenceTimestamps.find((ts, idx) => {
+        const nextTs = sentenceTimestamps[idx + 1];
+        const upperBound = nextTs ? nextTs.startTime : ts.endTime + 0.5;
+        return curr >= ts.startTime && curr < upperBound;
       });
-    }
+      if (match && match.sentenceIdx !== activeSentenceIndexRef.current) {
+        activeSentenceIndexRef.current = match.sentenceIdx;
+        setActiveSentenceIdx(match.sentenceIdx);
 
-    const gen = preloadGenerationRef.current;
-
-    const runWorkerPipeline = async () => {
-      const chunks = sentenceChunksRef.current;
-      if (!chunks || chunks.length === 0) return;
-
-      const MAX_CONCURRENT = 3; // Triple parallel HTTP streams to guarantee buffer even at 2x speed
-      let nextIdxToProcess = Math.max(0, startFromIdx);
-
-      const worker = async () => {
-        while (nextIdxToProcess < chunks.length) {
-          if (gen !== preloadGenerationRef.current) break;
-
-          const idx = nextIdxToProcess;
-          nextIdxToProcess++;
-
-          if (preloadedBlobUrlsRef.current[idx]) continue;
-
-          try {
-            await getOrFetchSentenceBlobUrl(idx, false);
-          } catch (err: any) {
-            if (err.name !== "AbortError") {
-              console.warn(`[Study Cabin TTS] Background preloader failed for chunk ${idx}:`, err);
-            }
+        const targetId = chunkTargetElementIdsRef.current[match.sentenceIdx];
+        if (targetId) {
+          const el = document.getElementById(targetId);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
           }
         }
-      };
-
-      const workers = [];
-      for (let w = 0; w < MAX_CONCURRENT; w++) {
-        workers.push(worker());
       }
-      await Promise.all(workers);
-    };
-
-    runWorkerPipeline();
+    }
   };
 
-  // 2. Build verbatim paragraph chunks and manage TTS audio preloading in strict sequential order
+  // Jump to specific sentence index in the single audio file
+  const handleSentenceClick = (index: number) => {
+    const ts = sentenceTimestamps[index];
+    if (ts && singleAudioRef.current) {
+      singleAudioRef.current.currentTime = ts.startTime;
+      singleAudioRef.current.play().catch(console.error);
+      setIsPlayingAudio(true);
+      setIsPausedAudio(false);
+      setActiveSentenceIdx(index);
+      activeSentenceIndexRef.current = index;
+    } else if (sentenceChunksRef.current[index] && singleAudioRef.current) {
+      const total = sentenceChunksRef.current.length;
+      if (total > 0 && singleAudioRef.current.duration) {
+        const ratio = index / total;
+        singleAudioRef.current.currentTime = ratio * singleAudioRef.current.duration;
+        singleAudioRef.current.play().catch(console.error);
+        setIsPlayingAudio(true);
+        setIsPausedAudio(false);
+        setActiveSentenceIdx(index);
+        activeSentenceIndexRef.current = index;
+      }
+    }
+  };
+
+  // Play, Pause and Rate controls for Single Audio
+  const startCabinAudio = () => {
+    if (!singleAudioRef.current) return;
+    singleAudioRef.current.play().then(() => {
+      setIsPlayingAudio(true);
+      setIsPausedAudio(false);
+    }).catch(console.error);
+  };
+
+  const pauseCabinAudio = () => {
+    if (!singleAudioRef.current) return;
+    singleAudioRef.current.pause();
+    setIsPlayingAudio(false);
+    setIsPausedAudio(true);
+  };
+
+  const stopCabinAudio = () => {
+    if (!singleAudioRef.current) return;
+    singleAudioRef.current.pause();
+    singleAudioRef.current.currentTime = 0;
+    setIsPlayingAudio(false);
+    setIsPausedAudio(false);
+    setActiveSentenceIdx(-1);
+    activeSentenceIndexRef.current = -1;
+  };
+
+  const handleRateChange = (newRate: number) => {
+    setPlaybackRate(newRate);
+    playbackRateRef.current = newRate;
+    if (singleAudioRef.current) {
+      singleAudioRef.current.playbackRate = newRate;
+    }
+  };
+
+  // Build verbatim paragraph chunk mappings & trigger asynchronous audio fetch/generation
   useEffect(() => {
     if (activeCabinIssue) {
+      if (loadingArticles) return; // Wait for articles to finish loading from DB before computing chunks
+
       const chunks: string[] = [];
       const targetElementIds: string[] = [];
 
@@ -877,13 +984,11 @@ export default function NewsPage() {
         cabinArticles.forEach((art) => {
           const locArt = getLocalizedArticle(art, selectedLanguage);
 
-          // Article Header Chunk
           const subcat = locArt.subcategory;
           const titleText = `${subcat}: ${locArt.title}.`;
           chunks.push(titleText);
           targetElementIds.push(`article-title-${art.id}`);
 
-          // Paragraph Chunks - Split each paragraph into acronym-safe sentence chunks
           if (locArt.paragraphs && locArt.paragraphs.length > 0) {
             locArt.paragraphs.forEach((para: string, pIdx: number) => {
               const sentences = splitParagraphIntoSentences(para);
@@ -924,265 +1029,150 @@ export default function NewsPage() {
 
       sentenceChunksRef.current = chunks;
       chunkTargetElementIdsRef.current = targetElementIds;
-      lastPreloadStartRef.current = -1;
-      
-      // Reset playback states
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      setActiveSentenceIdx(-1);
-      activeSentenceIndexRef.current = -1;
-      isPlayingAudioRef.current = false;
-      setAudioError(null);
-      
-      // Destroy active audio elements and revoke preloaded blob URLs
-      [domAudioRef.current, cabinAudioRef.current].forEach((audioEl) => {
-        if (audioEl) {
-          try {
-            audioEl.pause();
-            audioEl.onended = null;
-            audioEl.onerror = null;
-            audioEl.src = "";
-          } catch {}
+
+      const meta = (activeCabinIssue.metadata || {}) as Record<string, any>;
+      const audioKey = `${selectedVoice}_${selectedLanguage}`;
+      const cachedAudio = meta.audios?.[audioKey];
+
+      const readyStamps = cachedAudio?.sentence_timestamps || meta.sentence_timestamps || [];
+      const rawUrl = cachedAudio?.audio_url || meta.audio_url;
+
+      const isAudioAvailable = Boolean(
+        rawUrl &&
+        ((cachedAudio && cachedAudio.audio_url) ||
+          (meta.audio_url &&
+            (meta.audio_voice === selectedVoice || !meta.audio_voice) &&
+            (meta.audio_language === selectedLanguage || !meta.audio_language)))
+      );
+
+      if (isAudioAvailable) {
+        const readyUrl = rawUrl && !rawUrl.includes("?t=") && !rawUrl.includes("&t=")
+          ? `${rawUrl}${rawUrl.includes("?") ? "&" : "?"}t=${Date.now()}`
+          : rawUrl;
+        setAudioUrl(readyUrl);
+        setSentenceTimestamps(readyStamps);
+        setAudioError(null);
+
+        if (meta.audio_status === "processing") {
+          setIsGeneratingAudio(true);
+          const curProgress = typeof meta.audio_progress_percent === "number" ? meta.audio_progress_percent : 10;
+          setAudioProgressPercent(curProgress);
+        } else {
+          setIsGeneratingAudio(false);
+          setAudioProgressPercent(100);
         }
-      });
+      } else {
+        setIsGeneratingAudio(true);
+        const curProgress = typeof meta.audio_progress_percent === "number" ? meta.audio_progress_percent : 10;
+        setAudioProgressPercent(curProgress);
+        setAudioError(null);
 
-      Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
-        try { URL.revokeObjectURL(url); } catch {}
-      });
-      preloadedBlobUrlsRef.current = {};
+        let isCancelled = false;
+        let pollTimer: NodeJS.Timeout | null = null;
 
-      if (chunks.length > 0) {
-        startBackgroundPreloading(0, true);
+        const pollProgress = async () => {
+          try {
+            const { data: currentDoc } = await supabase
+              .from("documents")
+              .select("metadata")
+              .eq("id", activeCabinIssue.id)
+              .single();
+
+            if (isCancelled || !currentDoc) return;
+
+            const updatedMeta = currentDoc.metadata || {};
+            const curAudioKey = `${selectedVoice}_${selectedLanguage}`;
+            const curCachedAudio = updatedMeta.audios?.[curAudioKey];
+
+            const syncMetaToState = (newMeta: any) => {
+              setIssues((prevList: MagazineIssue[]) =>
+                prevList.map((iss) => (iss.id === activeCabinIssue.id ? { ...iss, metadata: newMeta } : iss))
+              );
+            };
+
+            if (curCachedAudio && curCachedAudio.status === "ready" && curCachedAudio.audio_url) {
+              setAudioUrl(curCachedAudio.audio_url);
+              setSentenceTimestamps(curCachedAudio.sentence_timestamps || []);
+              setIsGeneratingAudio(false);
+              setAudioProgressPercent(100);
+              syncMetaToState(updatedMeta);
+              return;
+            }
+
+            if (
+              updatedMeta.audio_url &&
+              updatedMeta.audio_status === "ready"
+            ) {
+              setAudioUrl(updatedMeta.audio_url);
+              setSentenceTimestamps(updatedMeta.sentence_timestamps || []);
+              setIsGeneratingAudio(false);
+              setAudioProgressPercent(100);
+              syncMetaToState(updatedMeta);
+              return;
+            }
+
+            if (updatedMeta.audio_status === "error") {
+              setIsGeneratingAudio(false);
+              setAudioError(updatedMeta.audio_error || "Error al generar el audio de la revista.");
+              syncMetaToState(updatedMeta);
+              return;
+            }
+
+            if (typeof updatedMeta.audio_progress_percent === "number") {
+              setAudioProgressPercent((prev) => Math.max(prev, updatedMeta.audio_progress_percent));
+            }
+            syncMetaToState(updatedMeta);
+
+            // Schedule next poll
+            pollTimer = setTimeout(pollProgress, 3000);
+          } catch (pollErr) {
+            console.warn("[Audio Poll Error]", pollErr);
+            pollTimer = setTimeout(pollProgress, 4000);
+          }
+        };
+
+        // Trigger background audio generation if current audio is not ready
+        if (!isAudioAvailable) {
+          fetch("/api/magazines/generate-audio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              documentId: activeCabinIssue.id,
+              voice: selectedVoice,
+              language: selectedLanguage,
+              sentences: chunks,
+              forceRegenerate: meta.audio_status === "error" || readyStamps.length !== chunks.length
+            })
+          }).catch((err) => console.warn("[Generate Audio Trigger Error]", err));
+        }
+
+        // Start polling for background progress updates
+        pollProgress();
+
+        return () => {
+          isCancelled = true;
+          if (pollTimer) clearTimeout(pollTimer);
+        };
       }
     } else {
-      [domAudioRef.current, cabinAudioRef.current].forEach((audioEl) => {
-        if (audioEl) {
-          try {
-            audioEl.pause();
-            audioEl.src = "";
-          } catch {}
-        }
-      });
+      setAudioUrl(null);
+      setSentenceTimestamps([]);
+      setIsGeneratingAudio(false);
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
       setActiveSentenceIdx(-1);
       activeSentenceIndexRef.current = -1;
-      isPlayingAudioRef.current = false;
       setAudioError(null);
-      lastPreloadStartRef.current = -1;
-      
-      Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
-        try { URL.revokeObjectURL(url); } catch {}
-      });
-      preloadedBlobUrlsRef.current = {};
     }
-  }, [activeCabinIssue, cabinArticles, selectedVoice, selectedLanguage]);
-
-  // Playback engine with double-buffering and instant burst prefetching
-  const playCabinSentence = async (index: number) => {
-    setAudioError(null);
-    const chunks = sentenceChunksRef.current;
-    if (index < 0 || index >= chunks.length) {
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      setActiveSentenceIdx(-1);
-      activeSentenceIndexRef.current = -1;
-      isPlayingAudioRef.current = false;
-      return;
-    }
-
-    // Instantly stop audio on BOTH channels & clear event handlers before doing anything else
-    [domAudioRef.current, cabinAudioRef.current].forEach((audioEl) => {
-      if (audioEl) {
-        audioEl.onended = null;
-        audioEl.onerror = null;
-        try {
-          audioEl.pause();
-          audioEl.currentTime = 0;
-        } catch {}
-      }
-    });
-
-    setIsPlayingAudio(true);
-    setIsPausedAudio(false);
-    setActiveSentenceIdx(index);
-    activeSentenceIndexRef.current = index;
-    isPlayingAudioRef.current = true;
-
-    // Instantly scroll & highlight paragraph in the UI as chunk starts playing
-    scrollToBestMatchingParagraph(chunks[index], index);
-
-    // Burst parallel prefetch for immediate 6 upcoming sentences
-    const BURST_AHEAD = 6;
-    for (let b = 0; b < BURST_AHEAD; b++) {
-      const targetIdx = index + b;
-      if (targetIdx < chunks.length && !preloadedBlobUrlsRef.current[targetIdx] && !inFlightPromisesRef.current[targetIdx]) {
-        getOrFetchSentenceBlobUrl(targetIdx, false).catch(() => {});
-      }
-    }
-
-    // Pivot background preloader queue smoothly
-    startBackgroundPreloading(index);
-
-    // Retrieve dual-channel DOM audio elements (AudioA and AudioB)
-    if (!activeAudioRef.current) {
-      activeAudioRef.current = domAudioRef.current;
-    }
-    const currentAudio = activeAudioRef.current || domAudioRef.current;
-    const nextAudio = currentAudio === domAudioRef.current ? cabinAudioRef.current : domAudioRef.current;
-
-    if (!currentAudio) {
-      console.warn("[Study Cabin TTS] DOM audio element not available");
-      return;
-    }
-
-    // Stop current audio events before configuring
-    currentAudio.onended = null;
-    currentAudio.onerror = null;
-
-    // Retrieve Blob URL for current sentence
-    let audioSrc = preloadedBlobUrlsRef.current[index];
-    if (!audioSrc) {
-      try {
-        audioSrc = await getOrFetchSentenceBlobUrl(index, true);
-        if (index !== activeSentenceIndexRef.current) return;
-      } catch (err: any) {
-        if (err.name === "AbortError" || index !== activeSentenceIndexRef.current) {
-          // Stale request or user clicked another sentence, ignore silently
-          return;
-        }
-        console.error(`[Study Cabin TTS] On-demand fetch failed for sentence ${index}:`, err);
-        setAudioError(err.message || "Error al sintetizar el audio.");
-        setIsPlayingAudio(false);
-        setIsPausedAudio(false);
-        isPlayingAudioRef.current = false;
-        return;
-      }
-    }
-
-    // Only update src if it changed (avoids reloading if already primed via double buffering)
-    if (currentAudio.src !== audioSrc) {
-      currentAudio.src = audioSrc;
-    }
-    currentAudio.playbackRate = playbackRateRef.current;
-
-    // Pre-prime next sentence on the secondary audio element for 0ms gapless transition
-    const nextIdx = index + 1;
-    const primeNextSentence = (nextBlobUrl: string) => {
-      if (nextAudio && nextIdx < chunks.length && isPlayingAudioRef.current) {
-        if (nextAudio.src !== nextBlobUrl) {
-          nextAudio.src = nextBlobUrl;
-          nextAudio.playbackRate = playbackRateRef.current;
-          nextAudio.load(); // Pre-loads and decodes in background!
-        }
-      }
-    };
-
-    if (nextIdx < chunks.length) {
-      if (preloadedBlobUrlsRef.current[nextIdx]) {
-        primeNextSentence(preloadedBlobUrlsRef.current[nextIdx]);
-      } else {
-        getOrFetchSentenceBlobUrl(nextIdx, false)
-          .then((nextBlobUrl) => primeNextSentence(nextBlobUrl))
-          .catch(() => {});
-      }
-    }
-
-    currentAudio.onended = () => {
-      if (!isPlayingAudioRef.current) return;
-      if (index !== activeSentenceIndexRef.current) return;
-
-      if (nextIdx < chunks.length) {
-        // Swap active audio element to nextAudio for gapless handoff
-        if (nextAudio && preloadedBlobUrlsRef.current[nextIdx]) {
-          activeAudioRef.current = nextAudio;
-        }
-        playCabinSentence(nextIdx);
-      } else {
-        setIsPlayingAudio(false);
-        setIsPausedAudio(false);
-        setActiveSentenceIdx(-1);
-        activeSentenceIndexRef.current = -1;
-        isPlayingAudioRef.current = false;
-      }
-    };
-
-    currentAudio.onerror = (e: any) => {
-      if (index !== activeSentenceIndexRef.current) return;
-      console.error(`[Study Cabin TTS] Audio error for sentence ${index}`, e);
-      setAudioError("Error al reproducir el fragmento de audio.");
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      isPlayingAudioRef.current = false;
-    };
-
-    try {
-      await currentAudio.play();
-    } catch (err: any) {
-      if (err.name === "AbortError") return;
-      console.warn("[Study Cabin TTS] Audio play interrupted:", err);
-    }
-  };
-
-  const startCabinAudio = () => {
-    const chunks = sentenceChunksRef.current;
-    if (chunks.length === 0) return;
-    
-    if (isPausedAudio && activeAudioRef.current) {
-      setIsPlayingAudio(true);
-      setIsPausedAudio(false);
-      isPlayingAudioRef.current = true;
-      activeAudioRef.current.play().catch(() => {});
-    } else {
-      const idx = activeSentenceIdx >= 0 ? activeSentenceIdx : 0;
-      playCabinSentence(idx);
-    }
-  };
-
-  const pauseCabinAudio = () => {
-    if (domAudioRef.current) domAudioRef.current.pause();
-    if (cabinAudioRef.current) cabinAudioRef.current.pause();
-    setIsPlayingAudio(false);
-    setIsPausedAudio(true);
-    isPlayingAudioRef.current = false;
-  };
-
-  const stopCabinAudio = () => {
-    if (domAudioRef.current) {
-      domAudioRef.current.pause();
-      domAudioRef.current.currentTime = 0;
-    }
-    if (cabinAudioRef.current) {
-      cabinAudioRef.current.pause();
-      cabinAudioRef.current.currentTime = 0;
-    }
-    setIsPlayingAudio(false);
-    setIsPausedAudio(false);
-    setActiveSentenceIdx(-1);
-    activeSentenceIndexRef.current = -1;
-    isPlayingAudioRef.current = false;
-  };
-
-  const handleSentenceClick = (index: number) => {
-    playCabinSentence(index);
-  };
-
-  const handleRateChange = (newRate: number) => {
-    setPlaybackRate(newRate);
-    playbackRateRef.current = newRate;
-    if (domAudioRef.current) domAudioRef.current.playbackRate = newRate;
-    if (cabinAudioRef.current) cabinAudioRef.current.playbackRate = newRate;
-  };
+  }, [activeCabinIssue?.id, cabinArticles, loadingArticles, selectedVoice, selectedLanguage]);
 
   const playFirstArticleForPage = (pageNumber: number) => {
     if (!cabinArticles || cabinArticles.length === 0) return;
 
-    // 1. Try exact match on start_page
     let targetArticle = cabinArticles.find(
       (art) => Number(art.metadata?.start_page) === pageNumber
     );
 
-    // 2. Try match within page range (start_page <= page <= end_page)
     if (!targetArticle) {
       targetArticle = cabinArticles.find((art) => {
         const start = Number(art.metadata?.start_page || 0);
@@ -1191,25 +1181,29 @@ export default function NewsPage() {
       });
     }
 
-    // 3. Try first article starting AFTER pageNumber
     if (!targetArticle) {
       targetArticle = cabinArticles.find(
         (art) => Number(art.metadata?.start_page || 0) > pageNumber
       );
     }
 
-    // 4. Fallback to first article
     if (!targetArticle) {
       targetArticle = cabinArticles[0];
     }
 
     if (targetArticle) {
       const headerTargetId = `article-title-${targetArticle.id}`;
-      const chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+      let chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+      if (chunkIdx < 0) {
+        chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${targetArticle.id}-0-0`);
+      }
+      if (chunkIdx < 0) {
+        chunkIdx = chunkTargetElementIdsRef.current.findIndex((id) => id.startsWith(`sentence-${targetArticle.id}-`));
+      }
       if (chunkIdx >= 0) {
-        playCabinSentence(chunkIdx);
+        handleSentenceClick(chunkIdx);
       } else if (sentenceChunksRef.current.length > 0) {
-        playCabinSentence(0);
+        handleSentenceClick(0);
       }
     }
   };
@@ -1391,6 +1385,11 @@ export default function NewsPage() {
     if (chunkIdx !== undefined && chunkIdx >= 0) {
       const targetId = chunkTargetElementIdsRef.current[chunkIdx];
       if (targetId) {
+        // Bidirectional sync: keep PDF viewer steady during reading unless user clicks article header
+        const matchedArt = cabinArticles.find((art) =>
+          targetId.includes(art.id)
+        );
+
         const element = document.getElementById(targetId);
         if (element) {
           setTranscriptionCollapsed(false);
@@ -1720,8 +1719,6 @@ export default function NewsPage() {
 
     return (
       <div className="min-h-screen text-slate-100 p-6 md:p-8 space-y-8 animate-fade-in relative pb-12">
-        {/* Invisible background audio element */}
-        <audio ref={cabinAudioRef} className="hidden" />
 
         {/* Back and Title Header Bar */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-zinc-900/60">
@@ -1763,6 +1760,12 @@ export default function NewsPage() {
           </div>
 
           <div className="flex flex-col sm:flex-row items-end lg:items-center justify-end gap-2.5 ml-auto flex-shrink-0 select-none">
+            {isGeneratingAudio ? (
+              <div className="px-3.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-[11px] font-mono text-amber-300 font-bold flex items-center gap-2 shadow-sm animate-pulse">
+                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                <span>{selectedLanguage === "es" ? `Audio en 2º Plano: ${audioProgressPercent}%` : `Background Audio: ${audioProgressPercent}%`}</span>
+              </div>
+            ) : null}
             <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-mono text-emerald-400 font-bold max-w-[280px] sm:max-w-xs truncate">
               {selectedLanguage === "es" ? "Revista" : selectedLanguage === "de" ? "Magazin" : selectedLanguage === "tr" ? "Dergi" : "Magazine"}: {mainTitle}
             </div>
@@ -1790,11 +1793,6 @@ export default function NewsPage() {
                   <h3 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
                     {selectedLanguage === "es" ? "Publicación Original Completa de Estudio" : "Original Full Study Publication"}
                   </h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-md bg-indigo-950/80 border border-indigo-500/40 text-[10px] font-mono font-bold text-indigo-300">
-                    {selectedLanguage === "es" ? `Pág. ${cabinSelectedPage}` : selectedLanguage === "de" ? `S. ${cabinSelectedPage}` : selectedLanguage === "tr" ? `Sayfa ${cabinSelectedPage}` : `Pg. ${cabinSelectedPage}`}
-                  </span>
                 </div>
               </div>
 
@@ -1909,6 +1907,8 @@ export default function NewsPage() {
                     <PdfViewer
                       url={activeCabinIssue.file_url}
                       page={cabinSelectedPage}
+                      onPageChange={(pageNum) => setCabinSelectedPage(pageNum)}
+                      onPageClick={(pageNum) => playFirstArticleForPage(pageNum)}
                     />
                   ) : (
                     <div className="relative z-10 w-full h-full flex items-center justify-center bg-gradient-to-b from-zinc-900 to-zinc-950 rounded-xl">
@@ -1921,13 +1921,10 @@ export default function NewsPage() {
                     <button
                       onClick={() => setCabinSelectedPage(prev => Math.max(1, prev - 1))}
                       disabled={cabinSelectedPage <= 1}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer group/prev select-none"
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-zinc-950/70 hover:bg-zinc-900 border border-zinc-800 hover:border-indigo-500/80 text-zinc-300 hover:text-white shadow-xl backdrop-blur-sm flex items-center justify-center transition-all opacity-40 hover:opacity-100 disabled:opacity-10 disabled:pointer-events-none cursor-pointer group/prev select-none"
                       title={selectedLanguage === "es" ? "Página Anterior" : "Previous Page"}
                     >
-                      <ChevronLeft className="w-4 h-4 text-indigo-400 group-hover/prev:-translate-x-0.5 transition-transform shrink-0" />
-                      <span className="font-mono tracking-tight text-[11px] hidden sm:inline">
-                        {selectedLanguage === "es" ? "Pág. Anterior" : selectedLanguage === "de" ? "Zurück" : selectedLanguage === "tr" ? "Önceki" : "Prev Page"}
-                      </span>
+                      <ChevronLeft className="w-5 h-5 text-indigo-400 group-hover/prev:-translate-x-0.5 transition-transform shrink-0" />
                     </button>
                   )}
 
@@ -1935,13 +1932,10 @@ export default function NewsPage() {
                   {activeCabinIssue.file_url && (
                     <button
                       onClick={() => setCabinSelectedPage(prev => prev + 1)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 px-3 py-2 sm:px-4 sm:py-2.5 rounded-full bg-zinc-950/85 hover:bg-zinc-900 border border-zinc-700/80 hover:border-indigo-500/80 text-white shadow-[0_8px_30px_rgb(0,0,0,0.8)] backdrop-blur-md flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 text-xs font-bold cursor-pointer group/next select-none"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-zinc-950/70 hover:bg-zinc-900 border border-zinc-800 hover:border-indigo-500/80 text-zinc-300 hover:text-white shadow-xl backdrop-blur-sm flex items-center justify-center transition-all opacity-40 hover:opacity-100 cursor-pointer group/next select-none"
                       title={selectedLanguage === "es" ? "Página Siguiente" : "Next Page"}
                     >
-                      <span className="font-mono tracking-tight text-[11px] hidden sm:inline">
-                        {selectedLanguage === "es" ? "Pág. Siguiente" : selectedLanguage === "de" ? "Weiter" : selectedLanguage === "tr" ? "Sonraki" : "Next Page"}
-                      </span>
-                      <ChevronRight className="w-4 h-4 text-indigo-400 group-hover/next:translate-x-0.5 transition-transform shrink-0" />
+                      <ChevronRight className="w-5 h-5 text-indigo-400 group-hover/next:translate-x-0.5 transition-transform shrink-0" />
                     </button>
                   )}
 
@@ -1988,8 +1982,27 @@ export default function NewsPage() {
                   </div>
                 </div>
 
-                {/* Persistent Hidden DOM Audio Element */}
-                <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
+                {/* Single Master Audio Element */}
+                <audio
+                  ref={singleAudioRef}
+                  src={audioUrl || undefined}
+                  className="hidden"
+                  playsInline
+                  preload="auto"
+                  onTimeUpdate={handleAudioTimeUpdate}
+                  onEnded={() => {
+                    setIsPlayingAudio(false);
+                    setIsPausedAudio(false);
+                    setActiveSentenceIdx(-1);
+                    activeSentenceIndexRef.current = -1;
+                  }}
+                  onError={(e) => {
+                    console.error("[Single Audio] Error playing audio:", e);
+                    setAudioError("Error al reproducir el archivo de audio.");
+                    setIsPlayingAudio(false);
+                    setIsPausedAudio(false);
+                  }}
+                />
 
                 {/* Speed & Voice Selection Options */}
                 <div className="flex flex-wrap items-center gap-3">
@@ -2035,6 +2048,70 @@ export default function NewsPage() {
               <div className="flex flex-col gap-5 w-full bg-zinc-950/40 border border-zinc-900/60 p-4 md:p-5 rounded-xl md:rounded-2xl select-none">
                 <div className="w-full flex flex-col gap-4.5">
                   <div className="flex flex-col gap-2 w-full">
+                    {isGeneratingAudio && (
+                      <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold flex flex-col gap-3 my-2 shadow-xl backdrop-blur-md">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 shrink-0">
+                              <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-extrabold text-amber-300 text-xs uppercase tracking-wider">
+                                {selectedLanguage === "es"
+                                  ? "Síntesis de Audio Asíncrona en Segundo Plano"
+                                  : "Asynchronous Background Audio Synthesis"}
+                              </span>
+                              <span className="text-[11px] text-amber-200/80 font-normal">
+                                {selectedLanguage === "es"
+                                  ? "Generando locución desatendida en el servidor Vercel / Supabase..."
+                                  : "Generating unattended voiceover on Vercel / Supabase server..."}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => {
+                                if (!activeCabinIssue?.id) return;
+                                fetch("/api/magazines/generate-audio", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    documentId: activeCabinIssue.id,
+                                    voice: selectedVoice,
+                                    language: selectedLanguage,
+                                    sentences: sentenceChunksRef.current,
+                                    forceRegenerate: true
+                                  })
+                                }).catch((err) => console.warn("[Force Regenerate Error]", err));
+                              }}
+                              title={selectedLanguage === "es" ? "Reiniciar síntesis de audio" : "Restart audio synthesis"}
+                              className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3 text-amber-400" />
+                              <span>{selectedLanguage === "es" ? "Forzar Reintento" : "Force Retry"}</span>
+                            </button>
+                            <span className="font-mono font-black text-amber-400 text-sm shrink-0 bg-amber-500/20 px-2.5 py-1 rounded-lg border border-amber-500/40 shadow-inner">
+                              {audioProgressPercent}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="w-full bg-zinc-950/90 h-2.5 rounded-full overflow-hidden border border-amber-500/20 p-0.5">
+                          <div
+                            className="bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 h-full rounded-full transition-all duration-500 shadow-md shadow-amber-500/50"
+                            style={{ width: `${Math.max(4, audioProgressPercent)}%` }}
+                          />
+                        </div>
+
+                        <p className="text-[10px] text-zinc-400 font-medium italic flex items-center gap-1.5">
+                          <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
+                          {selectedLanguage === "es"
+                            ? "Puedes salir de esta cabina o cerrar la página. La tarea continúa en el servidor y mantendrá tu progreso."
+                            : "You can leave this cabin or close the page. The background server task will preserve your progress."}
+                        </p>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between px-1">
                       <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 flex items-center gap-1.5">
                         <span className={`w-1.5 h-1.5 rounded-full ${isPlayingAudio && !isPausedAudio ? 'bg-amber-500 animate-pulse' : 'bg-zinc-600'}`} />
@@ -2223,7 +2300,7 @@ export default function NewsPage() {
             )}
 
             {/* ITEM 2: CARD 2 - FULL LITERAL LEGAL TRANSCRIPTION (DIRECTLY BELOW AUDIO CONTROL PLAYER) */}
-            <div className="rounded-2xl border border-zinc-900 bg-black overflow-hidden relative shadow-xl group">
+            <div id="verbatim-transcription-card" className="rounded-2xl border border-zinc-900 bg-black overflow-hidden relative shadow-xl group">
               <button
                 onClick={() => setTranscriptionCollapsed(!transcriptionCollapsed)}
                 className="w-full px-6 py-4 bg-zinc-900/10 hover:bg-zinc-900/20 border-b border-zinc-900/40 flex items-center justify-between transition-all group"
@@ -2413,7 +2490,7 @@ export default function NewsPage() {
                                       topFrameRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
                                       const chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
-                                      if (chunkIdx >= 0) playCabinSentence(chunkIdx);
+                                      if (chunkIdx >= 0) handleSentenceClick(chunkIdx);
                                     }}
                                     className={`text-sm sm:text-base font-bold tracking-wide cursor-pointer p-2.5 rounded-xl border transition-all duration-300 ${
                                       isHeaderActive
@@ -2464,7 +2541,7 @@ export default function NewsPage() {
                                                   onClick={(e) => {
                                                     e.stopPropagation();
                                                     const chunkIdx = chunkTargetElementIdsRef.current.indexOf(sentenceTargetId);
-                                                    if (chunkIdx >= 0) playCabinSentence(chunkIdx);
+                                                    if (chunkIdx >= 0) handleSentenceClick(chunkIdx);
                                                   }}
                                                   className={`inline transition-colors duration-150 cursor-pointer rounded px-1 py-0.5 box-decoration-clone ${
                                                     isSentenceActive
@@ -2482,7 +2559,7 @@ export default function NewsPage() {
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 const chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${art.id}-${pIdx}-0`);
-                                                if (chunkIdx >= 0) playCabinSentence(chunkIdx);
+                                                if (chunkIdx >= 0) handleSentenceClick(chunkIdx);
                                               }}
                                               className="cursor-pointer hover:text-white"
                                             >
@@ -2551,8 +2628,39 @@ export default function NewsPage() {
                 </button>
               </div>
             )}
-
-
+            {/* Floating Compact Icon-Only Compress/Expand Toggle Button for Verbatim Transcription Card */}
+            <button
+              onClick={() => {
+                const nextCollapsed = !transcriptionCollapsed;
+                setTranscriptionCollapsed(nextCollapsed);
+                if (nextCollapsed === false) {
+                  setTimeout(() => {
+                    document.getElementById("verbatim-transcription-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }, 100);
+                }
+              }}
+              className="fixed bottom-6 left-6 md:left-auto md:right-24 z-50 p-3.5 rounded-full bg-zinc-900/95 hover:bg-zinc-800 border border-sky-500/60 hover:border-sky-400 text-sky-400 hover:text-white shadow-[0_10px_35px_rgba(0,0,0,0.9)] backdrop-blur-xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 cursor-pointer group select-none ring-1 ring-sky-500/30"
+              title={
+                transcriptionCollapsed
+                  ? selectedLanguage === "es"
+                    ? "Expandir / Ver Transcripción"
+                    : "Expand Transcription"
+                  : selectedLanguage === "es"
+                  ? "Comprimir Transcripción"
+                  : "Compress Transcription"
+              }
+            >
+              <div className="relative flex items-center justify-center">
+                <FileText className="w-5 h-5 text-sky-400 group-hover:text-sky-300 transition-colors" />
+                <div className="absolute -top-1.5 -right-1.5 bg-zinc-950 border border-sky-500/50 rounded-full p-0.5 text-sky-400">
+                  {transcriptionCollapsed ? (
+                    <Maximize2 className="w-2.5 h-2.5" />
+                  ) : (
+                    <Minimize2 className="w-2.5 h-2.5" />
+                  )}
+                </div>
+              </div>
+            </button>
 
           </div>
         </div>
@@ -2807,17 +2915,31 @@ export default function NewsPage() {
 
                         {/* Interactive footer action buttons inside card */}
                         <div className="flex items-center justify-between mt-2">
-                          
-                          {/* ANALYSIS BUTTON - MATCHES MINI VIDEO CARDS AS REQUESTED */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveCabinIssue(issue);
-                            }}
-                            className="px-2.5 py-1 rounded bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 text-sky-400 text-[9px] font-bold transition-all uppercase tracking-wider"
-                          >
-                            {currTrans.analysis}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {/* ANALYSIS BUTTON - MATCHES MINI VIDEO CARDS AS REQUESTED */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveCabinIssue(issue);
+                              }}
+                              className="px-2.5 py-1 rounded bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 text-sky-400 text-[9px] font-bold transition-all uppercase tracking-wider"
+                            >
+                              {currTrans.analysis}
+                            </button>
+
+                            {/* AUDIO STATUS BADGE - MATCHES CABIN SYNC PROGRESS */}
+                            {issue.metadata?.audio_status === "processing" || (issue.metadata?.audio_progress_percent && issue.metadata?.audio_progress_percent < 100) ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[8.5px] font-mono font-bold flex items-center gap-1 animate-pulse" title="Sintetizando audio en segundo plano">
+                                <Loader2 className="w-2.5 h-2.5 animate-spin text-amber-400" />
+                                {issue.metadata?.audio_progress_percent || 10}%
+                              </span>
+                            ) : issue.metadata?.audio_url || issue.metadata?.audio_status === "ready" || (issue.metadata?.audios && Object.values(issue.metadata.audios).some((a: any) => a?.audio_url)) ? (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[8.5px] font-mono font-bold flex items-center gap-1">
+                                <Volume2 className="w-2.5 h-2.5 text-emerald-400" />
+                                MP3
+                              </span>
+                            ) : null}
+                          </div>
 
                           <div className="flex items-center gap-1.5">
                             <button
