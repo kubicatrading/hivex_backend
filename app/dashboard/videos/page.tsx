@@ -2077,9 +2077,12 @@ export default function VideosPage() {
     if (blobRef.current[index]) return; // Already preloaded!
 
     try {
-      const audioSrc = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
       console.log(`[Gemini Audio Preloader] Prefetching ${isReport ? 'report' : 'summary'} sentence ${index} as local Blob...`);
-      const res = await fetch(audioSrc);
+      const res = await fetch("/api/videos/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: chunks[index], voice: voiceName })
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
@@ -2204,8 +2207,11 @@ export default function VideosPage() {
     if (!audioSrc) {
       console.log(`[Gemini Audio Queue] No preloaded Blob URL found for sentence ${index}, loading on-demand`);
       try {
-        const url = `/api/videos/speak?text=${encodeURIComponent(chunks[index])}&voice=${voiceName}`;
-        const res = await fetch(url);
+        const res = await fetch("/api/videos/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunks[index], voice: voiceName })
+        });
         
         // Guard: If the user clicked seek or skipped to another sentence while we were fetching this one, abort!
         if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) {

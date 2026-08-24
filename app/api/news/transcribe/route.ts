@@ -238,7 +238,7 @@ export async function POST(req: Request) {
       user_id: targetUserId,
       title: art.title,
       description: art.paragraphs.join("\n\n"),
-      type: "knowledge_article_transcription",
+      type: "knowledge_transcription",
       metadata: {
         is_magazine_article: "true",
         issue_slug: issueSlug,

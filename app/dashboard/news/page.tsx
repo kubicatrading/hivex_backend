@@ -759,7 +759,7 @@ export default function NewsPage() {
           const { data, error } = await supabase
             .from("documents")
             .select("*")
-            .in("type", ["knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
+            .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
             .eq("metadata->>is_magazine_article", "true")
             .eq("metadata->>issue_slug", activeCabinIssue.metadata?.slug || "");
           if (error) throw error;
@@ -1272,7 +1272,7 @@ export default function NewsPage() {
         const { data: articles } = await supabase
           .from("documents")
           .select("*")
-          .in("type", ["knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
+          .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
           .eq("metadata->>is_magazine_article", "true")
           .eq("metadata->>issue_slug", issueSlug);
         if (articles && articles.length > 0) {
@@ -1340,7 +1340,7 @@ export default function NewsPage() {
       const { data: articles } = await supabase
         .from("documents")
         .select("*")
-        .in("type", ["knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
+        .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
         .eq("metadata->>is_magazine_article", "true")
         .eq("metadata->>issue_slug", issueSlug)
         .order("created_at", { ascending: true });
@@ -1484,7 +1484,7 @@ export default function NewsPage() {
       const { data: issuesData, error: issuesErr } = await supabase
         .from("documents")
         .select("*")
-        .eq("type", "knowledge_summary")
+        .in("type", ["knowledge_transcription", "knowledge_summary"])
         .eq("metadata->>is_magazine_issue", "true")
         .order("created_at", { ascending: false });
 
@@ -1514,15 +1514,14 @@ export default function NewsPage() {
       setSyncing(true);
       setSyncStatus("Autenticando contra Trends Journal...");
       
-      const token = localStorage.getItem("google_gcloud_token") || localStorage.getItem("supabase.auth.token") || "";
       let authHeader = "";
-      if (token) {
-        try {
-          const parsed = JSON.parse(token);
-          authHeader = parsed?.currentSession?.access_token || token;
-        } catch {
-          authHeader = token;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          authHeader = session.access_token;
         }
+      } catch (e) {
+        console.warn("Could not retrieve session token:", e);
       }
 
       if (!authHeader) {
@@ -1654,7 +1653,7 @@ export default function NewsPage() {
         title: formTitle,
         description: formDescription,
         file_url: formFileUrl,
-        type: "knowledge_summary",
+        type: "knowledge_transcription",
         metadata: {
           is_magazine_issue: true,
           slug: formTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
