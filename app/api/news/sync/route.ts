@@ -276,8 +276,28 @@ async function handleSync(request: Request) {
 
     const querystring = require("querystring");
 
-    // 3. Authenticate with WordPress MemberPress login POST
-    console.log("[Sync Scraper] Initiating secure WordPress MemberPress authentication...");
+    // 3. Authenticate with WordPress MemberPress (2-Step Handshake for Cloudflare)
+    console.log("[Sync Scraper] Initiating 2-Step WordPress MemberPress authentication...");
+    
+    // Step 3a: Initial GET to acquire Cloudflare __cf_bm and WordPress session cookies
+    let initCookieHeader = "";
+    try {
+      const getLoginRes = await makeRequest({
+        hostname: "trendsjournal.com",
+        path: "/login/",
+        method: "GET",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+        }
+      });
+      const getCookies = getLoginRes.headers["set-cookie"] || [];
+      initCookieHeader = getCookies.map((c: string) => c.split(";")[0]).join("; ");
+    } catch (getErr: any) {
+      console.warn("[Sync Scraper] Step 3a GET /login/ warning:", getErr?.message);
+    }
+
+    // Step 3b: POST login form with initial Cloudflare cookies, Referer, and Origin headers
     const postData = querystring.stringify({
       log: username,
       pwd: password,
@@ -294,12 +314,16 @@ async function handleSync(request: Request) {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/x-www-form-urlencoded",
-        "Content-Length": Buffer.byteLength(postData)
+        "Content-Length": Buffer.byteLength(postData),
+        "Cookie": initCookieHeader,
+        "Referer": "https://trendsjournal.com/login/",
+        "Origin": "https://trendsjournal.com"
       }
     }, postData);
 
-    const cookies = loginRes.headers["set-cookie"] || [];
-    const cookieHeader = cookies.map((c: string) => c.split(";")[0]).join("; ");
+    const loginCookies = loginRes.headers["set-cookie"] || [];
+    const allCookieStrings = [initCookieHeader, ...loginCookies.map((c: string) => c.split(";")[0])].filter(Boolean);
+    const cookieHeader = Array.from(new Set(allCookieStrings)).join("; ");
 
     if (!cookieHeader.includes("wordpress_logged_in_")) {
       console.error("[Sync Scraper] Login failure: No active session cookies returned.");
