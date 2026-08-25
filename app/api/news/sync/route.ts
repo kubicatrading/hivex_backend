@@ -353,81 +353,125 @@ async function handleSync(request: Request) {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
-    // Parse all post elements (both standard masonry and slider formats)
+    // Parse articles from homepage HTML
     console.log("[Sync Scraper] Parsing articles and issues...");
-    const articleRegex = /<article[^>]*id="post-(\d+)"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/article>/gi;
-    let match;
-    const issuesMap: Record<string, { date: Date; articles: any[] }> = {};
-
-    while ((match = articleRegex.exec(homeRes.data)) !== null) {
-      const postId = match[1];
-      const classes = match[2];
-      const content = match[3];
-
-      // Identify categories representing issues
-      // Look for e.g. "category-4-august-2026", "category-august-4-2026"
-      const categoryMatch = /category-([0-9a-zA-Z\-]+-2026)/i.exec(classes);
-      if (!categoryMatch) continue;
-
-      const issueCategory = categoryMatch[0]; // e.g. "category-4-august-2026"
-      const issueSlug = categoryMatch[1].toLowerCase(); // e.g. "4-august-2026"
-
-      const issueDate = parseIssueCategoryToDate(issueCategory);
-      if (!issueDate) continue;
-
-      // RULE 4: Sincronizar estrictamente del 4 de agosto de 2026 en adelante
+    const parseArticlesFromHtml = (html: string): Record<string, { date: Date; articles: any[] }> => {
+      const articleRegex = /<article[^>]*id="post-(\d+)"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/article>/gi;
+      let match;
+      const map: Record<string, { date: Date; articles: any[] }> = {};
       const limitDate = new Date(Date.UTC(2026, 7, 4)); // August 4, 2026
-      if (issueDate < limitDate) continue;
 
-      // Extract title and URL
-      const titleMatch = /<h3 class="cmsmasters_[a-z_]+_title[^>]*>\s*<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h3>/i.exec(content);
-      if (!titleMatch) continue;
+      while ((match = articleRegex.exec(html)) !== null) {
+        const postId = match[1];
+        const classes = match[2];
+        const content = match[3];
 
-      const url = titleMatch[1].trim();
-      const title = titleMatch[2].replace(/<[^>]+>/g, "").trim();
+        // Identify strict issue category e.g. category-18-august-2026 or category-august-18-2026
+        const issueCatRegex = /category-((\d{1,2}-[a-z]+-\d{4})|([a-z]+-\d{1,2}-\d{4}))\b/gi;
+        let catMatch;
+        let issueCategory = "";
+        let rawIssueSlug = "";
 
-      // Extract image src (lazy load or raw)
-      const imgMatch = /<img[^>]*data-src="([^"]+)"/i.exec(content) || /<img[^>]*src="([^"]+)"/i.exec(content);
-      const imgUrl = imgMatch ? imgMatch[1].trim() : "";
+        while ((catMatch = issueCatRegex.exec(classes)) !== null) {
+          issueCategory = catMatch[0];
+          rawIssueSlug = catMatch[1].toLowerCase();
+          break;
+        }
 
-      // Extract sub-category dynamically
-      let category = "GENERAL";
-      const classList = classes.split(/\s+/);
-      const subCategoryClass = classList.find(cls => 
-        cls.startsWith("category-") && 
-        !cls.endsWith(issueSlug) && 
-        cls !== `category-${issueSlug}`
-      );
-      if (subCategoryClass) {
-        let cleanCat = subCategoryClass.substring(9); // remove "category-"
-        // Remove dynamic date suffix e.g. -aug-4-2026, -august-4-2026, -sep-11-2026, etc.
-        cleanCat = cleanCat.replace(/-(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*-\d+-\d{4}$/i, "");
-        // Remove "trends-" prefix if exists
-        cleanCat = cleanCat.replace(/^trends-/i, "");
-        category = cleanCat.replace(/-/g, " ").toUpperCase();
+        if (!rawIssueSlug) continue;
+
+        const issueDate = parseIssueCategoryToDate(issueCategory);
+        if (!issueDate || issueDate < limitDate) continue;
+
+        const issueSlug = rawIssueSlug;
+
+        // Extract title and URL
+        const titleMatch = /<h3 class="cmsmasters_[a-z_]+_title[^>]*>\s*<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h3>/i.exec(content);
+        if (!titleMatch) continue;
+
+        const url = titleMatch[1].trim();
+        const title = titleMatch[2].replace(/<[^>]+>/g, "").trim();
+
+        // Extract image src (lazy load or raw)
+        const imgMatch = /<img[^>]*data-src="([^"]+)"/i.exec(content) || /<img[^>]*src="([^"]+)"/i.exec(content);
+        const imgUrl = imgMatch ? imgMatch[1].trim() : "";
+
+        // Extract sub-category dynamically
+        let category = "GENERAL";
+        const classList = classes.split(/\s+/);
+        const subCategoryClass = classList.find(cls => 
+          cls.startsWith("category-") && 
+          !cls.endsWith(issueSlug) && 
+          cls !== `category-${issueSlug}` &&
+          !cls.match(/^category-((\d{1,2}-[a-z]+-\d{4})|([a-z]+-\d{1,2}-\d{4}))$/i)
+        );
+        if (subCategoryClass) {
+          let cleanCat = subCategoryClass.substring(9);
+          cleanCat = cleanCat.replace(/-(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*-\d+-\d{4}$/i, "");
+          cleanCat = cleanCat.replace(/^trends-/i, "");
+          category = cleanCat.replace(/-/g, " ").toUpperCase();
+        }
+
+        const excerptMatch = /<div class="cmsmasters_[a-z_]+_content[^>]*>\s*<p>([\s\S]*?)<\/p>/i.exec(content);
+        const excerpt = excerptMatch ? excerptMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+
+        if (!map[issueSlug]) {
+          map[issueSlug] = { date: issueDate, articles: [] };
+        }
+
+        if (!map[issueSlug].articles.some(a => a.id === postId)) {
+          map[issueSlug].articles.push({
+            id: postId,
+            title,
+            url,
+            imgUrl,
+            category,
+            excerpt
+          });
+        }
       }
 
-      // Excerpt from feed
-      const excerptMatch = /<div class="cmsmasters_[a-z_]+_content[^>]*>\s*<p>([\s\S]*?)<\/p>/i.exec(content);
-      const excerpt = excerptMatch ? excerptMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+      return map;
+    };
 
-      if (!issuesMap[issueSlug]) {
-        issuesMap[issueSlug] = {
-          date: issueDate,
-          articles: []
-        };
+    const issuesMap = parseArticlesFromHtml(homeRes.data);
+
+    // Extract all issue links from the homepage (e.g. /issue/august-18-2026/, /issue/august-11-2026/, /issue/august-4-2026/)
+    const issueLinkRegex = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/gi;
+    let linkMatch;
+    const discoveredIssueSlugs = new Set<string>();
+    const limitDate = new Date(Date.UTC(2026, 7, 4));
+
+    while ((linkMatch = issueLinkRegex.exec(homeRes.data)) !== null) {
+      const slug = linkMatch[1].toLowerCase();
+      const issueDate = parseIssueCategoryToDate(`category-${slug}`);
+      if (issueDate && issueDate >= limitDate) {
+        discoveredIssueSlugs.add(slug);
       }
+    }
 
-      // Avoid duplicates inside same category
-      if (!issuesMap[issueSlug].articles.some(a => a.id === postId)) {
-        issuesMap[issueSlug].articles.push({
-          id: postId,
-          title,
-          url,
-          imgUrl,
-          category,
-          excerpt
+    // Crawl archive page for any discovered issue link not fully populated from homepage
+    for (const slug of Array.from(discoveredIssueSlugs)) {
+      const alreadyPresent = Object.keys(issuesMap).some(s => s.includes(slug) || slug.includes(s));
+      if (!alreadyPresent) {
+        console.log(`[Sync Scraper] Fetching archive page for issue link: /issue/${slug}/ ...`);
+        const pageRes = await makeRequest({
+          hostname: "trendsjournal.com",
+          path: `/issue/${slug}/`,
+          method: "GET",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Cookie": cookieHeader
+          }
         });
+        if (pageRes.statusCode === 200 && pageRes.data) {
+          const pageIssues = parseArticlesFromHtml(pageRes.data);
+          Object.keys(pageIssues).forEach(s => {
+            if (!issuesMap[s]) {
+              issuesMap[s] = pageIssues[s];
+            }
+          });
+        }
       }
     }
 
