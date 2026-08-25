@@ -1039,10 +1039,7 @@ export default function NewsPage() {
 
       const isAudioAvailable = Boolean(
         rawUrl &&
-        ((cachedAudio && cachedAudio.audio_url) ||
-          (meta.audio_url &&
-            (meta.audio_voice === selectedVoice || !meta.audio_voice) &&
-            (meta.audio_language === selectedLanguage || !meta.audio_language)))
+        (cachedAudio?.status === "ready" || meta.audio_status === "ready" || Boolean(rawUrl && rawUrl.length > 10))
       );
 
       if (isAudioAvailable) {
@@ -1052,7 +1049,9 @@ export default function NewsPage() {
         setAudioUrl(readyUrl);
         setSentenceTimestamps(readyStamps);
         setAudioError(null);
-
+        setIsGeneratingAudio(false);
+        setAudioProgressPercent(100);
+      } else {
         if (meta.audio_status === "processing") {
           setIsGeneratingAudio(true);
           const curProgress = typeof meta.audio_progress_percent === "number" ? meta.audio_progress_percent : 10;
@@ -1061,10 +1060,6 @@ export default function NewsPage() {
           setIsGeneratingAudio(false);
           setAudioProgressPercent(100);
         }
-      } else {
-        setIsGeneratingAudio(true);
-        const curProgress = typeof meta.audio_progress_percent === "number" ? meta.audio_progress_percent : 10;
-        setAudioProgressPercent(curProgress);
         setAudioError(null);
 
         let isCancelled = false;
