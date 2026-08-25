@@ -594,14 +594,16 @@ async function handleSync(request: Request) {
 
       // A. Sync each Article in the issue
       for (const art of issueData.articles) {
-        const articleSlug = art.url.split("/").filter(Boolean).pop() || art.id;
+        const rawSlug = art.url.split("/").filter(Boolean).pop() || art.id;
+        const altSlug = `${issueSlug}-${art.id}`;
+        const articleSlug = rawSlug;
 
-        // Check if article is already ingested
+        // Check if article is already ingested (check both slug formats)
         const { data: existingArt } = await supabase
           .from("documents")
           .select("id")
           .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_analysis"])
-          .eq("metadata->>slug", articleSlug)
+          .or(`metadata->>slug.eq.${rawSlug},metadata->>slug.eq.${altSlug}`)
           .maybeSingle();
 
         if (existingArt) {
