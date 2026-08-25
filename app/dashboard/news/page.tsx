@@ -1978,7 +1978,27 @@ export default function NewsPage() {
                     activeSentenceIndexRef.current = -1;
                   }}
                   onError={(e) => {
-                    console.error("[Single Audio] Error playing audio:", e);
+                    const audioTarget = e.currentTarget;
+                    console.error("[Single Audio] Error playing audio:", e, audioTarget?.src);
+                    
+                    const meta = (activeCabinIssue?.metadata || {}) as Record<string, any>;
+                    const altUrl = meta.audios?.["Aoede_es"]?.audio_url || meta.audio_url;
+                    
+                    if (altUrl && audioTarget.src !== altUrl) {
+                      console.log("[Single Audio] Retrying with fallback audio URL:", altUrl);
+                      setAudioUrl(altUrl);
+                      setAudioError(null);
+                      return;
+                    }
+
+                    if (audioTarget.src && audioTarget.src.includes("?t=")) {
+                      const cleanUrl = audioTarget.src.split("?t=")[0];
+                      console.log("[Single Audio] Retrying with clean URL:", cleanUrl);
+                      setAudioUrl(cleanUrl);
+                      setAudioError(null);
+                      return;
+                    }
+
                     setAudioError("Error al reproducir el archivo de audio.");
                     setIsPlayingAudio(false);
                     setIsPausedAudio(false);
