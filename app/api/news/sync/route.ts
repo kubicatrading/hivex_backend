@@ -16,13 +16,36 @@ interface ArticleMetadata {
   paragraphs: string[];
 }
 
-function makeRequest(options: any, postData: string | null = null): Promise<{ statusCode: number; headers: any; data: string }> {
+function makeRequest(options: any, postData: string | null = null, redirectCount: number = 0): Promise<{ statusCode: number; headers: any; data: string }> {
   const https = require("https");
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res: any) => {
       let data = "";
       res.on("data", (chunk: string) => { data += chunk; });
-      res.on("end", () => {
+      res.on("end", async () => {
+        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location && redirectCount < 5) {
+          try {
+            const redirectUrl = new URL(res.headers.location, `https://${options.hostname}`);
+            const newOptions = {
+              ...options,
+              hostname: redirectUrl.hostname,
+              path: redirectUrl.pathname + redirectUrl.search,
+              method: options.method === "POST" && (res.statusCode === 301 || res.statusCode === 302) ? "GET" : options.method
+            };
+            const setCookie = res.headers["set-cookie"] || [];
+            if (setCookie.length > 0) {
+              const newCookies = setCookie.map((c: string) => c.split(";")[0]).join("; ");
+              const existingCookies = options.headers?.["Cookie"] || options.headers?.["cookie"] || "";
+              const combinedCookies = [existingCookies, newCookies].filter(Boolean).join("; ");
+              newOptions.headers = { ...newOptions.headers, Cookie: combinedCookies };
+            }
+            const redirectedRes = await makeRequest(newOptions, null, redirectCount + 1);
+            resolve(redirectedRes);
+            return;
+          } catch (e) {
+            // Fallback to current response on redirect parse error
+          }
+        }
         resolve({
           statusCode: res.statusCode || 200,
           headers: res.headers,
