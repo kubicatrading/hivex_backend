@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         ];
 
@@ -562,7 +562,7 @@ Tienes dos propósitos de servicio principales:
       },
       {
         name: "Gemini 2.0 Flash",
-        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
       },
       {
         name: "Gemini 1.5 Flash",

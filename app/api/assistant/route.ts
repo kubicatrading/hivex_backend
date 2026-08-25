@@ -208,7 +208,7 @@ ${useInternet ? `
       },
       {
         name: "Gemini 2.0 Flash",
-        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
       },
       {
         name: "Gemini 1.5 Flash",

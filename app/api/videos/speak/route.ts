@@ -85,8 +85,22 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
     );
   }
 
-  // Pre-process decimals to prevent TTS from introducing awkward pauses on decimal dots
-  const processedText = formatDecimalsForTTS(text, voice);
+  // Clean text from markdown symbols and pre-process decimals
+  const cleanedText = text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/#+\s*/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[-*+]\s+/g, "")
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const processedText = formatDecimalsForTTS(cleanedText, voice);
   const cacheKey = `${voice}:${processedText.trim()}`;
 
   // Check in-memory cache for instantaneous 1ms response
@@ -152,10 +166,13 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
   let successfulModel = "";
   const errorDetails: string[] = [];
 
-  // Attempt generation sequentially
+  // Cap max text length to 1500 chars to avoid Gemini TTS API overload
+  const safeText = processedText.trim().substring(0, 1500);
+
+  // Attempt generation sequentially with per-fetch timeout guard
   for (const model of models) {
     try {
-      console.log(`[Speak API] Trying model: ${model} with voice: ${voice}`);
+      console.log(`[Speak API] Trying model: ${model} with voice: ${voice} (text length: ${safeText.length})`);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
       const payload = {
@@ -163,7 +180,7 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
           {
             parts: [
               {
-                text: processedText.trim()
+                text: safeText
               }
             ]
           }
@@ -180,13 +197,19 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
         }
       };
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 18000);
+
       const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -202,7 +225,7 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
         }
       } else {
         const errText = await response.text();
-        errorDetails.push(`${model} (HTTP ${response.status}): ${errText}`);
+        errorDetails.push(`${model} (HTTP ${response.status}): ${errText.substring(0, 200)}`);
       }
     } catch (err: any) {
       errorDetails.push(`${model} (Excepción): ${err?.message || err}`);
@@ -217,7 +240,7 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
         error: "Error al generar la síntesis de voz con todos los modelos disponibles.",
         details: errorDetails
       },
-      { status: 502 }
+      { status: 500 }
     );
   }
 

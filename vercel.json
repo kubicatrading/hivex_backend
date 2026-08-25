@@ -59,7 +59,7 @@
     },
     {
       "path": "/api/news/sync",
-      "schedule": "0 4 */2 * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }

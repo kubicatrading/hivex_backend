@@ -210,7 +210,7 @@ async function generateAIEditorialSummary(articles: { title: string; category: s
   3. No utilices subtítulos rígidos, listas, viñetas, guiones ni encabezados de sección. Solo párrafos de texto continuo.
   4. Redáctalo enteramente en español. Evita comentarios de IA o notas iniciales. Ve directo al grano.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   try {
     const response = await fetch(url, {
       method: "POST",

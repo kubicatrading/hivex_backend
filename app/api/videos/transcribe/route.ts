@@ -516,7 +516,7 @@ ${rawTranscriptText}`;
     {
       name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
       type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
     },
     {
       name: "Google AI Studio Gemini 1.5 Flash (v1beta)",

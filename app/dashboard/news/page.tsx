@@ -187,14 +187,14 @@ const newsTranslations: Record<string, any> = {
 };
 
 function getValidCoverUrl(coverUrl?: string, slug?: string): string {
-  if (coverUrl && coverUrl.startsWith("http") && !coverUrl.includes("trendsjournal.com")) {
+  if (coverUrl && coverUrl.startsWith("http")) {
     return coverUrl;
   }
   if (coverUrl && coverUrl.startsWith("/")) {
     return coverUrl;
   }
   const s = slug || "4-august-2026";
-  return `/covers/${s}.jpg`;
+  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
 }
 
 const getLocalizedTitle = (title: string, lang: string) => {
@@ -1131,23 +1131,10 @@ export default function NewsPage() {
           }
         };
 
-        // Trigger background audio generation if current audio is not ready
-        if (!isAudioAvailable) {
-          fetch("/api/magazines/generate-audio", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              documentId: activeCabinIssue.id,
-              voice: selectedVoice,
-              language: selectedLanguage,
-              sentences: chunks,
-              forceRegenerate: meta.audio_status === "error" || readyStamps.length !== chunks.length
-            })
-          }).catch((err) => console.warn("[Generate Audio Trigger Error]", err));
+        // Start polling for background progress updates if processing
+        if (meta.audio_status === "processing") {
+          pollProgress();
         }
-
-        // Start polling for background progress updates
-        pollProgress();
 
         return () => {
           isCancelled = true;
@@ -2730,11 +2717,9 @@ export default function NewsPage() {
                     referrerPolicy="no-referrer"
                     onError={(e) => {
                       const target = e.currentTarget;
-                      const s = selectedIssue.metadata?.slug || "4-august-2026";
+                      const s = selectedIssue?.metadata?.slug || "4-august-2026";
                       if (!target.src.includes("supabase.co")) {
                         target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
-                      } else {
-                        target.src = "/covers/4-august-2026.jpg";
                       }
                     }}
                   />
@@ -2887,8 +2872,6 @@ export default function NewsPage() {
                             const s = issue.metadata?.slug || "4-august-2026";
                             if (!target.src.includes("supabase.co")) {
                               target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
-                            } else {
-                              target.src = "/covers/4-august-2026.jpg";
                             }
                           }}
                         />
