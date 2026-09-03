@@ -334,7 +334,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           documentId: parentDocId,
           voice: "Aoede",
-          language: "es",
+          language: "en",
           forceRegenerate: !!force
         })
       }).catch(err => {

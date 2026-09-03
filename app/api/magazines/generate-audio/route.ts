@@ -214,7 +214,7 @@ export async function POST(request: Request) {
         }
 
         const body: GenerateAudioRequestBody = await request.json();
-        const { documentId: reqDocId, voice = "Aoede", language = "es", forceRegenerate = false } = body;
+        const { documentId: reqDocId, voice = "Aoede", language = "en", forceRegenerate = false } = body;
         documentId = reqDocId;
 
         if (!documentId) {
