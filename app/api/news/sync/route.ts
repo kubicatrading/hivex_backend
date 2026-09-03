@@ -382,7 +382,7 @@ async function handleSync(request: Request) {
       const articleRegex = /<article[^>]*id="post-(\d+)"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/article>/gi;
       let match;
       const map: Record<string, { date: Date; articles: any[] }> = {};
-      const limitDate = new Date(Date.UTC(2026, 7, 4)); // August 4, 2026
+      const limitDate = new Date(Date.UTC(2026, 6, 28)); // July 28, 2026
 
       while ((match = articleRegex.exec(html)) !== null) {
         const postId = match[1];
@@ -459,11 +459,11 @@ async function handleSync(request: Request) {
 
     const issuesMap = parseArticlesFromHtml(homeRes.data);
 
-    // Extract all issue links from the homepage (e.g. /issue/august-18-2026/, /issue/august-11-2026/, /issue/august-4-2026/)
+    // Extract all issue links from the homepage (e.g. /issue/august-25-2026/, /issue/august-18-2026/, /issue/august-11-2026/, /issue/august-4-2026/, /issue/july-28-2026/)
     const issueLinkRegex = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/gi;
     let linkMatch;
     const discoveredIssueSlugs = new Set<string>();
-    const limitDate = new Date(Date.UTC(2026, 7, 4));
+    const limitDate = new Date(Date.UTC(2026, 6, 28)); // July 28, 2026
 
     while ((linkMatch = issueLinkRegex.exec(homeRes.data)) !== null) {
       const slug = linkMatch[1].toLowerCase();
@@ -644,7 +644,9 @@ async function handleSync(request: Request) {
           paragraphs.push(art.excerpt);
         }
 
-        const articleMeta: ArticleMetadata = {
+        const articleMeta = {
+          document_type: "knowledge_magazine_transcription",
+          is_magazine_transcription: true,
           is_magazine_article: true,
           issue_slug: issueSlug,
           slug: articleSlug,

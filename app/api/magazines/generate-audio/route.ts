@@ -248,16 +248,32 @@ export async function POST(request: Request) {
           return;
         }
 
-        const existingMetadata = doc.metadata || {};
-        const audioKey = `${voice}_${language}`;
-        const cachedAudio = existingMetadata.audios?.[audioKey];
-        const hasValidCachedAudio = cachedAudio && cachedAudio.audio_url;
-        const hasValidRootAudio = existingMetadata.audio_url && existingMetadata.audio_language === language && existingMetadata.audio_voice === voice;
+        const issueSlug = doc.metadata?.slug || doc.metadata?.issue_slug || "";
 
-        // Check if audio for this voice + language combination already exists
-        if (!forceRegenerate && (hasValidCachedAudio || hasValidRootAudio)) {
-          const targetAudioUrl = cachedAudio?.audio_url || existingMetadata.audio_url;
-          const targetTimestamps = cachedAudio?.sentence_timestamps || existingMetadata.sentence_timestamps || [];
+        // Look up protected HIVEX Knowledge Asset (knowledge_magazine_audio)
+        const { data: knowledgeAudioDoc } = await supabase
+          .from("documents")
+          .select("*")
+          .eq("type", "knowledge_analysis")
+          .eq("metadata->>asset_subtype", "knowledge_magazine_audio")
+          .or(`metadata->>issue_id.eq.${documentId},metadata->>issue_slug.eq.${issueSlug}`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const existingMetadata = doc.metadata || {};
+        const kAudioMeta = knowledgeAudioDoc?.metadata || {};
+
+        const audioKey = `${voice}_${language}`;
+        const cachedAudio = existingMetadata.audios?.[audioKey] || kAudioMeta.audios?.[audioKey];
+        const hasValidCachedAudio = cachedAudio && cachedAudio.audio_url;
+        const hasValidRootAudio = (existingMetadata.audio_url || kAudioMeta.audio_url) && (existingMetadata.audio_language === language || kAudioMeta.audio_language === language);
+        const hasProtectedAsset = !!knowledgeAudioDoc;
+
+        // Check if audio for this voice + language combination already exists or is protected
+        if (!forceRegenerate && (hasValidCachedAudio || hasValidRootAudio || hasProtectedAsset)) {
+          const targetAudioUrl = cachedAudio?.audio_url || existingMetadata.audio_url || kAudioMeta.audio_url;
+          const targetTimestamps = cachedAudio?.sentence_timestamps || existingMetadata.sentence_timestamps || kAudioMeta.sentence_timestamps || [];
 
           // Self-heal DB metadata if status was stuck as processing
           if (existingMetadata.audio_status !== "ready" || existingMetadata.audio_progress_percent !== 100) {
@@ -297,6 +313,17 @@ export async function POST(request: Request) {
           return;
         }
 
+        // If forced regeneration, delete old knowledge_magazine_audio asset
+        if (forceRegenerate && issueSlug) {
+          console.log(`[Generate Audio API] Force regenerate requested for ${issueSlug}. Deleting old knowledge_magazine_audio assets...`);
+          await supabase
+            .from("documents")
+            .delete()
+            .eq("type", "knowledge_analysis")
+            .eq("metadata->>asset_subtype", "knowledge_magazine_audio")
+            .or(`metadata->>issue_id.eq.${documentId},metadata->>issue_slug.eq.${issueSlug}`);
+        }
+
         // Ensure active job state
         const initialStartPercent = Math.max(10, existingMetadata.audio_progress_percent || 10);
         sendEvent({ type: "progress", percent: initialStartPercent, message: "Iniciando procesamiento de la revista..." });
@@ -327,7 +354,7 @@ export async function POST(request: Request) {
           const { data: dbArticles } = await supabase
             .from("documents")
             .select("*")
-            .in("type", ["knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
+            .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
             .eq("metadata->>is_magazine_article", "true")
             .eq("metadata->>issue_slug", issueSlug);
 
@@ -632,6 +659,36 @@ export async function POST(request: Request) {
           .from("documents")
           .update({ metadata: finalMetadata })
           .eq("id", documentId);
+
+        // Auto-persist/upsert protected HIVEX Knowledge Asset for audio & sentence timestamps
+        try {
+          const kAudioDocId = crypto.randomUUID();
+          await supabase.from("documents").upsert({
+            id: kAudioDocId,
+            user_id: doc.user_id || "00000000-0000-0000-0000-000000000000",
+            title: `Audio & Sentence Timestamps - Trends Journal (${issueSlug}) - ${voice} v4`,
+            description: `Documento blindado oficial de la base de conocimiento HIVEX (knowledge_magazine_audio) conteniendo el audio completo sintetizado y sincronizado con el parseador v4.`,
+            type: "knowledge_analysis",
+            metadata: {
+              asset_subtype: "knowledge_magazine_audio",
+              is_hivex_knowledge_asset: true,
+              is_protected: true,
+              immutable: true,
+              issue_id: documentId,
+              issue_slug: issueSlug,
+              audio_url: publicAudioUrl,
+              audio_voice: voice,
+              audio_language: language,
+              audio_status: "ready",
+              total_sentences: timestamps.length,
+              parser_version: "toc_page_sliced_v4",
+              sentence_timestamps: timestamps,
+              protected_at: new Date().toISOString()
+            }
+          });
+        } catch (kErr) {
+          console.error("[Generate Audio API] Warning: Failed to upsert protected knowledge_magazine_audio asset:", kErr);
+        }
 
         sendEvent({
           type: "complete",

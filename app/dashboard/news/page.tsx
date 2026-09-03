@@ -10,7 +10,7 @@ import {
   RotateCcw, Headphones, AlertTriangle, Maximize2, Minimize2
 } from "lucide-react";
 import { translations } from "@/lib/translations";
-import { cleanSummaryForSpeech, splitParagraphIntoSentences } from "@/lib/magazineSentences";
+import { cleanSummaryForSpeech, splitParagraphIntoSentences, extractMagazineSentences } from "@/lib/magazineSentences";
 
 interface MagazineIssue {
   id: string;
@@ -186,15 +186,22 @@ const newsTranslations: Record<string, any> = {
   }
 };
 
-function getValidCoverUrl(coverUrl?: string, slug?: string): string {
-  if (coverUrl && coverUrl.startsWith("http")) {
+function getValidCoverUrl(coverUrl?: string, slug?: string, title?: string): string {
+  let s = slug;
+  if (!s || s === "undefined") {
+    const t = title || "";
+    if (t.includes("25")) s = "25-august-2026";
+    else if (t.includes("18")) s = "18-august-2026";
+    else if (t.includes("11")) s = "11-august-2026";
+    else s = "4-august-2026";
+  }
+  if (!s) s = "4-august-2026";
+
+  if (coverUrl && coverUrl.includes("documents/covers/") && coverUrl.includes("?v=hivex3")) {
     return coverUrl;
   }
-  if (coverUrl && coverUrl.startsWith("/")) {
-    return coverUrl;
-  }
-  const s = slug || "4-august-2026";
-  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
+
+  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex3`;
 }
 
 const getLocalizedTitle = (title: string, lang: string) => {
@@ -719,7 +726,7 @@ export default function NewsPage() {
     if (lang === "en" || !art?.metadata?.translations?.[lang]) {
       return {
         title: art?.title || "",
-        category: art?.metadata?.category || "TENDENCIAS",
+        category: art?.metadata?.main_category || art?.metadata?.category || "TENDENCIAS",
         subcategory: art?.metadata?.subcategory || art?.metadata?.category || "SECCIÓN",
         paragraphs: art?.metadata?.paragraphs || (art?.description ? [art.description] : [])
       };
@@ -727,7 +734,7 @@ export default function NewsPage() {
     const trans = art.metadata.translations[lang];
     return {
       title: trans.title || art?.title || "",
-      category: trans.category || art?.metadata?.category || "TENDENCIAS",
+      category: trans.main_category || trans.category || art?.metadata?.main_category || art?.metadata?.category || "TENDENCIAS",
       subcategory: trans.subcategory || art?.metadata?.subcategory || "SECCIÓN",
       paragraphs: trans.paragraphs || art?.metadata?.paragraphs || (art?.description ? [art.description] : [])
     };
@@ -742,7 +749,7 @@ export default function NewsPage() {
   const playbackRateRef = useRef(1.0);
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [sentenceTimestamps, setSentenceTimestamps] = useState<Array<{ sentenceIdx: number, text: string, startTime: number, endTime: number }>>([]);
+  const [sentenceTimestamps, setSentenceTimestamps] = useState<Array<{ sentenceIdx: number, text: string, startTime: number, endTime: number, elementId?: string, articleId?: string, pIdx?: number, sIdx?: number }>>([]);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioProgressPercent, setAudioProgressPercent] = useState<number>(0);
   const [audioCurrentTime, setAudioTime] = useState(0);
@@ -903,7 +910,7 @@ export default function NewsPage() {
         activeSentenceIndexRef.current = match.sentenceIdx;
         setActiveSentenceIdx(match.sentenceIdx);
 
-        const targetId = chunkTargetElementIdsRef.current[match.sentenceIdx];
+        const targetId = match.elementId || chunkTargetElementIdsRef.current[match.sentenceIdx];
         if (targetId) {
           const el = document.getElementById(targetId);
           if (el) {
@@ -981,34 +988,24 @@ export default function NewsPage() {
       const targetElementIds: string[] = [];
 
       if (cabinArticles.length > 0) {
-        cabinArticles.forEach((art) => {
+        const localizedArticles = cabinArticles.map((art) => {
           const locArt = getLocalizedArticle(art, selectedLanguage);
+          return {
+            ...art,
+            title: locArt.title,
+            metadata: {
+              ...(art.metadata || {}),
+              category: locArt.category,
+              subcategory: locArt.subcategory,
+              paragraphs: locArt.paragraphs
+            }
+          };
+        });
 
-          const subcat = locArt.subcategory;
-          const titleText = `${subcat}: ${locArt.title}.`;
-          chunks.push(titleText);
-          targetElementIds.push(`article-title-${art.id}`);
-
-          if (locArt.paragraphs && locArt.paragraphs.length > 0) {
-            locArt.paragraphs.forEach((para: string, pIdx: number) => {
-              const sentences = splitParagraphIntoSentences(para);
-              if (sentences.length > 0) {
-                sentences.forEach((sentence: string, sIdx: number) => {
-                  const speechSentence = cleanSummaryForSpeech(sentence);
-                  if (speechSentence.length > 0) {
-                    chunks.push(speechSentence);
-                    targetElementIds.push(`sentence-${art.id}-${pIdx}-${sIdx}`);
-                  }
-                });
-              } else {
-                const cleanP = cleanSummaryForSpeech(para);
-                if (cleanP.length > 0) {
-                  chunks.push(cleanP);
-                  targetElementIds.push(`sentence-${art.id}-${pIdx}-0`);
-                }
-              }
-            });
-          }
+        const canonicalChunks = extractMagazineSentences(localizedArticles);
+        canonicalChunks.forEach((c) => {
+          chunks.push(c.text);
+          targetElementIds.push(c.elementId);
         });
       } else {
         const summaryText = activeCabinIssue.metadata?.summary || activeCabinIssue.description || "";
@@ -1459,23 +1456,55 @@ export default function NewsPage() {
   const lang = selectedLanguage || "en";
   const currTrans = newsTranslations[lang] || newsTranslations["en"];
 
+  // Helper to extract exact publication timestamp for descending sorting (most recent first)
+  const getIssuePublicationTimestamp = (issue: MagazineIssue): number => {
+    if (issue.metadata?.published_at) {
+      const t = new Date(issue.metadata.published_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    const slug = issue.metadata?.slug || "";
+    const months: Record<string, number> = {
+      january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+      july: 6, august: 7, september: 8, october: 9, november: 10, december: 11
+    };
+    // Match "18-august-2026"
+    let m = slug.match(/^(\d{1,2})-([a-z]+)-(\d{4})$/i);
+    if (m && months[m[2].toLowerCase()] !== undefined) {
+      return Date.UTC(parseInt(m[3], 10), months[m[2].toLowerCase()], parseInt(m[1], 10));
+    }
+    // Match "august-18-2026"
+    m = slug.match(/^([a-z]+)-(\d{1,2})-(\d{4})$/i);
+    if (m && months[m[1].toLowerCase()] !== undefined) {
+      return Date.UTC(parseInt(m[3], 10), months[m[1].toLowerCase()], parseInt(m[2], 10));
+    }
+    // Match Spanish title "Revista Semanal - 18 de Agosto de 2026"
+    const esMonths: Record<string, number> = {
+      enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
+      julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11
+    };
+    const titleMatch = issue.title.match(/(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})/i);
+    if (titleMatch && esMonths[titleMatch[2].toLowerCase()] !== undefined) {
+      return Date.UTC(parseInt(titleMatch[3], 10), esMonths[titleMatch[2].toLowerCase()], parseInt(titleMatch[1], 10));
+    }
+    return new Date(issue.created_at).getTime() || 0;
+  };
+
   // 1. Fetch magazine content from DB
   const fetchContent = async () => {
     try {
       setLoading(true);
       const { data: issuesData, error: issuesErr } = await supabase
         .from("documents")
-        .select("*")
-        .in("type", ["knowledge_transcription", "knowledge_summary"])
-        .eq("metadata->>is_magazine_issue", "true")
-        .order("created_at", { ascending: false });
+        .select("id, title, description, type, file_url, user_id, created_at, metadata")
+        .eq("metadata->>is_magazine_issue", "true");
 
-      if (issuesErr) throw issuesErr;
-
-      const items = (issuesData || []) as MagazineIssue[];
+      const rawItems = (issuesData || []) as MagazineIssue[];
+      const items = rawItems
+        .filter(item => !item.title.startsWith("["))
+        .sort((a, b) => getIssuePublicationTimestamp(b) - getIssuePublicationTimestamp(a));
       setIssues(items);
       
-      // Auto-select first issue if none is selected
+      // Auto-select first issue (most recent) if none is selected
       if (items.length > 0 && !selectedIssue) {
         setSelectedIssue(items[0]);
       }
@@ -2480,7 +2509,9 @@ export default function NewsPage() {
                             <div className="mb-4">
                               {(() => {
                                 const headerTargetId = `article-title-${art.id}`;
-                                const activeTargetId = activeSentenceIdx >= 0 ? chunkTargetElementIdsRef.current[activeSentenceIdx] : null;
+                                const activeTargetId = activeSentenceIdx >= 0
+                                  ? (sentenceTimestamps[activeSentenceIdx]?.elementId || chunkTargetElementIdsRef.current[activeSentenceIdx])
+                                  : null;
                                 const isHeaderActive = activeTargetId === headerTargetId && isPlayingAudio;
                                 return (
                                   <h4
@@ -2490,7 +2521,10 @@ export default function NewsPage() {
                                       setCabinSelectedPage(p);
                                       topFrameRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-                                      const chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+                                      let chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+                                      if (chunkIdx < 0) {
+                                        chunkIdx = sentenceTimestamps.findIndex((ts: any) => ts.elementId === headerTargetId);
+                                      }
                                       if (chunkIdx >= 0) handleSentenceClick(chunkIdx);
                                     }}
                                     className={`text-sm sm:text-base font-bold tracking-wide cursor-pointer p-2.5 rounded-xl border transition-all duration-300 ${
@@ -2510,7 +2544,9 @@ export default function NewsPage() {
                               {locArt.paragraphs && locArt.paragraphs.length > 0 ? (
                                 locArt.paragraphs.map((para: string, pIdx: number) => {
                                   const sentences = splitParagraphIntoSentences(para);
-                                  const activeTargetId = activeSentenceIdx >= 0 ? chunkTargetElementIdsRef.current[activeSentenceIdx] : null;
+                                  const activeTargetId = activeSentenceIdx >= 0
+                                    ? (sentenceTimestamps[activeSentenceIdx]?.elementId || chunkTargetElementIdsRef.current[activeSentenceIdx])
+                                    : null;
                                   const isAnySentenceInParaActive = sentences.some((_, sIdx) => `sentence-${art.id}-${pIdx}-${sIdx}` === activeTargetId) && isPlayingAudio;
 
                                   return (
@@ -2541,7 +2577,10 @@ export default function NewsPage() {
                                                   id={sentenceTargetId}
                                                   onClick={(e) => {
                                                     e.stopPropagation();
-                                                    const chunkIdx = chunkTargetElementIdsRef.current.indexOf(sentenceTargetId);
+                                                    let chunkIdx = chunkTargetElementIdsRef.current.indexOf(sentenceTargetId);
+                                                    if (chunkIdx < 0) {
+                                                      chunkIdx = sentenceTimestamps.findIndex((ts: any) => ts.elementId === sentenceTargetId);
+                                                    }
                                                     if (chunkIdx >= 0) handleSentenceClick(chunkIdx);
                                                   }}
                                                   className={`inline transition-colors duration-150 cursor-pointer rounded px-1 py-0.5 box-decoration-clone ${
@@ -2559,7 +2598,10 @@ export default function NewsPage() {
                                               id={`sentence-${art.id}-${pIdx}-0`}
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                const chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${art.id}-${pIdx}-0`);
+                                                let chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${art.id}-${pIdx}-0`);
+                                                if (chunkIdx < 0) {
+                                                  chunkIdx = sentenceTimestamps.findIndex((ts: any) => ts.elementId === `sentence-${art.id}-${pIdx}-0`);
+                                                }
                                                 if (chunkIdx >= 0) handleSentenceClick(chunkIdx);
                                               }}
                                               className="cursor-pointer hover:text-white"
@@ -2719,23 +2761,21 @@ export default function NewsPage() {
                 {/* Widescreen backdrop blur background utilizing cover url */}
                 <div 
                   className="absolute inset-0 bg-cover bg-center blur-3xl opacity-40 select-none pointer-events-none"
-                  style={{ backgroundImage: `url(${getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug)})` }}
+                  style={{ backgroundImage: `url(${getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug, selectedIssue.title)})` }}
                 />
 
                 {/* Sharp vertical centered cover representational display */}
                 <div className="h-[96%] aspect-[3/4.2] relative z-10 rounded-lg overflow-hidden border border-zinc-800 shadow-2xl flex-shrink-0">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug)}
+                    src={getValidCoverUrl(selectedIssue.metadata?.cover_url, selectedIssue.metadata?.slug, selectedIssue.title)}
                     alt={selectedIssue.title}
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                     onError={(e) => {
                       const target = e.currentTarget;
-                      const s = selectedIssue?.metadata?.slug || "4-august-2026";
-                      if (!target.src.includes("supabase.co")) {
-                        target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
-                      }
+                      const s = selectedIssue?.metadata?.slug || (selectedIssue?.title?.includes("18") ? "18-august-2026" : selectedIssue?.title?.includes("11") ? "11-august-2026" : "4-august-2026");
+                      target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex3`;
                     }}
                   />
                 </div>
@@ -2875,19 +2915,17 @@ export default function NewsPage() {
                       }`}
                     >
                       {/* Cover Miniature representation */}
-                      <div className="w-18 h-24 bg-zinc-950 flex-shrink-0 relative rounded-lg overflow-hidden border border-zinc-900 shadow-inner">
+                      <div className="w-20 h-28 bg-zinc-950 flex-shrink-0 relative rounded-lg overflow-hidden border border-zinc-900 shadow-inner">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={getValidCoverUrl(issue.metadata?.cover_url, issue.metadata?.slug)}
+                          src={getValidCoverUrl(issue.metadata?.cover_url, issue.metadata?.slug, issue.title)}
                           alt={getLocalizedTitle(issue.title, selectedLanguage)}
                           className="w-full h-full object-cover"
                           referrerPolicy="no-referrer"
                           onError={(e) => {
                             const target = e.currentTarget;
-                            const s = issue.metadata?.slug || "4-august-2026";
-                            if (!target.src.includes("supabase.co")) {
-                              target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg`;
-                            }
+                            const s = issue.metadata?.slug || (issue.title?.includes("18") ? "18-august-2026" : issue.title?.includes("11") ? "11-august-2026" : "4-august-2026");
+                            target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex3`;
                           }}
                         />
 

@@ -78,7 +78,7 @@ ${tocText}`;
 
 export async function POST(req: Request) {
   try {
-    const { issueSlug, pdfUrl, title } = await req.json();
+    const { issueSlug, pdfUrl, title, force } = await req.json();
 
     if (!issueSlug) {
       return NextResponse.json({ success: false, error: "Missing issueSlug" }, { status: 400 });
@@ -89,22 +89,88 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Missing GEMINI_API_KEY" }, { status: 500 });
     }
 
-    console.log(`[News Transcribe API] Initiating TOC-Guided Page Slicing Pipeline for issue ${issueSlug}...`);
     const supabase = getSupabaseClient();
+
+    // 1. Strict Immutability & Coupling Check (No-Overwrite unless force === true)
+    if (!force) {
+      const { data: existingArticles } = await supabase
+        .from("documents")
+        .select("id")
+        .eq("type", "knowledge_transcription")
+        .eq("metadata->>is_magazine_article", "true")
+        .eq("metadata->>issue_slug", issueSlug);
+
+      const { data: existingAudioAsset } = await supabase
+        .from("documents")
+        .select("id")
+        .eq("type", "knowledge_analysis")
+        .eq("metadata->>asset_subtype", "knowledge_magazine_audio")
+        .eq("metadata->>issue_slug", issueSlug)
+        .limit(1);
+
+      if (existingArticles && existingArticles.length > 0 && existingAudioAsset && existingAudioAsset.length > 0) {
+        console.log(`[News Transcribe API] Magazine transcription and protected audio asset already exist for issue ${issueSlug}. Skipping re-transcription (force = false).`);
+        return NextResponse.json({
+          success: true,
+          count: existingArticles.length,
+          cached: true,
+          protected: true,
+          message: "Magazine transcription and audio asset are strictly protected and unchanged."
+        });
+      }
+    }
+
+    console.log(`[News Transcribe API] Initiating TOC-Guided Page Slicing Pipeline for issue ${issueSlug} (force: ${!!force})...`);
 
     // Fetch magazine issue parent document to retrieve target user_id
     const { data: issueDocs } = await supabase
       .from("documents")
-      .select("id, user_id, file_url")
+      .select("id, user_id, file_url, metadata")
       .eq("metadata->>is_magazine_issue", "true")
+      .eq("metadata->>slug", issueSlug)
       .limit(1);
 
     const parentIssue = issueDocs?.[0];
+    const parentDocId = parentIssue?.id;
     const targetUserId = parentIssue?.user_id || "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
     const targetPdfUrl = pdfUrl || parentIssue?.file_url;
 
     if (!targetPdfUrl) {
       return NextResponse.json({ success: false, error: "No PDF URL found for magazine issue" }, { status: 400 });
+    }
+
+    // 2. Atomic cleanup when force === true
+    if (force) {
+      console.log(`[News Transcribe API] Forced re-sync requested. Deleting old transcription and audio assets for ${issueSlug}...`);
+      
+      // Delete old magazine transcriptions
+      await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "knowledge_transcription")
+        .eq("metadata->>is_magazine_article", "true")
+        .eq("metadata->>issue_slug", issueSlug);
+
+      // Delete old magazine audio assets
+      await supabase
+        .from("documents")
+        .delete()
+        .eq("type", "knowledge_analysis")
+        .eq("metadata->>asset_subtype", "knowledge_magazine_audio")
+        .eq("metadata->>issue_slug", issueSlug);
+
+      // Reset audio fields on master issue doc
+      if (parentDocId) {
+        const cleanMeta = { ...(parentIssue?.metadata || {}) };
+        delete cleanMeta.audio_url;
+        delete cleanMeta.sentence_timestamps;
+        delete cleanMeta.audios;
+
+        await supabase
+          .from("documents")
+          .update({ metadata: cleanMeta })
+          .eq("id", parentDocId);
+      }
     }
 
     console.log(`[News Transcribe API] Downloading PDF binary from: ${targetPdfUrl}`);
@@ -224,15 +290,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. Delete old articles for this issue slug
-    await supabase
-      .from("documents")
-      .delete()
-      .in("type", ["knowledge_article_transcription", "knowledge_analysis"])
-      .eq("metadata->>is_magazine_article", "true")
-      .eq("metadata->>issue_slug", issueSlug);
-
-    // 6. Batch upsert clean articles to Supabase
+    // 5. Batch upsert clean articles to Supabase tagged as knowledge_magazine_transcription
     const payloadList = cleanArticles.map((art, idx) => ({
       id: crypto.randomUUID(),
       user_id: targetUserId,
@@ -240,6 +298,8 @@ export async function POST(req: Request) {
       description: art.paragraphs.join("\n\n"),
       type: "knowledge_transcription",
       metadata: {
+        document_type: "knowledge_magazine_transcription",
+        is_magazine_transcription: true,
         is_magazine_article: "true",
         issue_slug: issueSlug,
         category: art.category,
@@ -263,11 +323,10 @@ export async function POST(req: Request) {
       }
     }
 
-    console.log(`[News Transcribe API] Successfully saved/upserted ${savedCount} clean articles to Supabase for issue ${issueSlug}.`);
+    console.log(`[News Transcribe API] Successfully saved/upserted ${savedCount} clean articles (knowledge_magazine_transcription) to Supabase for issue ${issueSlug}.`);
 
-    // Asynchronously trigger background audio generation without blocking transcription response
-    if (issueDocs && issueDocs.length > 0) {
-      const parentDocId = issueDocs[0].id;
+    // 6. Asynchronously trigger background audio generation if parent doc ID exists
+    if (parentDocId) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://hivex-backend.vercel.app";
       fetch(`${appUrl}/api/magazines/generate-audio`, {
         method: "POST",
@@ -276,9 +335,11 @@ export async function POST(req: Request) {
           documentId: parentDocId,
           voice: "Aoede",
           language: "es",
-          forceRegenerate: false
+          forceRegenerate: !!force
         })
-      }).catch((bgErr) => console.warn("[News Transcribe API] Background audio trigger warning:", bgErr?.message || bgErr));
+      }).catch(err => {
+        console.error("[News Transcribe API] Error triggering background generate-audio:", err);
+      });
     }
 
     return NextResponse.json({
