@@ -604,8 +604,8 @@ export async function POST(request: Request) {
         // Concatenate PCM buffers into a single linear PCM stream
         const fullPcmBuffer = Buffer.concat(allPcmBuffers);
 
-        // Compress 24kHz 16-bit Mono PCM into 24kbps MP3 (~5.3 MB for 2.5 hours speech narration)
-        const mp3AudioBuffer = encodePcmToMp3(fullPcmBuffer, 24000, 24);
+        // Compress 24kHz 16-bit Mono PCM into 18kbps MP3 (~30 MB for full magazine narration)
+        const mp3AudioBuffer = encodePcmToMp3(fullPcmBuffer, 24000, 18);
 
         sendEvent({ type: "progress", percent: 96, message: "Guardando audio MP3 comprimido en Supabase Storage..." });
 
