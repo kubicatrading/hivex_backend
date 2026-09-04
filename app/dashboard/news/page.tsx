@@ -1504,8 +1504,23 @@ export default function NewsPage() {
         .sort((a, b) => getIssuePublicationTimestamp(b) - getIssuePublicationTimestamp(a));
       setIssues(items);
       
-      // Auto-select first issue (most recent) if none is selected
-      if (items.length > 0 && !selectedIssue) {
+      // Auto-select and auto-open study cabin if deep-linked via ?id= or ?slug= (e.g. from Telegram)
+      let deepLinkedIssue: MagazineIssue | null = null;
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetId = urlParams.get("id");
+        const targetSlug = urlParams.get("slug");
+        if (targetId) {
+          deepLinkedIssue = items.find(it => it.id === targetId || it.metadata?.slug === targetId) || null;
+        } else if (targetSlug) {
+          deepLinkedIssue = items.find(it => it.metadata?.slug === targetSlug) || null;
+        }
+      }
+
+      if (deepLinkedIssue) {
+        setSelectedIssue(deepLinkedIssue);
+        setActiveCabinIssue(deepLinkedIssue);
+      } else if (items.length > 0 && !selectedIssue) {
         setSelectedIssue(items[0]);
       }
     } catch (err) {

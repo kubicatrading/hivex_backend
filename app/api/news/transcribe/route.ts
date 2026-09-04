@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { PDFParse } from "pdf-parse";
 import crypto from "crypto";
+import { sendMagazineNotification } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -325,7 +326,48 @@ export async function POST(req: Request) {
 
     console.log(`[News Transcribe API] Successfully saved/upserted ${savedCount} clean articles (knowledge_magazine_transcription) to Supabase for issue ${issueSlug}.`);
 
-    // 6. Asynchronously trigger background audio generation if parent doc ID exists
+    // 6. Alert in Telegram (HIVEX Update - AddNewMagazine) for this newly ingested magazine
+    if (parentDocId) {
+      try {
+        const { data: issueDoc } = await supabase
+          .from("documents")
+          .select("id, title, metadata, created_at")
+          .eq("id", parentDocId)
+          .maybeSingle();
+
+        if (issueDoc && !issueDoc.metadata?.telegram_notified) {
+          console.log(`[News Transcribe API] Sending Telegram notification for issue ${issueSlug}...`);
+          const coverUrl = issueDoc.metadata?.cover_url || `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${issueSlug}.jpg`;
+          const tgResult = await sendMagazineNotification({
+            title: issueDoc.title,
+            channelName: "Trends Journal",
+            publishedAt: issueDoc.metadata?.published_at || issueDoc.created_at,
+            documentId: issueDoc.id,
+            issueSlug: issueSlug,
+            coverUrl: coverUrl
+          });
+
+          if (tgResult.success) {
+            console.log(`[News Transcribe API] Telegram alert dispatched successfully!`);
+            await supabase
+              .from("documents")
+              .update({
+                metadata: {
+                  ...(issueDoc.metadata || {}),
+                  telegram_notified: true
+                }
+              })
+              .eq("id", issueDoc.id);
+          } else {
+            console.warn(`[News Transcribe API] Telegram alert failed:`, tgResult.error);
+          }
+        }
+      } catch (tgErr: any) {
+        console.warn(`[News Transcribe API] Warning: Telegram notification failed for ${issueSlug}:`, tgErr.message);
+      }
+    }
+
+    // 7. Asynchronously trigger background audio generation if parent doc ID exists
     if (parentDocId) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://hivex-backend.vercel.app";
       fetch(`${appUrl}/api/magazines/generate-audio`, {

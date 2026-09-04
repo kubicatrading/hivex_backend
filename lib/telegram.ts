@@ -136,6 +136,102 @@ export function formatVideoNotification({
   return message;
 }
 
+export interface MagazineNotificationPayload {
+  title: string;
+  channelName?: string;
+  publishedAt?: string | Date;
+  documentId?: string;
+  issueSlug?: string;
+  coverUrl?: string;
+  lang?: string;
+}
+
+/**
+ * Formats a magazine notification into a premium financial alert HTML template for Telegram.
+ */
+export function formatMagazineNotification({
+  title,
+  channelName = "Trends Journal",
+  publishedAt,
+  documentId,
+  issueSlug,
+  lang,
+}: MagazineNotificationPayload): string {
+  const isSpanish = lang === "es";
+  const locale = isSpanish ? "es-ES" : "en-US";
+
+  let dateObj = new Date();
+  if (publishedAt) {
+    const parsed = new Date(publishedAt);
+    if (!isNaN(parsed.getTime())) {
+      dateObj = parsed;
+    }
+  }
+
+  let dateStr = "";
+  if (isSpanish) {
+    const day = dateObj.toLocaleDateString("es-ES", { day: "numeric" });
+    const month = dateObj.toLocaleDateString("es-ES", { month: "long" });
+    const year = dateObj.toLocaleDateString("es-ES", { year: "numeric" });
+    const time = dateObj.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    dateStr = `${day} de ${month} de ${year} a las ${time}`;
+  } else {
+    dateStr = dateObj.toLocaleDateString("en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  const escapedChannel = escapeHtml(channelName);
+  const escapedTitle = escapeHtml(title);
+  const targetId = documentId || issueSlug;
+  const cabinUrl = targetId
+    ? `https://hivex-backend.vercel.app/dashboard/news?id=${targetId}&from=telegram`
+    : `https://hivex-backend.vercel.app/dashboard/news?from=telegram`;
+
+  const labelTitle = isSpanish ? "Título" : "Title";
+  const labelChannel = isSpanish ? "Canal" : "Channel";
+  const labelDate = isSpanish ? "Fecha" : "Date";
+
+  let message = `<b>HIVEX Update - AddNewMagazine</b>\n`;
+  message += `---\n`;
+  message += `<b>${labelTitle}:</b> <a href="${cabinUrl}">${escapedTitle}</a>\n`;
+  message += `<b>${labelChannel}:</b> ${escapedChannel}\n`;
+  message += `<b>${labelDate}:</b> ${dateStr}\n`;
+  message += `---\n`;
+  message += cabinUrl;
+  return message;
+}
+
+/**
+ * Transmits a magazine alert to Telegram with cover photo (or fallback to message).
+ */
+export async function sendMagazineNotification(payload: MagazineNotificationPayload): Promise<{
+  success: boolean;
+  simulated: boolean;
+  error?: string;
+}> {
+  const activeLang = payload.lang || (await getTelegramLanguage());
+  const formattedHtml = formatMagazineNotification({ ...payload, lang: activeLang });
+
+  if (payload.coverUrl) {
+    try {
+      const photoResult = await sendTelegramPhoto(payload.coverUrl, formattedHtml, undefined, formattedHtml);
+      if (photoResult.success) {
+        return photoResult;
+      }
+      console.warn("[Telegram Service] sendTelegramPhoto returned unsuccessful, trying sendTelegramMessage...", photoResult.error);
+    } catch (photoErr: any) {
+      console.warn("[Telegram Service] sendTelegramPhoto threw error, falling back to message:", photoErr.message);
+    }
+  }
+
+  return await sendTelegramMessage(formattedHtml);
+}
+
 function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
