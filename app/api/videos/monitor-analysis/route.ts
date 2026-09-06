@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
-import { sendTelegramMessage, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
+import { sendTelegramMessage, sendVideoNotification, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during long transcripts
@@ -126,7 +126,7 @@ function splitTranscription(text: string) {
 // Persist / update the four knowledge base documents under the system ADMIN user ID
 async function saveVideoKnowledgeBaseServer(
   supabaseAdmin: any,
-  videoDoc: { id: string; title: string; file_url?: string; metadata?: any },
+  videoDoc: { id: string; title: string; file_url?: string; created_at?: string; metadata?: any },
   transcriptionText: string
 ) {
   const adminId = "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
@@ -263,16 +263,19 @@ async function saveVideoKnowledgeBaseServer(
     console.log(`[Base de Conocimiento Monitor] Triggering automatic Telegram notification for newly analyzed video: ${videoDoc.title}`);
     try {
       const activeLang = await getTelegramLanguage();
-      const textToSend = formatVideoNotification({
+      const coverUrl = videoDoc.metadata?.thumbnail || (ytId ? `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg` : undefined);
+
+      const telegramResult = await sendVideoNotification({
         videoTitle: videoDoc.title,
         channelName: channelTitle,
         analysisSummary: splitResult.summary || splitResult.report || "Análisis bursátil guardado con éxito.",
         youtubeId: ytId || undefined,
         videoId: videoDoc.id,
+        coverUrl: coverUrl,
+        publishedAt: videoDoc.created_at || videoDoc.metadata?.published_at,
         lang: activeLang,
       });
 
-      const telegramResult = await sendTelegramMessage(textToSend);
       if (telegramResult.success) {
         console.log(`[Base de Conocimiento Monitor] Telegram notification dispatched successfully! ${telegramResult.simulated ? "(Simulated)" : ""}`);
       } else {

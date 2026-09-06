@@ -91,6 +91,9 @@ export interface VideoAnalysisPayload {
   analysisSummary?: string;
   youtubeId?: string;
   videoId?: string;
+  coverUrl?: string;
+  thumbnailUrl?: string;
+  publishedAt?: string | Date;
   lang?: string;
 }
 
@@ -102,22 +105,43 @@ export function formatVideoNotification({
   channelName,
   youtubeId,
   videoId,
+  publishedAt,
   lang,
 }: VideoAnalysisPayload): string {
   const isSpanish = lang === "es";
   const locale = isSpanish ? "es-ES" : "en-US";
   
-  const dateStr = new Date().toLocaleDateString(locale, {
-    day: "numeric",
-    month: isSpanish ? "long" : "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  let dateObj = new Date();
+  if (publishedAt) {
+    const parsed = new Date(publishedAt);
+    if (!isNaN(parsed.getTime())) {
+      dateObj = parsed;
+    }
+  }
+
+  let dateStr = "";
+  if (isSpanish) {
+    const day = dateObj.toLocaleDateString("es-ES", { day: "numeric" });
+    const month = dateObj.toLocaleDateString("es-ES", { month: "long" });
+    const year = dateObj.toLocaleDateString("es-ES", { year: "numeric" });
+    const time = dateObj.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+    dateStr = `${day} de ${month} de ${year} a las ${time}`;
+  } else {
+    dateStr = dateObj.toLocaleDateString("en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
 
   const escapedChannel = escapeHtml(channelName);
   const escapedTitle = escapeHtml(videoTitle);
   const targetId = videoId || youtubeId;
+  const cabinUrl = targetId
+    ? `https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram`
+    : `https://hivex-backend.vercel.app/dashboard/videos?from=telegram`;
 
   const labelTitle = isSpanish ? "Título" : "Title";
   const labelChannel = isSpanish ? "Canal" : "Channel";
@@ -125,15 +149,56 @@ export function formatVideoNotification({
 
   let message = `<b>HIVEX Update - AddNewVideo</b>\n`;
   message += `---\n`;
-  if (targetId) {
-    message += `<b>${labelTitle}:</b> <a href="https://hivex-backend.vercel.app/dashboard/videos?id=${targetId}&from=telegram">${escapedTitle}</a>\n`;
-  } else {
-    message += `<b>${labelTitle}:</b> <a href="https://hivex-backend.vercel.app/dashboard/videos?from=telegram">${escapedTitle}</a>\n`;
-  }
+  message += `<b>${labelTitle}:</b> <a href="${cabinUrl}">${escapedTitle}</a>\n`;
   message += `<b>${labelChannel}:</b> ${escapedChannel}\n`;
   message += `<b>${labelDate}:</b> ${dateStr}\n`;
-  message += `---`;
+  message += `---\n`;
+  message += cabinUrl;
   return message;
+}
+
+/**
+ * Transmits a video alert to Telegram with cover photo (or fallback to message).
+ */
+export async function sendVideoNotification(payload: VideoAnalysisPayload): Promise<{
+  success: boolean;
+  simulated: boolean;
+  photoSent?: boolean;
+  error?: string;
+}> {
+  const activeLang = payload.lang || (await getTelegramLanguage());
+  const formattedHtml = formatVideoNotification({ ...payload, lang: activeLang });
+
+  // Priority 1: explicitly passed coverUrl or thumbnailUrl
+  // Priority 2: extract youtube id from payload.youtubeId
+  let coverUrl = payload.coverUrl || payload.thumbnailUrl;
+  if (!coverUrl && payload.youtubeId) {
+    coverUrl = `https://img.youtube.com/vi/${payload.youtubeId}/maxresdefault.jpg`;
+  }
+
+  if (coverUrl) {
+    try {
+      const photoResult = await sendTelegramPhoto(coverUrl, formattedHtml, undefined, formattedHtml);
+      if (photoResult.success && photoResult.photoSent) {
+        return photoResult;
+      }
+
+      // If maxresdefault failed, retry with standard hqdefault which is guaranteed to exist on YouTube
+      if (coverUrl.includes("maxresdefault.jpg")) {
+        const fallbackHq = coverUrl.replace("maxresdefault.jpg", "hqdefault.jpg");
+        const retryResult = await sendTelegramPhoto(fallbackHq, formattedHtml, undefined, formattedHtml);
+        if (retryResult.success && retryResult.photoSent) {
+          return retryResult;
+        }
+      }
+
+      console.warn("[Telegram Service] sendTelegramPhoto returned unsuccessful for video, trying sendTelegramMessage...", photoResult.error);
+    } catch (photoErr: any) {
+      console.warn("[Telegram Service] sendTelegramPhoto threw error for video, falling back to message:", photoErr.message);
+    }
+  }
+
+  return await sendTelegramMessage(formattedHtml);
 }
 
 export interface MagazineNotificationPayload {
@@ -537,6 +602,9 @@ export async function sendTelegramPhoto(
       
       // Determine what text to send as fallback
       let finalFallbackText = "";
+      const isChartOrSnapshot = photoUrl.includes("/snapshots/") || photoUrl.includes("/clips/");
+      const noteSuffix = isChartOrSnapshot ? `\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}` : "";
+
       if (fallbackText) {
         // Safe truncation of markdown before HTML conversion to avoid broken HTML tags
         let truncatedMarkdown = fallbackText;
@@ -544,14 +612,14 @@ export async function sendTelegramPhoto(
           truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
         }
         const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
-        finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
+        finalFallbackText = `${fallbackHtml}${noteSuffix}`;
       } else if (caption) {
-        finalFallbackText = `${caption}\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
+        finalFallbackText = `${caption}${noteSuffix}`;
         if (finalFallbackText.length > 4000) {
           finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
         }
       } else {
-        finalFallbackText = `<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
+        finalFallbackText = `<i>[Nota: No se pudo cargar el archivo adjunto: ${photoUrl}]</i>${cabinLink}`;
       }
 
       console.log("[Telegram Fallback Debug] finalFallbackText constructed (API fail):", finalFallbackText);
@@ -570,20 +638,23 @@ export async function sendTelegramPhoto(
   } catch (error: any) {
     console.error("[Telegram Service] Photo fetch error:", error);
     let finalFallbackText = "";
+    const isChartOrSnapshot = photoUrl.includes("/snapshots/") || photoUrl.includes("/clips/");
+    const noteSuffix = isChartOrSnapshot ? `\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}` : "";
+
     if (fallbackText) {
       let truncatedMarkdown = fallbackText;
       if (truncatedMarkdown.length > 3500) {
         truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
       }
       const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
-      finalFallbackText = `${fallbackHtml}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
+      finalFallbackText = `${fallbackHtml}${noteSuffix}`;
     } else if (caption) {
-      finalFallbackText = `${caption}\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
+      finalFallbackText = `${caption}${noteSuffix}`;
       if (finalFallbackText.length > 4000) {
         finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
       }
     } else {
-      finalFallbackText = `<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}`;
+      finalFallbackText = `<i>[Nota: Error de red al cargar el archivo adjunto: ${photoUrl}]</i>${cabinLink}`;
     }
     
     const msgResult = await sendTelegramMessage(finalFallbackText, chatId);

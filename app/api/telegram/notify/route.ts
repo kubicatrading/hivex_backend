@@ -1,43 +1,110 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendTelegramMessage, formatVideoNotification, escapeHtml, markdownToTelegramHtml, getTelegramLanguage } from "@/lib/telegram";
+import { 
+  sendTelegramMessage, 
+  sendVideoNotification, 
+  sendMagazineNotification,
+  markdownToTelegramHtml, 
+  getTelegramLanguage 
+} from "@/lib/telegram";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, message, videoTitle, channelName, analysisSummary, youtubeId, videoId, lang } = body;
+    const { 
+      type, 
+      message, 
+      videoTitle, 
+      channelName, 
+      analysisSummary, 
+      youtubeId, 
+      videoId, 
+      coverUrl, 
+      thumbnailUrl, 
+      publishedAt, 
+      title, 
+      documentId, 
+      issueSlug, 
+      lang 
+    } = body;
 
-    let textToSend = "";
-
-    if (type === "video_analysis") {
+    if (type === "video_analysis" || type === "new_video") {
       // Automatic video analysis notification
-      if (!videoTitle || !channelName || !analysisSummary) {
+      if (!videoTitle || !channelName) {
         return NextResponse.json(
           { success: false, error: "Missing required video analysis payload fields" },
           { status: 400 }
         );
       }
-      const activeLang = lang || await getTelegramLanguage();
-      textToSend = formatVideoNotification({
+      const activeLang = lang || (await getTelegramLanguage());
+      const result = await sendVideoNotification({
         videoTitle,
         channelName,
         analysisSummary,
         youtubeId,
         videoId,
+        coverUrl: coverUrl || thumbnailUrl || (youtubeId ? `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg` : undefined),
+        publishedAt,
         lang: activeLang,
       });
-    } else {
-      // Manual broadcast or general message
-      if (!message) {
+
+      if (!result.success) {
         return NextResponse.json(
-          { success: false, error: "Message body is empty" },
-          { status: 400 }
+          { success: false, error: result.error || "Failed to dispatch Telegram video notification" },
+          { status: 500 }
         );
       }
 
-      // Convert basic markdown formatting into Telegram HTML
-      textToSend = markdownToTelegramHtml(message);
+      return NextResponse.json({
+        success: true,
+        simulated: result.simulated,
+        photoSent: result.photoSent,
+        message: result.simulated ? "Video notification simulated in server console" : "Video notification dispatched successfully"
+      });
     }
 
+    if (type === "new_magazine" || type === "magazine") {
+      const magTitle = title || videoTitle;
+      if (!magTitle) {
+        return NextResponse.json(
+          { success: false, error: "Missing required magazine title" },
+          { status: 400 }
+        );
+      }
+      const activeLang = lang || (await getTelegramLanguage());
+      const result = await sendMagazineNotification({
+        title: magTitle,
+        channelName: channelName || "Trends Journal",
+        publishedAt,
+        documentId,
+        issueSlug,
+        coverUrl,
+        lang: activeLang,
+      });
+
+      if (!result.success) {
+        return NextResponse.json(
+          { success: false, error: result.error || "Failed to dispatch Telegram magazine notification" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        simulated: result.simulated,
+        message: result.simulated ? "Magazine notification simulated in server console" : "Magazine notification dispatched successfully"
+      });
+    }
+
+    // Manual broadcast or general message
+    if (!message) {
+      return NextResponse.json(
+        { success: false, error: "Message body is empty" },
+        { status: 400 }
+      );
+    }
+
+    // Convert basic markdown formatting into Telegram HTML
+    const textToSend = markdownToTelegramHtml(message);
     const result = await sendTelegramMessage(textToSend);
 
     if (!result.success) {
