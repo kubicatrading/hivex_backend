@@ -791,6 +791,94 @@ export async function sendTelegramVideo(
  * Parses markdown text, intercepts images (e.g. ![alt](url)), formats HTML,
  * and distributes them appropriately via /sendPhoto and /sendMessage.
  */
+/**
+ * Automatically intercepts clips URLs and clean chart links (referencing specific video sections)
+ * and ensures they are accompanied by the visual snapshot image of that chart.
+ * When there are no references to specific video sections (e.g. general questions or full video links),
+ * no chart image is injected.
+ */
+export function prepareMessageMedia(text: string): string {
+  if (!text) return text;
+
+  // 1. Intercept /clips/ URLs (Rule 3) and convert them to the static snapshot JPG URL
+  text = text.replace(
+    /!\[([^\]]*)\]\((https?:\/\/[^\s)]*?\/clips\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.mp4)?)\)/gi,
+    (_m, alt, _full, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
+  );
+
+  // 2. Normalize direct Supabase Storage snapshots URLs to the proxied URL
+  text = text.replace(
+    /!\[([^\]]*)\]\(https?:\/\/[^\/]+\.supabase\.co\/storage\/v1\/object\/public\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.jpg)?\)/gi,
+    (_m, alt, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
+  );
+
+  // 3. Find clean chart links that reference a specific section (start=seconds)
+  // Format: [Chart Title](https://hivex-backend.vercel.app/dashboard/videos?id=VIDEO_ID&start=SECONDS...)
+  // Notice: Links WITHOUT start= refer to the complete video, so they are intentionally excluded!
+  const chartLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*?[?&]start=(\d+)[^\s)]*)\)/gi;
+  let match;
+  const chartMatches: { title: string; url: string; start: string; videoId: string }[] = [];
+
+  while ((match = chartLinkRegex.exec(text)) !== null) {
+    const rawTitle = match[1];
+    const cleanTitle = rawTitle.replace(/^[🔗\s\*]+|[🔗\s\*]+$/g, "").trim();
+    const url = match[2];
+    const start = match[3];
+    const vidMatch = url.match(/[?&]id=([a-zA-Z0-9_\-]+)/i) || url.match(/\/share\/([a-zA-Z0-9_\-]+)/i) || url.match(/\/videos\/([a-zA-Z0-9_\-]+)/i);
+    const videoId = vidMatch ? vidMatch[1] : null;
+
+    if (videoId && start) {
+      // Check if text already contains an image tag for this videoId and start
+      const alreadyHasImage = new RegExp(`!\\[[^\\]]*\\]\\([^\\)]*\\/snapshots\\/${videoId}\\/${start}`, "i").test(text);
+      if (!alreadyHasImage) {
+        chartMatches.push({ title: cleanTitle || "Gráfico de Análisis", url, start, videoId });
+      }
+    }
+  }
+
+  if (chartMatches.length === 0) return text;
+
+  // Inject snapshot images for each referenced chart
+  const lines = text.split("\n");
+  const processedLines: string[] = [];
+  const inserted = new Set<string>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let didInsert = false;
+
+    for (const cm of chartMatches) {
+      const key = `${cm.videoId}-${cm.start}`;
+      if (inserted.has(key)) continue;
+
+      const isHeading = (line.startsWith("#") || /^\[\d{1,2}:\d{2}/.test(line.trim())) &&
+        (line.toLowerCase().includes(cm.title.toLowerCase().slice(0, 10)) || cm.title.toLowerCase().includes(line.replace(/^[#\s\[\]\d:-]+/, "").trim().toLowerCase().slice(0, 10)));
+
+      const containsLink = line.includes(cm.url);
+
+      if (isHeading) {
+        processedLines.push(line);
+        processedLines.push(`![${cm.title}](https://hivex-backend.vercel.app/snapshots/${cm.videoId}/${cm.start}.jpg)`);
+        inserted.add(key);
+        didInsert = true;
+        break;
+      } else if (containsLink) {
+        processedLines.push(`![${cm.title}](https://hivex-backend.vercel.app/snapshots/${cm.videoId}/${cm.start}.jpg)`);
+        processedLines.push(line);
+        inserted.add(key);
+        didInsert = true;
+        break;
+      }
+    }
+
+    if (!didInsert) {
+      processedLines.push(line);
+    }
+  }
+
+  return processedLines.join("\n");
+}
+
 export async function sendTelegramMessageWithPhotos(
   text: string,
   customChatId?: string
@@ -801,6 +889,9 @@ export async function sendTelegramMessageWithPhotos(
 }> {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = customChatId || process.env.TELEGRAM_CHAT_ID;
+
+  // Prepare text: normalize clip/snapshot URLs and auto-inject snapshot images for referenced charts
+  text = prepareMessageMedia(text);
 
   // 1. Regex to capture markdown images: ![alt](url)
   const imageRegex = /!\[([^\]]*)\]\(((?:https?:\/\/[^\s)]+|\/[^\s)]+))\)/g;
@@ -939,8 +1030,18 @@ export async function sendTelegramMessageWithPhotos(
 
   // 4. Dispatch the sequence
   try {
-    // 4.1. Send intro text if present
-    if (introText.trim().length > 0) {
+    // 4.1. Check if we can merge introText into the single photo caption to send everything in a single message
+    let shouldSendIntroSeparately = introText.trim().length > 0;
+    if (matches.length === 1 && shouldSendIntroSeparately) {
+      // Test if merged caption fits within Telegram photo caption limit (950 chars)
+      const testCaption = `${introText.trim()}\n\n${(headings[0] && headings[0] !== matches[0].alt) ? `**${headings[0]}**\n\n` : ""}${explanations[0] || ""}`;
+      const testHtml = markdownToTelegramHtml(testCaption);
+      if (testHtml.length <= 950) {
+        shouldSendIntroSeparately = false; // Merge into photo caption
+      }
+    }
+
+    if (shouldSendIntroSeparately) {
       const introHtml = markdownToTelegramHtml(introText);
       const introResult = await sendTelegramMessage(introHtml, chatId);
       if (!introResult.success) {
@@ -952,6 +1053,14 @@ export async function sendTelegramMessageWithPhotos(
     for (let i = 0; i < matches.length; i++) {
       let mediaUrl = resolveUrl(matches[i].url);
       
+      // Rule 3: Intercept /clips/ URLs and convert them to the static snapshot JPG URL
+      if (mediaUrl.includes("/clips/")) {
+        const clipMatch = mediaUrl.match(/\/clips\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.mp4)?/i);
+        if (clipMatch) {
+          mediaUrl = `https://hivex-backend.vercel.app/snapshots/${clipMatch[1]}/${clipMatch[2]}.jpg`;
+        }
+      }
+
       // If the URL is a direct Supabase Storage URL pointing to snapshots, redirect it to our Vercel proxied URL.
       // This ensures that UUIDs are dynamically resolved to YouTube video IDs by our backend proxy.
       if (mediaUrl.includes(".supabase.co/storage/v1/object/public/snapshots/")) {
@@ -959,9 +1068,12 @@ export async function sendTelegramMessageWithPhotos(
           /https?:\/\/[^\/]+\.supabase\.co\/storage\/v1\/object\/public\/snapshots\//i,
           "https://hivex-backend.vercel.app/snapshots/"
         );
+        if (!mediaUrl.endsWith(".jpg")) {
+          mediaUrl += ".jpg";
+        }
       }
 
-      const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") || mediaUrl.includes("/clips/");
+      const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") && !mediaUrl.includes("/snapshots/");
       let heading = headings[i];
       let explanation = explanations[i];
 
@@ -1054,13 +1166,14 @@ export async function sendTelegramMessageWithPhotos(
         // Separate bounded link (chart) and complete video link (strictly without start/end parameters)
         const cleanFullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
 
-        // Replace any Markdown link, HTML link, or raw URL in the caption with our clickable title link
+        // Replace only link/anchor lines in the caption with our clickable title link
         const lines = captionMarkdown.split("\n");
         const updatedLines = lines.map(line => {
-          if (line.toLowerCase().includes("completo")) {
+          const isLinkOrGeneric = /https?:\/\//i.test(line) || /\[.*\]\(.*\)/.test(line) || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena");
+          if (isLinkOrGeneric && (line.toLowerCase().includes("completo") || line.toLowerCase().includes("video") || line.toLowerCase().includes("vídeo"))) {
             return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
           }
-          if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.includes(cleanChartName)) {
+          if (isLinkOrGeneric && (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena"))) {
             return replacementLinkMarkdown;
           }
           return line;
@@ -1071,16 +1184,22 @@ export async function sendTelegramMessageWithPhotos(
         if (explanation) {
           const expLines = explanation.split("\n");
           const updatedExpLines = expLines.map(line => {
-            if (line.toLowerCase().includes("completo")) {
+            const isLinkOrGeneric = /https?:\/\//i.test(line) || /\[.*\]\(.*\)/.test(line) || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena");
+            if (isLinkOrGeneric && (line.toLowerCase().includes("completo") || line.toLowerCase().includes("video") || line.toLowerCase().includes("vídeo"))) {
               return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
             }
-            if (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.includes(cleanChartName)) {
+            if (isLinkOrGeneric && (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena"))) {
               return replacementLinkMarkdown;
             }
             return line;
           });
           explanation = updatedExpLines.join("\n").trim();
         }
+      }
+
+      // If introText was not sent separately (merged into single photo), prepend it to captionMarkdown
+      if (matches.length === 1 && !shouldSendIntroSeparately && introText.trim().length > 0) {
+        captionMarkdown = `${introText.trim()}\n\n${captionMarkdown}`;
       }
 
       const captionHtml = markdownToTelegramHtml(captionMarkdown);
