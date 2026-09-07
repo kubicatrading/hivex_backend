@@ -551,7 +551,8 @@ export async function sendTelegramPhoto(
   photoUrl: string,
   caption?: string,
   customChatId?: string,
-  fallbackText?: string
+  fallbackText?: string,
+  showCaptionAboveMedia: boolean = true
 ): Promise<{
   success: boolean;
   simulated: boolean;
@@ -590,7 +591,8 @@ export async function sendTelegramPhoto(
         chat_id: chatId,
         photo: photoUrl,
         caption: caption,
-        parse_mode: "HTML"
+        parse_mode: "HTML",
+        show_caption_above_media: showCaptionAboveMedia
       }),
     });
 
@@ -806,68 +808,69 @@ export function prepareMessageMedia(text: string): string {
     (_m, alt, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
   );
 
-  // 2. Find clean chart links that reference a specific section (start=seconds or t=seconds)
-  // Format: [Chart Title](https://hivex-backend.vercel.app/dashboard/videos?id=VIDEO_ID&start=SECONDS...)
-  // Notice: Links WITHOUT start=/t= refer to the complete video, so they are intentionally excluded!
-  const chartLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*?[?&](?:start|t)=(\d+)[^\s)]*)\)/gi;
-  let match;
-  const chartMatches: { title: string; url: string; start: string; videoId: string }[] = [];
+  // 2. Strictly rewrite any legacy /clips/ URLs to /snapshots/ JPG URLs (no MP4 videos in Telegram per user rule)
+  text = text.replace(
+    /!\[([^\]]*)\]\(https?:\/\/[^\s)]*?\/clips\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.mp4)?\)/gi,
+    (_m, alt, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
+  );
 
-  while ((match = chartLinkRegex.exec(text)) !== null) {
-    const rawTitle = match[1];
-    const cleanTitle = rawTitle.replace(/^[🔗\s\*]+|[🔗\s\*]+$/g, "").trim();
-    const url = match[2];
-    const start = match[3];
-    const vidMatch = url.match(/[?&]id=([a-zA-Z0-9_\-]+)/i) || url.match(/\/share\/([a-zA-Z0-9_\-]+)/i) || url.match(/\/videos\/([a-zA-Z0-9_\-]+)/i);
-    const videoId = vidMatch ? vidMatch[1] : null;
-
-    if (videoId && start) {
-      // Check if text already contains an image/clip tag for this videoId and start
-      const alreadyHasMedia = new RegExp(`!\\[[^\\]]*\\]\\([^\\)]*(?:\\/snapshots|\\/clips)\\/${videoId}\\/${start}`, "i").test(text);
-      if (!alreadyHasMedia) {
-        const isEnglish = /\b(the|this|here|chart|market|analysis|full video)\b/i.test(text.slice(0, 300));
-        chartMatches.push({ title: cleanTitle || (isEnglish ? "Analysis Chart" : "Gráfico de Análisis"), url, start, videoId });
-      }
-    }
-  }
-
-  if (chartMatches.length === 0) return text;
-
-  // Inject snapshot media below the clean links (General Rule: media appears below links)
+  // 3. Process line-by-line to ensure each link is immediately paired with its capture
   const lines = text.split("\n");
   const processedLines: string[] = [];
-  const inserted = new Set<string>();
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    let didInsert = false;
+    processedLines.push(line);
 
-    for (const cm of chartMatches) {
-      const key = `${cm.videoId}-${cm.start}`;
-      if (inserted.has(key)) continue;
+    // Check if line contains a bounded chart link: start= or t=
+    const chartLinkMatch = line.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*?[?&](?:start|t)=(\d+)[^\s)]*)\)/i);
+    if (chartLinkMatch) {
+      const rawTitle = chartLinkMatch[1];
+      const cleanTitle = rawTitle.replace(/^[🔗\s\*]+|[🔗\s\*]+$/g, "").trim();
+      const url = chartLinkMatch[2];
+      const start = chartLinkMatch[3];
+      const vidMatch = url.match(/[?&]id=([a-zA-Z0-9_\-]+)/i) || url.match(/\/share\/([a-zA-Z0-9_\-]+)/i) || url.match(/\/videos\/([a-zA-Z0-9_\-]+)/i);
+      const videoId = vidMatch ? vidMatch[1] : null;
 
-      const containsLink = line.includes(cm.url);
-
-      if (containsLink) {
-        processedLines.push(line);
-        // Look ahead to keep companion links (e.g. Full Video link) grouped together before placing media
-        let nextIdx = i + 1;
-        while (nextIdx < lines.length && (lines[nextIdx].trim() === "" || lines[nextIdx].includes("/dashboard/videos") || lines[nextIdx].includes("Vídeo Completo") || lines[nextIdx].includes("Full Video"))) {
-          if (lines[nextIdx].trim() !== "") {
-            processedLines.push(lines[nextIdx]);
-            i = nextIdx;
+      if (videoId && start) {
+        // Check if the next non-empty line is already an image for this video and second
+        let nextNonEmpty = "";
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim() !== "") {
+            nextNonEmpty = lines[j].trim();
+            break;
           }
-          nextIdx++;
         }
-        processedLines.push(`\n![${cm.title}](https://hivex-backend.vercel.app/snapshots/${cm.videoId}/${cm.start}.jpg)`);
-        inserted.add(key);
-        didInsert = true;
-        break;
+        const hasSnapshotNext = nextNonEmpty.startsWith("![") && nextNonEmpty.includes(videoId);
+        if (!hasSnapshotNext) {
+          processedLines.push(`![${cleanTitle}](https://hivex-backend.vercel.app/snapshots/${videoId}/${start}.jpg)`);
+        }
       }
     }
 
-    if (!didInsert) {
-      processedLines.push(line);
+    // Check if line contains a full video link (WITHOUT start= or t=)
+    const fullVideoLinkMatch = line.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*)\)/i);
+    if (fullVideoLinkMatch && !/[?&](?:start|t)=\d+/i.test(fullVideoLinkMatch[2])) {
+      const rawTitle = fullVideoLinkMatch[1];
+      const cleanTitle = rawTitle.replace(/^[🔗\s\*]+|[🔗\s\*]+$/g, "").replace(/^(?:Vídeo Completo|Full Video):\s*/i, "").trim();
+      const url = fullVideoLinkMatch[2];
+      const vidMatch = url.match(/[?&]id=([a-zA-Z0-9_\-]+)/i) || url.match(/\/share\/([a-zA-Z0-9_\-]+)/i) || url.match(/\/videos\/([a-zA-Z0-9_\-]+)/i);
+      const videoId = vidMatch ? vidMatch[1] : null;
+
+      if (videoId) {
+        // Check if the next non-empty line is already an image for this video
+        let nextNonEmpty = "";
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim() !== "") {
+            nextNonEmpty = lines[j].trim();
+            break;
+          }
+        }
+        const hasCoverNext = nextNonEmpty.startsWith("![") && nextNonEmpty.includes(videoId);
+        if (!hasCoverNext) {
+          processedLines.push(`![${cleanTitle}](https://hivex-backend.vercel.app/snapshots/${videoId}/0.jpg)`);
+        }
+      }
     }
   }
 
@@ -930,7 +933,7 @@ export async function sendTelegramMessageWithPhotos(
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = customChatId || process.env.TELEGRAM_CHAT_ID;
 
-  // Prepare text: normalize clip/snapshot URLs and auto-inject snapshot images for referenced charts
+  // Prepare text: normalize clip/snapshot URLs and auto-inject snapshot images for referenced charts and videos
   text = prepareMessageMedia(text);
 
   // 1. Regex to capture markdown images: ![alt](url)
@@ -948,7 +951,6 @@ export async function sendTelegramMessageWithPhotos(
   }
 
   // If no images found, route transparently to standard sendTelegramMessage
-  // but split if the text is long to prevent "message is too long" errors
   if (matches.length === 0) {
     const chunks = splitMarkdown(text, 3000);
     let lastResult = { success: true, simulated: false };
@@ -963,12 +965,23 @@ export async function sendTelegramMessageWithPhotos(
     return lastResult;
   }
 
-  // Helper to resolve relative snapshot URLs
+  // Helper to resolve snapshot URLs
   const resolveUrl = (url: string) => {
-    if (url.startsWith("/")) {
-      return `https://hivex-backend.vercel.app${url}`;
+    let resolved = url.startsWith("/") ? `https://hivex-backend.vercel.app${url}` : url;
+    if (resolved.includes(".supabase.co/storage/v1/object/public/snapshots/")) {
+      resolved = resolved.replace(
+        /https?:\/\/[^\/]+\.supabase\.co\/storage\/v1\/object\/public\/snapshots\//i,
+        "https://hivex-backend.vercel.app/snapshots/"
+      );
+      if (!resolved.endsWith(".jpg")) {
+        resolved += ".jpg";
+      }
     }
-    return url;
+    // Strict user rule: NO MP4 video files in Telegram to prevent forwarding. Ensure still JPG captures only.
+    if (resolved.endsWith(".mp4")) {
+      resolved = resolved.replace(/\/clips\//i, "/snapshots/").replace(/\.mp4$/i, ".jpg");
+    }
+    return resolved;
   };
 
   // 2. Partition the text into alternating non-image blocks
@@ -980,333 +993,90 @@ export async function sendTelegramMessageWithPhotos(
   }
   nonImageBlocks.push(text.substring(lastIndex));
 
-  // 3. Extract headings and explanations with a highly resilient bottom-to-top pattern
-  let introText = "";
-  const headings: string[] = [];
-  const preExplanations: string[] = [];
-  const postExplanations: string[] = [];
+  // 3. Pair each image with its friendly link directly above it (hierarchical pairing)
+  const photoCaptions: string[] = [];
+  const textBlocksToSend: string[] = [];
 
   for (let i = 0; i < matches.length; i++) {
     const block = nonImageBlocks[i];
     const lines = block.split("\n");
-    
-    // Find heading index bottom-to-top (only formal headings)
-    let hIdx = -1;
+
+    // Look for link line at bottom of the block
+    let linkLineIdx = -1;
     for (let j = lines.length - 1; j >= 0; j--) {
-      const trimmedLine = lines[j].trim();
-      if (trimmedLine === "") continue;
-      
-      const isHeading = 
-        trimmedLine.startsWith("#") || 
-        /^\[\d{1,2}:\d{2}(?::\d{2})?\]/i.test(trimmedLine) ||
-        (/^####\s+\[?\d{1,2}:\d{2}/i.test(trimmedLine)) ||
-        (trimmedLine.startsWith("**") && trimmedLine.endsWith("**") && trimmedLine.length < 120);
-        
-      if (isHeading) {
-        hIdx = j;
+      const trimmed = lines[j].trim();
+      if (trimmed === "") continue;
+      if (trimmed.includes("](") || trimmed.includes("http://") || trimmed.includes("https://")) {
+        linkLineIdx = j;
         break;
       }
+      // If we encounter normal text or section headings before any link, stop searching
+      break;
     }
 
-    let heading = "";
-    let leftoverBefore = "";
-    let rightoverAfter = "";
+    let textBefore = block;
+    let captionHtml = "";
 
-    if (hIdx !== -1) {
-      heading = lines[hIdx].trim();
-      leftoverBefore = lines.slice(0, hIdx).join("\n").trim();
-      rightoverAfter = lines.slice(hIdx + 1).join("\n").trim();
+    if (linkLineIdx !== -1) {
+      const linkLine = lines[linkLineIdx].trim();
+      textBefore = lines.slice(0, linkLineIdx).join("\n").trim();
+      captionHtml = markdownToTelegramHtml(linkLine);
     } else {
-      // If no formal heading is found:
-      // - Treat the entire block as description/explanation (so rightoverAfter = entire block.trim())
-      // - Fall back to the image's alt text as the heading
-      const isEnglishIntro = /\b(the|this|here|chart|market|analysis|full video)\b/i.test(text.slice(0, 300));
-      heading = matches[i].alt || (isEnglishIntro ? "Analysis Chart" : "Gráfico de Análisis");
-      leftoverBefore = "";
-      rightoverAfter = block.trim();
+      // Fallback caption: use clean alt text formatted nicely
+      const cleanAlt = matches[i].alt.replace(/\*\*/g, "").trim();
+      captionHtml = cleanAlt ? `<b>${escapeHtml(cleanAlt)}</b>` : "";
+      textBefore = block.trim();
     }
 
-    headings.push(heading);
-    preExplanations.push(rightoverAfter);
-
-    if (i === 0) {
-      introText = leftoverBefore;
-    } else {
-      postExplanations.push(leftoverBefore);
-    }
+    photoCaptions.push(captionHtml);
+    textBlocksToSend.push(textBefore);
   }
 
-  // The final block belongs entirely to the explanation of the last image
-  postExplanations.push(nonImageBlocks[matches.length].trim());
-
-  // Recombine explanation parts (pre-image and post-image) for each image
-  const explanations: string[] = [];
-  for (let i = 0; i < matches.length; i++) {
-    const preExp = preExplanations[i] || "";
-    const postExp = postExplanations[i] || "";
-    
-    let combined = "";
-    if (preExp && postExp) {
-      combined = `${preExp}\n\n${postExp}`;
-    } else {
-      combined = preExp || postExp;
-    }
-    explanations.push(combined.trim());
-  }
+  // Trailing text after the last image (if any)
+  const trailingText = nonImageBlocks[matches.length].trim();
 
   // If mock/simulation mode (no env vars)
   if (!botToken || !chatId) {
     console.log("================ TELEGRAM MULTIMEDIA SIMULATION MODE ================");
     console.log(`TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.`);
-    console.log(`Intro Text:`, introText);
     for (let i = 0; i < matches.length; i++) {
-      console.log(`Image ${i}:`);
-      console.log(`  URL: ${resolveUrl(matches[i].url)}`);
-      console.log(`  Heading: ${headings[i]}`);
-      console.log(`  Explanation: ${explanations[i]}`);
+      if (textBlocksToSend[i]) console.log(`Text Block ${i}:`, textBlocksToSend[i]);
+      console.log(`Photo ${i}: ${resolveUrl(matches[i].url)}`);
+      console.log(`Photo Caption ${i}: ${photoCaptions[i]}`);
     }
+    if (trailingText) console.log(`Trailing Text:`, trailingText);
     console.log("=========================================================");
     return { success: true, simulated: true };
   }
 
-  // 4. Dispatch the sequence
+  // 4. Dispatch the sequence:
+  // For each block:
+  // - Send any preceding text (intro/narrative/cabin header) as a text message
+  // - Send the photo with its clean link caption displayed directly ABOVE the photo (show_caption_above_media: true)
   try {
-    // 4.1. Check if we can merge introText into the single photo caption to send everything in a single message
-    let shouldSendIntroSeparately = introText.trim().length > 0;
-    if (matches.length === 1 && shouldSendIntroSeparately) {
-      // Test if merged caption fits within Telegram photo caption limit (950 chars)
-      const testCaption = `${introText.trim()}\n\n${(headings[0] && headings[0] !== matches[0].alt) ? `**${headings[0]}**\n\n` : ""}${explanations[0] || ""}`;
-      const testHtml = markdownToTelegramHtml(testCaption);
-      if (testHtml.length <= 950) {
-        shouldSendIntroSeparately = false; // Merge into photo caption
-      }
-    }
-
-    if (shouldSendIntroSeparately) {
-      const introHtml = markdownToTelegramHtml(introText);
-      const introResult = await sendTelegramMessage(introHtml, chatId);
-      if (!introResult.success) {
-        console.warn("[Telegram Service] Failed to send intro text:", introResult.error);
-      }
-    }
-
-    // 4.2. Send each section with its text and links first, followed immediately by its media below the links (General Rule)
     for (let i = 0; i < matches.length; i++) {
-      let mediaUrl = resolveUrl(matches[i].url);
-
-      // Check if a real MP4 clip exists in Supabase storage for this video and second
-      const snapMatch = mediaUrl.match(/\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.jpg)?/i);
-      if (snapMatch) {
-        const storageClip = await resolveStorageClipUrl(snapMatch[1], snapMatch[2]);
-        if (storageClip) {
-          mediaUrl = storageClip;
-        }
-      }
-
-      // If the URL is a direct Supabase Storage URL pointing to snapshots, redirect it to our Vercel proxied URL.
-      // This ensures that UUIDs are dynamically resolved to YouTube video IDs by our backend proxy.
-      if (mediaUrl.includes(".supabase.co/storage/v1/object/public/snapshots/")) {
-        mediaUrl = mediaUrl.replace(
-          /https?:\/\/[^\/]+\.supabase\.co\/storage\/v1\/object\/public\/snapshots\//i,
-          "https://hivex-backend.vercel.app/snapshots/"
-        );
-        if (!mediaUrl.endsWith(".jpg")) {
-          mediaUrl += ".jpg";
-        }
-      }
-
-      const isVideo = mediaUrl.toLowerCase().endsWith(".mp4") && !mediaUrl.includes("/snapshots/");
-      let heading = headings[i];
-      let explanation = explanations[i];
-
-      // Format caption (only prepend heading if it was parsed as a formal heading from the markdown text)
-      const isFormalHeading = heading !== matches[i].alt && heading !== "Gráfico de Análisis" && heading !== "Analysis Chart";
-      let captionMarkdown = (isFormalHeading && explanation)
-        ? `${heading}\n\n${explanation}`
-        : (explanation || heading);
-
-      // Extract share or video link and replace it with the dynamic clickable title of the full video
-      const boundedLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*(?:start=\d+|t=\d+)[^\s"'>]*)/i;
-      const anyLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*)/i;
-      
-      const boundedMatch = captionMarkdown.match(boundedLinkRegex) || (explanation ? explanation.match(boundedLinkRegex) : null);
-      const anyMatch = captionMarkdown.match(anyLinkRegex) || (explanation ? explanation.match(anyLinkRegex) : null);
-      const linkMatch = boundedMatch || anyMatch;
-
-      let cleanChartName = "";
-
-      if (linkMatch) {
-        const originalUrl = linkMatch[1];
-        const videoId = linkMatch[2];
-
-        // Extract start and end parameters from the original deep-link to preserve them in the premium access link
-        let startParam = "";
-        let endParam = "";
-        try {
-          const parsedUrl = new URL(originalUrl);
-          startParam = parsedUrl.searchParams.get("start") || parsedUrl.searchParams.get("t") || "";
-          endParam = parsedUrl.searchParams.get("end") || "";
-        } catch (e) {
-          const startM = originalUrl.match(/[?&](?:start|t)=(\d+)/i);
-          const endM = originalUrl.match(/[?&]end=(\d+)/i);
-          if (startM) startParam = startM[1];
-          if (endM) endParam = endM[1];
-        }
-
-        // Fallback: if startParam was not in the link, retrieve it from the snapshot media URL
-        if (!startParam) {
-          const snapM = mediaUrl.match(/\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)\.jpg/i);
-          if (snapM) {
-            startParam = snapM[2];
-          }
-        }
-
-        // Fallback: if endParam was not in the link, extract from heading timestamp intervals like [08:01 - 09:56]
-        if (!endParam) {
-          const rangeMatch = (heading + " " + captionMarkdown).match(/\[\d{1,2}:\d{2}(?::\d{2})?\s*-\s*(\d{1,2}):(\d{2})\]/);
-          if (rangeMatch) {
-            endParam = String(parseInt(rangeMatch[1], 10) * 60 + parseInt(rangeMatch[2], 10));
-          }
-        }
-
-        // Fetch the video's actual title from the database
-        let videoTitle = "Cabina de Estudio (HIVEX)";
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
-        const supabaseAdmin = getSupabaseAdmin();
-        if (supabaseAdmin) {
-          try {
-            if (isUuid) {
-              const { data } = await supabaseAdmin
-                .from("documents")
-                .select("title")
-                .eq("id", videoId)
-                .single();
-              if (data && data.title) {
-                videoTitle = data.title;
-              }
-            } else {
-              const { data } = await supabaseAdmin
-                .from("documents")
-                .select("title")
-                .eq("type", "video")
-                .ilike("file_url", `%${videoId}%`)
-                .limit(1);
-              if (data && data.length > 0 && data[0].title) {
-                videoTitle = data[0].title;
-              }
-            }
-          } catch (err) {
-            console.error("[Telegram Service] Failed to fetch video title for caption link replacement:", err);
-          }
-        }
-
-        // Use the real database video title for the heading if no custom markdown title is given
-        const finalHeading = isFormalHeading ? heading : videoTitle;
-        heading = finalHeading;
-
-        // Clean up the heading to extract ONLY the clean chart name (e.g., removing ####, [12:27] or [08:01 - 09:56] timestamps, and bold asterisks)
-        cleanChartName = finalHeading;
-        cleanChartName = cleanChartName.replace(/^#+\s*/, ""); // Remove markdown hashes (e.g., ####)
-        cleanChartName = cleanChartName.replace(/^\[?\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]?\s*/, ""); // Remove timestamps and ranges (e.g., [12:27] or [08:01 - 09:56])
-        cleanChartName = cleanChartName.replace(/\*\*/g, "").replace(/\*/g, "").trim(); // Strip all bold/italic asterisks
-
-        // Detect language dynamically: configured preference in DB or message keywords
-        const sampleTextForLang = (heading + " " + captionMarkdown + " " + (explanation || "")).slice(0, 500);
-        const configuredLang = await getTelegramLanguage();
-        const isEnglish = configuredLang === "en" || 
-          /\b(the|this|here|chart|market|analysis|full video)\b/i.test(sampleTextForLang);
-
-        const defaultChartName = isEnglish ? "Analysis Chart" : "Gráfico de Análisis";
-        const fullVideoPrefix = isEnglish ? "Full Video" : "Vídeo Completo";
-
-        if (!cleanChartName) {
-          cleanChartName = defaultChartName;
-        }
-
-        // Re-construct the captionMarkdown with the real database video title or formal heading at the top
-        captionMarkdown = (explanation)
-          ? `**${finalHeading}**\n\n${explanation}`
-          : `**${finalHeading}**`;
-
-        // Generic / forbidden anchor regex (Rule 4) across multiple common languages
-        const genericAnchorRegex = /^(?:https?:\/\/|abrir\s+escena|ver\s+escena|ver\s+v[ií]deo|open\s+scene|watch\s+scene|view\s+scene|watch\s+clip|watch\s+video|click\s+here|hacer\s+clic|enlace|link|video|v[ií]deo|scene|escena)$/i;
-
-        // Dedicated helper to format Telegram links cleanly and completely language-agnostically
-        const formatTelegramLinks = (content: string): string => {
-          const lines = content.split("\n");
-          const updatedLines = lines.map(line => {
-            const mdMatch = line.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/i);
-            const rawMatch = line.match(/(https?:\/\/[^\s"'<]+)/i);
-
-            const targetUrl = mdMatch ? mdMatch[2] : (rawMatch ? rawMatch[1] : null);
-            if (!targetUrl) return line;
-
-            const isHivexVideo = /hivex-backend\.vercel\.app\/(?:dashboard\/videos|share)/i.test(targetUrl);
-            if (!isHivexVideo) return line;
-
-            // 100% URL-based determination (language-agnostic):
-            // If the URL has start= or t=, it is by definition a bounded scene clip
-            const hasStartParam = /[?&](?:start|t)=\d+/i.test(targetUrl);
-
-            if (hasStartParam) {
-              // Bounded chart scene link!
-              let anchor = mdMatch ? mdMatch[1].replace(/\*\*/g, "").replace(/^[🔗\s]+|[🔗\s]+$/g, "").trim() : "";
-              if (!anchor || genericAnchorRegex.test(anchor)) {
-                anchor = cleanChartName;
-              }
-              let start = (targetUrl.match(/[?&](?:start|t)=(\d+)/i) || [])[1] || startParam;
-              let end = (targetUrl.match(/[?&]end=(\d+)/i) || [])[1] || endParam;
-
-              let cleanUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
-              if (start) cleanUrl += `&start=${start}`;
-              if (end) cleanUrl += `&end=${end}`;
-
-              return `🔗 [**${anchor}**](${cleanUrl})`;
-            } else {
-              // Full video link (no start bounds)!
-              let anchor = mdMatch ? mdMatch[1].replace(/\*\*/g, "").replace(/^[🔗\s]+|[🔗\s]+$/g, "").trim() : "";
-              if (!anchor || genericAnchorRegex.test(anchor)) {
-                anchor = `${fullVideoPrefix}: ${videoTitle}`;
-              }
-              const cleanUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
-              return `🔗 [**${anchor}**](${cleanUrl})`;
-            }
-          });
-          return updatedLines.join("\n");
-        };
-
-        captionMarkdown = formatTelegramLinks(captionMarkdown).trim();
-      }
-
-      // If cleanChartName is still empty, fall back to heading or alt
-      if (!cleanChartName) {
-        cleanChartName = matches[i].alt || heading.replace(/\*\*/g, "").replace(/^#+\s*/, "").trim();
-      }
-
-      // General Rule: Strip raw embedded markdown image tags from the text body so they don't leak
-      let cleanBodyMarkdown = captionMarkdown.replace(/!\[[^\]]*\]\([^\)]+\)/g, "").trim();
-
-      // Dispatch the text message first (Rule 1 & General Rule: alert text and clean links appear first)
-      if (cleanBodyMarkdown.length > 0) {
-        const chunks = splitMarkdown(cleanBodyMarkdown, 3800);
+      const textToSend = textBlocksToSend[i];
+      if (textToSend && textToSend.trim().length > 0) {
+        const chunks = splitMarkdown(textToSend.trim(), 3800);
         for (const chunk of chunks) {
           const chunkHtml = markdownToTelegramHtml(chunk);
           await sendTelegramMessage(chunkHtml, chatId);
         }
       }
 
-      // Immediately dispatch the visual media (playable video or snapshot photo) BELOW the links
-      const mediaCaption = `<b>${escapeHtml(cleanChartName)}</b>`;
-      if (isVideo) {
-        const videoResult = await sendTelegramVideo(mediaUrl, mediaCaption, chatId);
-        if (!videoResult.success) {
-          console.warn(`[Telegram Service] Failed to send video ${i}:`, videoResult.error);
-        }
-      } else {
-        const photoResult = await sendTelegramPhoto(mediaUrl, mediaCaption, chatId);
-        if (!photoResult.success) {
-          console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
-        }
+      const mediaUrl = resolveUrl(matches[i].url);
+      const caption = photoCaptions[i];
+      const photoResult = await sendTelegramPhoto(mediaUrl, caption, chatId, undefined, true);
+      if (!photoResult.success) {
+        console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
+      }
+    }
+
+    if (trailingText && trailingText.length > 0) {
+      const chunks = splitMarkdown(trailingText, 3800);
+      for (const chunk of chunks) {
+        const chunkHtml = markdownToTelegramHtml(chunk);
+        await sendTelegramMessage(chunkHtml, chatId);
       }
     }
 

@@ -300,9 +300,10 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
 🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-
 ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - El informe comienza directamente con el encabezado indicado y pasa de inmediato a las alertas. No agregues saludos, presentaciones, firmas, ni notas explicativas.
@@ -310,20 +311,24 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace de la cabina de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Devuelven líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO):
+- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO) - FORMATO JERÁRQUICO 4 PASOS:
   - Si el vídeo tiene gráficos detectados en el campo "charts":
     1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros ({startSeconds}).
     2. Suma siempre 60 segundos para obtener {endSeconds}.
     3. Extrae el título limpio, descriptivo y representativo del gráfico {cleanChartTitle} (ej. "Curva de Tipos 10A vs 2A", "Flujos Globales de Liquidez"). ESTÁ TERMINANTEMENTE PROHIBIDO usar textos genéricos como "Abrir Escena", "Ver gráfico", "Hacer clic aquí" o URLs en crudo.
-    4. El enlace hacia la escena acotada debe ser el propio nombre limpio del gráfico:
+    4. Estructura la sección de la cabina de estudio con la siguiente jerarquía exacta (pegando cada captura a su enlace correspondiente):
+       3.1. Enlace limpio al vídeo corto:
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-    5. Añade obligatoriamente el enlace hacia el vídeo completo:
-       🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-    6. Coloca siempre la carátula fija del gráfico o vídeo visual DEBAJO de estos enlaces con la sintaxis:
+       3.2. Captura del chart (pegada a su enlace):
        ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+       3.3. Enlace limpio al vídeo completo:
+       🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+       3.4. Carátula de portada del vídeo completo (pegada a su enlace):
+       ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
   - Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos):
-    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni la carátula fotográfica, ni el enlace del gráfico acotado. En ese caso, incluye únicamente la línea del vídeo completo:
+    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni el enlace del gráfico acotado. Incluye únicamente la línea del vídeo completo y su carátula:
     🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 3. PROHIBICIÓN ABSOLUTA DE METANARRATIVA, PASOS DE AUTO-CORRECCIÓN Y REVISIONES DE IA: No escribas borradores, explicaciones, notas, listas de cumplimiento, ni textos de autocomprobación. El informe debe terminar de forma limpia y directa inmediatamente después del último enlace de la última alerta.
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -354,9 +359,10 @@ STRICTLY follow the formatting and style rules below:
 
 🎬 **INTEGRATED PLAYER (STUDY CABIN)**
 🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-
 ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+
+🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - The report starts directly with the header and goes immediately to the alerts. No introductions, greetings, signatures, or notes.
@@ -364,20 +370,24 @@ CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the public HIVEX dashboard URL.
 - NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
 - NO BACKTICKS: Do NOT use backticks (\`) anywhere around the titles, markdown links, or URLs.
-- RULE 3 & RULE 4 FOR CHARTS (STUDY CABIN):
+- RULE 3 & RULE 4 FOR CHARTS (STUDY CABIN) - 4-PART HIERARCHICAL FORMAT:
   - If the video has charts in the "charts" field:
     1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds ({startSeconds}).
     2. Always add 60 seconds to get {endSeconds}.
     3. Extract a clean, descriptive, and representative chart title {cleanChartTitle} (e.g. "10Y vs 2Y Yield Curve", "Global Liquidity Flows"). STRICTLY FORBIDDEN to use generic link texts such as "Open Scene", "View Chart", "Click here", or raw URLs.
-    4. The bounded scene link MUST be the clean chart title itself:
+    4. Structure the cabin section with the following exact hierarchy (gluing each snapshot to its companion link):
+       3.1. Friendly link to short video:
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-    5. Always append the full video link:
-       🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-    6. Always place the static snapshot cover or video visually BELOW these links using the syntax:
+       3.2. Chart snapshot (glued directly below its link):
        ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+       3.3. Friendly link to full video:
+       🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+       3.4. Full video cover snapshot (glued directly below its link):
+       ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
   - If the "charts" field is empty or indicates no charts were detected:
-    Do NOT include "🎬 **INTEGRATED PLAYER (STUDY CABIN)**", nor the snapshot cover image, nor the bounded chart link. Include only the full video link:
+    Do NOT include "🎬 **INTEGRATED PLAYER (STUDY CABIN)**", nor the bounded chart link. Include only the full video link and its cover snapshot:
     🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 3. ABSOLUTE PROHIBITION OF METANARRATIVE, SELF-CORRECTION STEPS, AND AI REVIEWS: Do not write drafts, explanations, notes, or checklists. The report must end cleanly right after the last link of the last alert.
 4. Generate ONLY standard Markdown. Do not use HTML tags at all.
@@ -483,8 +493,9 @@ function generateDeterministicAlerts(videoContexts: any[], lang: string): string
       output += `▫️ **Ventaja Inversora**: Se aconseja revisar los flujos de liquidez y realizar seguimiento de los niveles marcados en el gráfico para capturar ventajas operativas.\n\n`;
       output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
       output += `🔗 [${chartTitle}](${boundedUrl})\n`;
-      output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n\n`;
       output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+      output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n`;
+      output += `![${video.title}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
     } else {
       const chartTitle = `Analysis Chart: ${video.title}`;
       const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
@@ -495,8 +506,9 @@ function generateDeterministicAlerts(videoContexts: any[], lang: string): string
       output += `▫️ **Investor Advantage**: Careful review of liquidity flows and tracking levels marked in the chart is advised to capture operational advantages.\n\n`;
       output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
       output += `🔗 [${chartTitle}](${boundedUrl})\n`;
-      output += `🔗 [Full Video: ${video.title}](${fullVideoUrl})\n\n`;
       output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+      output += `🔗 [Full Video: ${video.title}](${fullVideoUrl})\n`;
+      output += `![${video.title}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
     }
   });
 

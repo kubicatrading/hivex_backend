@@ -283,9 +283,10 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
 🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-
 ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera recomendación, el título "🚨 HIVEX Investors - 24H" debe ir seguido inmediatamente por la línea de separación "---", la breve presentación formal, y un espacio en blanco antes de "🚨 DECISIÓN 1:".
@@ -293,20 +294,24 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace de la cabina de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO):
+- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO) - FORMATO JERÁRQUICO 4 PASOS:
   - Si el vídeo tiene gráficos detectados en el campo "charts":
     1. Busca la marca de tiempo del gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) para {startSeconds}.
     2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 740, end es 800).
     3. Extrae el título limpio, descriptivo y representativo del gráfico {cleanChartTitle} (ej. "Curva de Tipos 10A vs 2A", "Flujos Globales de Liquidez"). ESTÁ TERMINANTEMENTE PROHIBIDO usar textos de enlace genéricos como "Abrir Escena", "Ver gráfico", "Hacer clic aquí" o la URL en crudo.
-    4. El enlace hacia la escena acotada debe ser el propio nombre limpio del gráfico:
+    4. Estructura la sección de la cabina de estudio con la siguiente jerarquía exacta (pegando cada captura a su enlace correspondiente):
+       3.1. Enlace limpio al vídeo corto:
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-    5. Añade obligatoriamente el enlace hacia el vídeo completo:
-       🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-    6. Coloca siempre la carátula fija del gráfico o vídeo visual DEBAJO de estos enlaces con la sintaxis:
+       3.2. Captura del chart (pegada a su enlace):
        ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+       3.3. Enlace limpio al vídeo completo:
+       🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+       3.4. Carátula de portada del vídeo completo (pegada a su enlace):
+       ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
   - Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos):
-    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni la carátula fotográfica, ni el enlace del gráfico acotado. En ese caso, incluye únicamente la línea del vídeo completo:
+    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni el enlace del gráfico acotado. Incluye únicamente la línea del vídeo completo y su carátula:
     🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Investors - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -409,8 +414,9 @@ function generateDeterministicInvestors(priorityVideos: any[]): string {
     output += `▫️ **Fronteras y Soporte**: Niveles técnicos clave bajo estudio activo en la cabina. Vigilar la velocidad de la rotación sectorial.\n\n`;
     output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
     output += `🔗 [${chartTitle}](${boundedUrl})\n`;
-    output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n\n`;
     output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+    output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n`;
+    output += `![${video.title}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
   });
 
   return output.trim();
