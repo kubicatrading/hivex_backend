@@ -4603,7 +4603,12 @@ export default function VideosPage() {
         
         // Only reset if it is not the deep-linked video
         const deepLinkId = searchParams.get("id") || searchParams.get("video");
-        if (activeStudyVideo.id !== deepLinkId) {
+        const isDeepLinked = deepLinkId && (
+          activeStudyVideo.id === deepLinkId ||
+          (activeStudyVideo.file_url && activeStudyVideo.file_url.includes(deepLinkId)) ||
+          ((activeStudyVideo.metadata as any)?.video_id === deepLinkId)
+        );
+        if (!isDeepLinked) {
           setPlayerTime(null);
           setUrlStartSeconds(null);
           setUrlEndSeconds(null);
@@ -4829,11 +4834,11 @@ export default function VideosPage() {
               </div>
               <div className="relative w-full aspect-video bg-zinc-950">
                 {isYt ? (
-                  urlStartSeconds !== null && urlEndSeconds !== null ? (
+                  urlStartSeconds !== null ? (
                     <YouTubeSnapshotPlayer
                       ytId={getYoutubeId(activeStudyVideo.file_url) || ""}
                       targetTime={urlStartSeconds}
-                      endSeconds={urlEndSeconds}
+                      endSeconds={urlEndSeconds || undefined}
                       selectedLanguage={selectedLanguage}
                       isPlaying={mainPlayerPlaying}
                       onEnded={() => setMainPlayerPlaying(false)}

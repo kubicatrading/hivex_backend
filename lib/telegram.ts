@@ -1084,8 +1084,12 @@ export async function sendTelegramMessageWithPhotos(
         : (explanation || heading);
 
       // Extract share or video link and replace it with the dynamic clickable title of the full video
-      const hivexVideoLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*)/i;
-      const linkMatch = captionMarkdown.match(hivexVideoLinkRegex);
+      const boundedLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*(?:start=\d+|t=\d+)[^\s"'>]*)/i;
+      const anyLinkRegex = /(https?:\/\/[^\s"'<]+?(?:\/share\/|\/dashboard\/videos\?id=)([a-zA-Z0-9_\-]+)[^\s"'>]*)/i;
+      
+      const boundedMatch = captionMarkdown.match(boundedLinkRegex) || (explanation ? explanation.match(boundedLinkRegex) : null);
+      const anyMatch = captionMarkdown.match(anyLinkRegex) || (explanation ? explanation.match(anyLinkRegex) : null);
+      const linkMatch = boundedMatch || anyMatch;
 
       if (linkMatch) {
         const originalUrl = linkMatch[1];
@@ -1096,18 +1100,34 @@ export async function sendTelegramMessageWithPhotos(
         let endParam = "";
         try {
           const parsedUrl = new URL(originalUrl);
-          startParam = parsedUrl.searchParams.get("start") || "";
+          startParam = parsedUrl.searchParams.get("start") || parsedUrl.searchParams.get("t") || "";
           endParam = parsedUrl.searchParams.get("end") || "";
         } catch (e) {
-          const startM = originalUrl.match(/[?&]start=(\d+)/i);
+          const startM = originalUrl.match(/[?&](?:start|t)=(\d+)/i);
           const endM = originalUrl.match(/[?&]end=(\d+)/i);
           if (startM) startParam = startM[1];
           if (endM) endParam = endM[1];
         }
 
+        // Fallback: if startParam was not in the link, retrieve it from the snapshot media URL
+        if (!startParam) {
+          const snapMatch = mediaUrl.match(/\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)\.jpg/i);
+          if (snapMatch) {
+            startParam = snapMatch[2];
+          }
+        }
+
+        // Fallback: if endParam was not in the link, extract from heading timestamp intervals like [08:01 - 09:56]
+        if (!endParam) {
+          const rangeMatch = (heading + " " + captionMarkdown).match(/\[\d{1,2}:\d{2}(?::\d{2})?\s*-\s*(\d{1,2}):(\d{2})\]/);
+          if (rangeMatch) {
+            endParam = String(parseInt(rangeMatch[1], 10) * 60 + parseInt(rangeMatch[2], 10));
+          }
+        }
+
         // Fetch the video's actual title from the database
         let videoTitle = "Cabina de Estudio (HIVEX)";
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
         const supabaseAdmin = getSupabaseAdmin();
         if (supabaseAdmin) {
           try {
@@ -1140,10 +1160,10 @@ export async function sendTelegramMessageWithPhotos(
         const finalHeading = isFormalHeading ? heading : videoTitle;
         heading = finalHeading;
 
-        // Clean up the heading to extract ONLY the clean chart name (e.g., removing ####, [12:27] timestamps, and bold asterisks)
+        // Clean up the heading to extract ONLY the clean chart name (e.g., removing ####, [12:27] or [08:01 - 09:56] timestamps, and bold asterisks)
         let cleanChartName = finalHeading;
         cleanChartName = cleanChartName.replace(/^#+\s*/, ""); // Remove markdown hashes (e.g., ####)
-        cleanChartName = cleanChartName.replace(/^\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, ""); // Remove timestamps (e.g., [12:27])
+        cleanChartName = cleanChartName.replace(/^\[?\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]?\s*/, ""); // Remove timestamps and ranges (e.g., [12:27] or [08:01 - 09:56])
         cleanChartName = cleanChartName.replace(/\*\*/g, "").replace(/\*/g, "").trim(); // Strip all bold/italic asterisks
 
         if (!cleanChartName) {
@@ -1166,34 +1186,37 @@ export async function sendTelegramMessageWithPhotos(
         // Separate bounded link (chart) and complete video link (strictly without start/end parameters)
         const cleanFullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
 
-        // Replace only link/anchor lines in the caption with our clickable title link
-        const lines = captionMarkdown.split("\n");
-        const updatedLines = lines.map(line => {
-          const isLinkOrGeneric = /https?:\/\//i.test(line) || /\[.*\]\(.*\)/.test(line) || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena");
-          if (isLinkOrGeneric && (line.toLowerCase().includes("completo") || line.toLowerCase().includes("video") || line.toLowerCase().includes("vídeo"))) {
-            return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
-          }
-          if (isLinkOrGeneric && (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena"))) {
-            return replacementLinkMarkdown;
-          }
-          return line;
-        });
-        captionMarkdown = updatedLines.join("\n").trim();
+        // Dedicated helper to format Telegram links cleanly without cross-colliding
+        const formatTelegramLinks = (content: string): string => {
+          const lines = content.split("\n");
+          const updatedLines = lines.map(line => {
+            const isLinkOrGeneric = /https?:\/\//i.test(line) || /\[.*\]\(.*\)/.test(line) || /abrir escena|ver escena/i.test(line);
+            if (!isLinkOrGeneric) return line;
 
-        // Also replace inside the separate explanation block (in case caption length is > 950 and sent as a split message)
-        if (explanation) {
-          const expLines = explanation.split("\n");
-          const updatedExpLines = expLines.map(line => {
-            const isLinkOrGeneric = /https?:\/\//i.test(line) || /\[.*\]\(.*\)/.test(line) || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena");
-            if (isLinkOrGeneric && (line.toLowerCase().includes("completo") || line.toLowerCase().includes("video") || line.toLowerCase().includes("vídeo"))) {
+            // 1. Is it explicitly the full/complete video link?
+            // (We check for the word 'completo' in the line/anchor text, NEVER matching against generic 'video' in URLs)
+            if (/completo/i.test(line)) {
               return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
             }
-            if (isLinkOrGeneric && (line.includes("/share/") || line.includes("/dashboard/videos") || line.toLowerCase().includes("abrir escena") || line.toLowerCase().includes("ver escena"))) {
+
+            // 2. Is it a bounded scene link (has start= or t=) or generic scene anchor text?
+            if (line.includes("start=") || line.includes("&t=") || line.includes("?t=") || /abrir escena|ver escena/i.test(line)) {
               return replacementLinkMarkdown;
             }
+
+            // 3. If line references HIVEX dashboard or share without start= and without 'completo':
+            if (line.includes("/dashboard/videos") || line.includes("/share/")) {
+              return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
+            }
+
             return line;
           });
-          explanation = updatedExpLines.join("\n").trim();
+          return updatedLines.join("\n");
+        };
+
+        captionMarkdown = formatTelegramLinks(captionMarkdown).trim();
+        if (explanation) {
+          explanation = formatTelegramLinks(explanation).trim();
         }
       }
 
