@@ -90,20 +90,20 @@ async function handleAlerts(request: NextRequest) {
 
     // Handle Empty State (No new videos to alert)
     if (unalertedVideos.length === 0) {
-      console.log("[Alerts Route] No new unalerted videos found in the last 24 hours.");
+      console.log("[Alerts Route] No new unalerted videos found in the last 24 hours. Skipping Telegram notification.");
       
-      const emptyStateMessage = lang === "es"
-        ? `🚨 <b>HIVEX Alerts - 24H</b>\n\nNo se han detectado nuevas alertas en las últimas 24 horas. Todos los vídeos recientes ya han sido procesados y comunicados.`
-        : `🚨 <b>HIVEX Alerts - 24H</b>\n\nNo new market alerts detected in the last 24 hours. All recent videos have already been processed and communicated.`;
-      
-      if (!dryRun) {
+      const notifyEmpty = searchParams.get("notifyEmpty") === "true";
+      if (notifyEmpty && !dryRun) {
+        const emptyStateMessage = lang === "es"
+          ? `🚨 <b>HIVEX Alerts - 24H</b>\n\nNo se han detectado nuevas alertas en las últimas 24 horas. Todos los vídeos recientes ya han sido procesados y comunicados.`
+          : `🚨 <b>HIVEX Alerts - 24H</b>\n\nNo new market alerts detected in the last 24 hours. All recent videos have already been processed and communicated.`;
         await sendTelegramMessage(emptyStateMessage, customChatId || undefined);
       }
 
       return NextResponse.json({
         success: true,
         count: 0,
-        message: "No new unalerted videos found. Empty state notification dispatched.",
+        message: "No new unalerted videos found. Telegram notification skipped.",
         markdown: lang === "es" 
           ? `🚨 HIVEX Alerts - 24H\n\nNo se han detectado nuevas alertas en las últimas 24 horas.` 
           : `🚨 HIVEX Alerts - 24H\n\nNo new market alerts detected in the last 24 hours.`,
