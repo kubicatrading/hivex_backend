@@ -299,9 +299,10 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 ▫️ **Ventaja Inversora**: [La implicación táctica directa, oportunidad de arbitraje o cobertura defensiva recomendada para obtener beneficio.]
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
-![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
 🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
 🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+
+![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - El informe comienza directamente con el encabezado indicado y pasa de inmediato a las alertas. No agregues saludos, presentaciones, firmas, ni notas explicativas.
@@ -314,12 +315,12 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
     1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros ({startSeconds}).
     2. Suma siempre 60 segundos para obtener {endSeconds}.
     3. Extrae el título limpio, descriptivo y representativo del gráfico {cleanChartTitle} (ej. "Curva de Tipos 10A vs 2A", "Flujos Globales de Liquidez"). ESTÁ TERMINANTEMENTE PROHIBIDO usar textos genéricos como "Abrir Escena", "Ver gráfico", "Hacer clic aquí" o URLs en crudo.
-    4. Incluye siempre la carátula fija del gráfico con la sintaxis:
-       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
-    5. El enlace hacia la escena acotada debe ser el propio nombre limpio del gráfico:
+    4. El enlace hacia la escena acotada debe ser el propio nombre limpio del gráfico:
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-    6. Añade obligatoriamente el enlace hacia el vídeo completo:
+    5. Añade obligatoriamente el enlace hacia el vídeo completo:
        🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    6. Coloca siempre la carátula fija del gráfico o vídeo visual DEBAJO de estos enlaces con la sintaxis:
+       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
   - Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos):
     NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni la carátula fotográfica, ni el enlace del gráfico acotado. En ese caso, incluye únicamente la línea del vídeo completo:
     🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
@@ -352,9 +353,10 @@ STRICTLY follow the formatting and style rules below:
 ▫️ **Investor Advantage**: [The direct tactical implication, arbitrage opportunity, or defensive hedge recommended to capture benefit.]
 
 🎬 **INTEGRATED PLAYER (STUDY CABIN)**
-![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
 🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
 🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+
+![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - The report starts directly with the header and goes immediately to the alerts. No introductions, greetings, signatures, or notes.
@@ -367,12 +369,12 @@ CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
     1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds ({startSeconds}).
     2. Always add 60 seconds to get {endSeconds}.
     3. Extract a clean, descriptive, and representative chart title {cleanChartTitle} (e.g. "10Y vs 2Y Yield Curve", "Global Liquidity Flows"). STRICTLY FORBIDDEN to use generic link texts such as "Open Scene", "View Chart", "Click here", or raw URLs.
-    4. Always include the static snapshot cover using the syntax:
-       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
-    5. The bounded scene link MUST be the clean chart title itself:
+    4. The bounded scene link MUST be the clean chart title itself:
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-    6. Always append the full video link:
+    5. Always append the full video link:
        🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    6. Always place the static snapshot cover or video visually BELOW these links using the syntax:
+       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
   - If the "charts" field is empty or indicates no charts were detected:
     Do NOT include "🎬 **INTEGRATED PLAYER (STUDY CABIN)**", nor the snapshot cover image, nor the bounded chart link. Include only the full video link:
     🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
@@ -480,9 +482,9 @@ function generateDeterministicAlerts(videoContexts: any[], lang: string): string
       output += `▫️ **El Incidente**: Movimientos de volumen atípicos o catalizadores geopolíticos bajo análisis activo en la cabina de estudio.\n`;
       output += `▫️ **Ventaja Inversora**: Se aconseja revisar los flujos de liquidez y realizar seguimiento de los niveles marcados en el gráfico para capturar ventajas operativas.\n\n`;
       output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-      output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n`;
       output += `🔗 [${chartTitle}](${boundedUrl})\n`;
       output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n\n`;
+      output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
     } else {
       const chartTitle = `Analysis Chart: ${video.title}`;
       const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
@@ -492,9 +494,9 @@ function generateDeterministicAlerts(videoContexts: any[], lang: string): string
       output += `▫️ **The Incident**: Unusual volume movements or geopolitical catalysts under active analysis in the study cabin.\n`;
       output += `▫️ **Investor Advantage**: Careful review of liquidity flows and tracking levels marked in the chart is advised to capture operational advantages.\n\n`;
       output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
-      output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n`;
       output += `🔗 [${chartTitle}](${boundedUrl})\n`;
       output += `🔗 [Full Video: ${video.title}](${fullVideoUrl})\n\n`;
+      output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
     }
   });
 

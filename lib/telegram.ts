@@ -800,19 +800,13 @@ export async function sendTelegramVideo(
 export function prepareMessageMedia(text: string): string {
   if (!text) return text;
 
-  // 1. Intercept /clips/ URLs (Rule 3) and convert them to the static snapshot JPG URL
-  text = text.replace(
-    /!\[([^\]]*)\]\((https?:\/\/[^\s)]*?\/clips\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.mp4)?)\)/gi,
-    (_m, alt, _full, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
-  );
-
-  // 2. Normalize direct Supabase Storage snapshots URLs to the proxied URL
+  // 1. Normalize direct Supabase Storage snapshots URLs to the proxied URL
   text = text.replace(
     /!\[([^\]]*)\]\(https?:\/\/[^\/]+\.supabase\.co\/storage\/v1\/object\/public\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.jpg)?\)/gi,
     (_m, alt, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
   );
 
-  // 3. Find clean chart links that reference a specific section (start=seconds or t=seconds)
+  // 2. Find clean chart links that reference a specific section (start=seconds or t=seconds)
   // Format: [Chart Title](https://hivex-backend.vercel.app/dashboard/videos?id=VIDEO_ID&start=SECONDS...)
   // Notice: Links WITHOUT start=/t= refer to the complete video, so they are intentionally excluded!
   const chartLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*?[?&](?:start|t)=(\d+)[^\s)]*)\)/gi;
@@ -828,9 +822,9 @@ export function prepareMessageMedia(text: string): string {
     const videoId = vidMatch ? vidMatch[1] : null;
 
     if (videoId && start) {
-      // Check if text already contains an image tag for this videoId and start
-      const alreadyHasImage = new RegExp(`!\\[[^\\]]*\\]\\([^\\)]*\\/snapshots\\/${videoId}\\/${start}`, "i").test(text);
-      if (!alreadyHasImage) {
+      // Check if text already contains an image/clip tag for this videoId and start
+      const alreadyHasMedia = new RegExp(`!\\[[^\\]]*\\]\\([^\\)]*(?:\\/snapshots|\\/clips)\\/${videoId}\\/${start}`, "i").test(text);
+      if (!alreadyHasMedia) {
         const isEnglish = /\b(the|this|here|chart|market|analysis|full video)\b/i.test(text.slice(0, 300));
         chartMatches.push({ title: cleanTitle || (isEnglish ? "Analysis Chart" : "Gráfico de Análisis"), url, start, videoId });
       }
@@ -839,7 +833,7 @@ export function prepareMessageMedia(text: string): string {
 
   if (chartMatches.length === 0) return text;
 
-  // Inject snapshot images for each referenced chart
+  // Inject snapshot media below the clean links (General Rule: media appears below links)
   const lines = text.split("\n");
   const processedLines: string[] = [];
   const inserted = new Set<string>();
@@ -852,20 +846,20 @@ export function prepareMessageMedia(text: string): string {
       const key = `${cm.videoId}-${cm.start}`;
       if (inserted.has(key)) continue;
 
-      const isHeading = (line.startsWith("#") || /^\[\d{1,2}:\d{2}/.test(line.trim())) &&
-        (line.toLowerCase().includes(cm.title.toLowerCase().slice(0, 10)) || cm.title.toLowerCase().includes(line.replace(/^[#\s\[\]\d:-]+/, "").trim().toLowerCase().slice(0, 10)));
-
       const containsLink = line.includes(cm.url);
 
-      if (isHeading) {
+      if (containsLink) {
         processedLines.push(line);
-        processedLines.push(`![${cm.title}](https://hivex-backend.vercel.app/snapshots/${cm.videoId}/${cm.start}.jpg)`);
-        inserted.add(key);
-        didInsert = true;
-        break;
-      } else if (containsLink) {
-        processedLines.push(`![${cm.title}](https://hivex-backend.vercel.app/snapshots/${cm.videoId}/${cm.start}.jpg)`);
-        processedLines.push(line);
+        // Look ahead to keep companion links (e.g. Full Video link) grouped together before placing media
+        let nextIdx = i + 1;
+        while (nextIdx < lines.length && (lines[nextIdx].trim() === "" || lines[nextIdx].includes("/dashboard/videos") || lines[nextIdx].includes("Vídeo Completo") || lines[nextIdx].includes("Full Video"))) {
+          if (lines[nextIdx].trim() !== "") {
+            processedLines.push(lines[nextIdx]);
+            i = nextIdx;
+          }
+          nextIdx++;
+        }
+        processedLines.push(`\n![${cm.title}](https://hivex-backend.vercel.app/snapshots/${cm.videoId}/${cm.start}.jpg)`);
         inserted.add(key);
         didInsert = true;
         break;
@@ -878,6 +872,51 @@ export function prepareMessageMedia(text: string): string {
   }
 
   return processedLines.join("\n");
+}
+
+/**
+ * Resolves whether a real playable MP4 clip exists in Supabase Storage
+ * for a given videoId and start timestamp.
+ * If found, returns the direct public video URL.
+ * If not found, returns null.
+ */
+export async function resolveStorageClipUrl(videoId: string, seconds: number | string): Promise<string | null> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return null;
+
+  try {
+    const secNum = parseInt(String(seconds), 10);
+    if (isNaN(secNum)) return null;
+
+    let ytId = videoId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(videoId);
+    if (isUuid) {
+      const { data } = await supabase.from("documents").select("file_url").eq("id", videoId).maybeSingle();
+      if (data?.file_url) {
+        const m = data.file_url.match(/(?:embed\/|v=|youtu\.be\/|shorts\/)([a-zA-Z0-9_\-]{11})/);
+        if (m) ytId = m[1];
+      }
+    }
+
+    const candidates = Array.from(new Set([ytId, videoId]));
+    for (const folder of candidates) {
+      const { data: files } = await supabase.storage.from("documents").list(`clips/${folder}`);
+      if (files && files.length > 0) {
+        const matched = files.find(f => {
+          if (!f.name.endsWith(".mp4")) return false;
+          const fSec = parseInt(f.name.replace(".mp4", ""), 10);
+          return !isNaN(fSec) && Math.abs(fSec - secNum) <= 15;
+        });
+        if (matched) {
+          const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://lhtlrztsmkllcqiziftn.supabase.co";
+          return `${supabaseUrl}/storage/v1/object/public/documents/clips/${folder}/${matched.name}`;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[Telegram Service] Error checking clip in storage:", err);
+  }
+  return null;
 }
 
 export async function sendTelegramMessageWithPhotos(
@@ -1051,15 +1090,16 @@ export async function sendTelegramMessageWithPhotos(
       }
     }
 
-    // 4.2. Send each media file with its accompanying explanation as caption
+    // 4.2. Send each section with its text and links first, followed immediately by its media below the links (General Rule)
     for (let i = 0; i < matches.length; i++) {
       let mediaUrl = resolveUrl(matches[i].url);
-      
-      // Rule 3: Intercept /clips/ URLs and convert them to the static snapshot JPG URL
-      if (mediaUrl.includes("/clips/")) {
-        const clipMatch = mediaUrl.match(/\/clips\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.mp4)?/i);
-        if (clipMatch) {
-          mediaUrl = `https://hivex-backend.vercel.app/snapshots/${clipMatch[1]}/${clipMatch[2]}.jpg`;
+
+      // Check if a real MP4 clip exists in Supabase storage for this video and second
+      const snapMatch = mediaUrl.match(/\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)(?:\.jpg)?/i);
+      if (snapMatch) {
+        const storageClip = await resolveStorageClipUrl(snapMatch[1], snapMatch[2]);
+        if (storageClip) {
+          mediaUrl = storageClip;
         }
       }
 
@@ -1093,6 +1133,8 @@ export async function sendTelegramMessageWithPhotos(
       const anyMatch = captionMarkdown.match(anyLinkRegex) || (explanation ? explanation.match(anyLinkRegex) : null);
       const linkMatch = boundedMatch || anyMatch;
 
+      let cleanChartName = "";
+
       if (linkMatch) {
         const originalUrl = linkMatch[1];
         const videoId = linkMatch[2];
@@ -1113,9 +1155,9 @@ export async function sendTelegramMessageWithPhotos(
 
         // Fallback: if startParam was not in the link, retrieve it from the snapshot media URL
         if (!startParam) {
-          const snapMatch = mediaUrl.match(/\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)\.jpg/i);
-          if (snapMatch) {
-            startParam = snapMatch[2];
+          const snapM = mediaUrl.match(/\/snapshots\/([a-zA-Z0-9_\-]+)\/(\d+)\.jpg/i);
+          if (snapM) {
+            startParam = snapM[2];
           }
         }
 
@@ -1163,7 +1205,7 @@ export async function sendTelegramMessageWithPhotos(
         heading = finalHeading;
 
         // Clean up the heading to extract ONLY the clean chart name (e.g., removing ####, [12:27] or [08:01 - 09:56] timestamps, and bold asterisks)
-        let cleanChartName = finalHeading;
+        cleanChartName = finalHeading;
         cleanChartName = cleanChartName.replace(/^#+\s*/, ""); // Remove markdown hashes (e.g., ####)
         cleanChartName = cleanChartName.replace(/^\[?\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]?\s*/, ""); // Remove timestamps and ranges (e.g., [12:27] or [08:01 - 09:56])
         cleanChartName = cleanChartName.replace(/\*\*/g, "").replace(/\*/g, "").trim(); // Strip all bold/italic asterisks
@@ -1234,57 +1276,36 @@ export async function sendTelegramMessageWithPhotos(
         };
 
         captionMarkdown = formatTelegramLinks(captionMarkdown).trim();
-        if (explanation) {
-          explanation = formatTelegramLinks(explanation).trim();
+      }
+
+      // If cleanChartName is still empty, fall back to heading or alt
+      if (!cleanChartName) {
+        cleanChartName = matches[i].alt || heading.replace(/\*\*/g, "").replace(/^#+\s*/, "").trim();
+      }
+
+      // General Rule: Strip raw embedded markdown image tags from the text body so they don't leak
+      let cleanBodyMarkdown = captionMarkdown.replace(/!\[[^\]]*\]\([^\)]+\)/g, "").trim();
+
+      // Dispatch the text message first (Rule 1 & General Rule: alert text and clean links appear first)
+      if (cleanBodyMarkdown.length > 0) {
+        const chunks = splitMarkdown(cleanBodyMarkdown, 3800);
+        for (const chunk of chunks) {
+          const chunkHtml = markdownToTelegramHtml(chunk);
+          await sendTelegramMessage(chunkHtml, chatId);
         }
       }
 
-      // If introText was not sent separately (merged into single photo), prepend it to captionMarkdown
-      if (matches.length === 1 && !shouldSendIntroSeparately && introText.trim().length > 0) {
-        captionMarkdown = `${introText.trim()}\n\n${captionMarkdown}`;
-      }
-
-      const captionHtml = markdownToTelegramHtml(captionMarkdown);
-
-      if (captionHtml.length <= 950) {
-        // Send media with full description as caption
-        if (isVideo) {
-          const videoResult = await sendTelegramVideo(mediaUrl, captionHtml, chatId, captionMarkdown);
-          if (!videoResult.success) {
-            console.warn(`[Telegram Service] Failed to send video ${i}:`, videoResult.error);
-          }
-        } else {
-          const photoResult = await sendTelegramPhoto(mediaUrl, captionHtml, chatId, captionMarkdown);
-          if (!photoResult.success) {
-            console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
-          }
+      // Immediately dispatch the visual media (playable video or snapshot photo) BELOW the links
+      const mediaCaption = `<b>${escapeHtml(cleanChartName)}</b>`;
+      if (isVideo) {
+        const videoResult = await sendTelegramVideo(mediaUrl, mediaCaption, chatId);
+        if (!videoResult.success) {
+          console.warn(`[Telegram Service] Failed to send video ${i}:`, videoResult.error);
         }
       } else {
-        // Caption exceeds 950 characters: send media with just the title/heading as caption
-        const headingHtml = markdownToTelegramHtml(heading);
-        let mediaSent = false;
-
-        if (isVideo) {
-          const videoResult = await sendTelegramVideo(mediaUrl, headingHtml, chatId, captionMarkdown);
-          mediaSent = videoResult.videoSent;
-          if (!videoResult.success) {
-            console.warn(`[Telegram Service] Failed to send video ${i} with heading:`, videoResult.error);
-          }
-        } else {
-          const photoResult = await sendTelegramPhoto(mediaUrl, headingHtml, chatId, captionMarkdown);
-          mediaSent = photoResult.photoSent;
-          if (!photoResult.success) {
-            console.warn(`[Telegram Service] Failed to send photo ${i} with heading:`, photoResult.error);
-          }
-        }
-
-        // If the media was successfully sent, we must send the detailed explanation as separate message(s)
-        if (mediaSent && explanation) {
-          const chunks = splitMarkdown(explanation, 3000);
-          for (const chunk of chunks) {
-            const chunkHtml = markdownToTelegramHtml(chunk);
-            await sendTelegramMessage(chunkHtml, chatId);
-          }
+        const photoResult = await sendTelegramPhoto(mediaUrl, mediaCaption, chatId);
+        if (!photoResult.success) {
+          console.warn(`[Telegram Service] Failed to send photo ${i}:`, photoResult.error);
         }
       }
     }
