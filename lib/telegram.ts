@@ -831,7 +831,8 @@ export function prepareMessageMedia(text: string): string {
       // Check if text already contains an image tag for this videoId and start
       const alreadyHasImage = new RegExp(`!\\[[^\\]]*\\]\\([^\\)]*\\/snapshots\\/${videoId}\\/${start}`, "i").test(text);
       if (!alreadyHasImage) {
-        chartMatches.push({ title: cleanTitle || "Gráfico de Análisis", url, start, videoId });
+        const isEnglish = /\b(the|this|here|chart|market|analysis|full video)\b/i.test(text.slice(0, 300));
+        chartMatches.push({ title: cleanTitle || (isEnglish ? "Analysis Chart" : "Gráfico de Análisis"), url, start, videoId });
       }
     }
   }
@@ -980,7 +981,8 @@ export async function sendTelegramMessageWithPhotos(
       // If no formal heading is found:
       // - Treat the entire block as description/explanation (so rightoverAfter = entire block.trim())
       // - Fall back to the image's alt text as the heading
-      heading = matches[i].alt || "Gráfico de Análisis";
+      const isEnglishIntro = /\b(the|this|here|chart|market|analysis|full video)\b/i.test(text.slice(0, 300));
+      heading = matches[i].alt || (isEnglishIntro ? "Analysis Chart" : "Gráfico de Análisis");
       leftoverBefore = "";
       rightoverAfter = block.trim();
     }
@@ -1078,7 +1080,7 @@ export async function sendTelegramMessageWithPhotos(
       let explanation = explanations[i];
 
       // Format caption (only prepend heading if it was parsed as a formal heading from the markdown text)
-      const isFormalHeading = heading !== matches[i].alt && heading !== "Gráfico de Análisis";
+      const isFormalHeading = heading !== matches[i].alt && heading !== "Gráfico de Análisis" && heading !== "Analysis Chart";
       let captionMarkdown = (isFormalHeading && explanation)
         ? `${heading}\n\n${explanation}`
         : (explanation || heading);
@@ -1166,8 +1168,17 @@ export async function sendTelegramMessageWithPhotos(
         cleanChartName = cleanChartName.replace(/^\[?\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]?\s*/, ""); // Remove timestamps and ranges (e.g., [12:27] or [08:01 - 09:56])
         cleanChartName = cleanChartName.replace(/\*\*/g, "").replace(/\*/g, "").trim(); // Strip all bold/italic asterisks
 
+        // Detect language dynamically: configured preference in DB or message keywords
+        const sampleTextForLang = (heading + " " + captionMarkdown + " " + (explanation || "")).slice(0, 500);
+        const configuredLang = await getTelegramLanguage();
+        const isEnglish = configuredLang === "en" || 
+          /\b(the|this|here|chart|market|analysis|full video)\b/i.test(sampleTextForLang);
+
+        const defaultChartName = isEnglish ? "Analysis Chart" : "Gráfico de Análisis";
+        const fullVideoPrefix = isEnglish ? "Full Video" : "Vídeo Completo";
+
         if (!cleanChartName) {
-          cleanChartName = "Gráfico de Análisis";
+          cleanChartName = defaultChartName;
         }
 
         // Re-construct the captionMarkdown with the real database video title or formal heading at the top
@@ -1175,41 +1186,49 @@ export async function sendTelegramMessageWithPhotos(
           ? `**${finalHeading}**\n\n${explanation}`
           : `**${finalHeading}**`;
 
-        // Construct the clean, unrestricted full video link pointing directly to the Cabina de Estudio with start and end params
-        let cleanFullShareUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
-        if (startParam) cleanFullShareUrl += `&start=${startParam}`;
-        if (endParam) cleanFullShareUrl += `&end=${endParam}`;
+        // Generic / forbidden anchor regex (Rule 4) across multiple common languages
+        const genericAnchorRegex = /^(?:https?:\/\/|abrir\s+escena|ver\s+escena|ver\s+v[ií]deo|open\s+scene|watch\s+scene|view\s+scene|watch\s+clip|watch\s+video|click\s+here|hacer\s+clic|enlace|link|video|v[ií]deo|scene|escena)$/i;
 
-        // Create the premium access link named after the exact clean chart's title
-        const replacementLinkMarkdown = `🔗 [**${cleanChartName}**](${cleanFullShareUrl})`;
-
-        // Separate bounded link (chart) and complete video link (strictly without start/end parameters)
-        const cleanFullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
-
-        // Dedicated helper to format Telegram links cleanly without cross-colliding
+        // Dedicated helper to format Telegram links cleanly and completely language-agnostically
         const formatTelegramLinks = (content: string): string => {
           const lines = content.split("\n");
           const updatedLines = lines.map(line => {
-            const isLinkOrGeneric = /https?:\/\//i.test(line) || /\[.*\]\(.*\)/.test(line) || /abrir escena|ver escena/i.test(line);
-            if (!isLinkOrGeneric) return line;
+            const mdMatch = line.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/i);
+            const rawMatch = line.match(/(https?:\/\/[^\s"'<]+)/i);
 
-            // 1. Is it explicitly the full/complete video link?
-            // (We check for the word 'completo' in the line/anchor text, NEVER matching against generic 'video' in URLs)
-            if (/completo/i.test(line)) {
-              return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
+            const targetUrl = mdMatch ? mdMatch[2] : (rawMatch ? rawMatch[1] : null);
+            if (!targetUrl) return line;
+
+            const isHivexVideo = /hivex-backend\.vercel\.app\/(?:dashboard\/videos|share)/i.test(targetUrl);
+            if (!isHivexVideo) return line;
+
+            // 100% URL-based determination (language-agnostic):
+            // If the URL has start= or t=, it is by definition a bounded scene clip
+            const hasStartParam = /[?&](?:start|t)=\d+/i.test(targetUrl);
+
+            if (hasStartParam) {
+              // Bounded chart scene link!
+              let anchor = mdMatch ? mdMatch[1].replace(/\*\*/g, "").replace(/^[🔗\s]+|[🔗\s]+$/g, "").trim() : "";
+              if (!anchor || genericAnchorRegex.test(anchor)) {
+                anchor = cleanChartName;
+              }
+              let start = (targetUrl.match(/[?&](?:start|t)=(\d+)/i) || [])[1] || startParam;
+              let end = (targetUrl.match(/[?&]end=(\d+)/i) || [])[1] || endParam;
+
+              let cleanUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
+              if (start) cleanUrl += `&start=${start}`;
+              if (end) cleanUrl += `&end=${end}`;
+
+              return `🔗 [**${anchor}**](${cleanUrl})`;
+            } else {
+              // Full video link (no start bounds)!
+              let anchor = mdMatch ? mdMatch[1].replace(/\*\*/g, "").replace(/^[🔗\s]+|[🔗\s]+$/g, "").trim() : "";
+              if (!anchor || genericAnchorRegex.test(anchor)) {
+                anchor = `${fullVideoPrefix}: ${videoTitle}`;
+              }
+              const cleanUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${videoId}&from=telegram`;
+              return `🔗 [**${anchor}**](${cleanUrl})`;
             }
-
-            // 2. Is it a bounded scene link (has start= or t=) or generic scene anchor text?
-            if (line.includes("start=") || line.includes("&t=") || line.includes("?t=") || /abrir escena|ver escena/i.test(line)) {
-              return replacementLinkMarkdown;
-            }
-
-            // 3. If line references HIVEX dashboard or share without start= and without 'completo':
-            if (line.includes("/dashboard/videos") || line.includes("/share/")) {
-              return `🔗 [**Vídeo Completo: ${videoTitle}**](${cleanFullVideoUrl})`;
-            }
-
-            return line;
           });
           return updatedLines.join("\n");
         };
