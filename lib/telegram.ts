@@ -812,10 +812,10 @@ export function prepareMessageMedia(text: string): string {
     (_m, alt, vid, sec) => `![${alt}](https://hivex-backend.vercel.app/snapshots/${vid}/${sec}.jpg)`
   );
 
-  // 3. Find clean chart links that reference a specific section (start=seconds)
+  // 3. Find clean chart links that reference a specific section (start=seconds or t=seconds)
   // Format: [Chart Title](https://hivex-backend.vercel.app/dashboard/videos?id=VIDEO_ID&start=SECONDS...)
-  // Notice: Links WITHOUT start= refer to the complete video, so they are intentionally excluded!
-  const chartLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*?[?&]start=(\d+)[^\s)]*)\)/gi;
+  // Notice: Links WITHOUT start=/t= refer to the complete video, so they are intentionally excluded!
+  const chartLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]*?(?:\/dashboard\/videos|\/share\/)[^\s)]*?[?&](?:start|t)=(\d+)[^\s)]*)\)/gi;
   let match;
   const chartMatches: { title: string; url: string; start: string; videoId: string }[] = [];
 

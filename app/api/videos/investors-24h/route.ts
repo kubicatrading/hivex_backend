@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
+import { sendTelegramMessageWithPhotos, sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -199,41 +199,32 @@ async function handleInvestors(request: NextRequest) {
 
     // Deliver to Telegram (unless dryRun)
     if (!dryRun) {
-      console.log("[Investors Route] Converting tactical report to Telegram HTML and sending...");
+      console.log("[Investors Route] Converting tactical report to Telegram multimedia messages and sending...");
       const delimiter = "🚨 DECISIÓN ";
       
       const parts = reportMarkdown.split(new RegExp(`(?=${delimiter}\\d+)`, "g"));
       
       if (parts.length > 1) {
-        const header = parts[0].trim() ? parts[0].trim() + "\n\n" : "";
-        const firstDecisionMarkdown = header + parts[1].trim();
-        const firstDecisionHtml = markdownToTelegramHtml(firstDecisionMarkdown);
+        // Send Header + Formal Investor Presentation first (Rule 1)
+        const header = parts[0].trim();
+        if (header) {
+          console.log(`[Investors Route] Dispatching Header and Formal Presentation to Telegram...`);
+          const headerHtml = markdownToTelegramHtml(header);
+          await sendTelegramMessage(headerHtml, customChatId || undefined);
+        }
         
-        console.log(`[Investors Route] Dispatching Decision 1 to Telegram...`);
-        await sendTelegramMessage(firstDecisionHtml, customChatId || undefined);
-        
-        // Dispatch subsequent decisions with delay
-        for (let i = 2; i < parts.length; i++) {
+        // Dispatch each tactical decision with its visual snapshot photo and clean links (Rule 3 & Rule 4)
+        for (let i = 1; i < parts.length; i++) {
           const decisionMarkdown = parts[i].trim();
           if (decisionMarkdown) {
-            const decisionHtml = markdownToTelegramHtml(decisionMarkdown);
             await new Promise((resolve) => setTimeout(resolve, 800));
-            console.log(`[Investors Route] Dispatching Decision ${i} to Telegram...`);
-            await sendTelegramMessage(decisionHtml, customChatId || undefined);
+            console.log(`[Investors Route] Dispatching Decision ${i} with photo/multimedia to Telegram...`);
+            await sendTelegramMessageWithPhotos(decisionMarkdown, customChatId || undefined);
           }
         }
       } else {
-        // Fallback to sending as a single message
-        const telegramHtml = markdownToTelegramHtml(reportMarkdown);
-        if (telegramHtml.length > 3500) {
-          const chunks = splitMarkdown(reportMarkdown, 3000);
-          for (let i = 0; i < chunks.length; i++) {
-            const chunkHtml = markdownToTelegramHtml(chunks[i]);
-            await sendTelegramMessage(chunkHtml, customChatId || undefined);
-          }
-        } else {
-          await sendTelegramMessage(telegramHtml, customChatId || undefined);
-        }
+        // Fallback to sending as a single multimedia message
+        await sendTelegramMessageWithPhotos(reportMarkdown, customChatId || undefined);
       }
       console.log("[Investors Route] Decisions delivered successfully to Telegram.");
     } else {
@@ -291,21 +282,30 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 ▫️ **Fronteras y Soporte**: [Rangos numéricos exactos, precios, niveles clave de soporte, resistencia, o plazos estimados que determinan la validez de la recomendación.]
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
-🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
-🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
+![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - En la primera recomendación, el título "🚨 HIVEX Investors - 24H" debe ir seguido inmediatamente por la línea de separación "---", la breve presentación formal, y un espacio en blanco antes de "🚨 DECISIÓN 1:".
 - Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la decisión para mantener un diseño premium y respirable.
-- PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
+- PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace de la cabina de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA PARA VÍDEOS SIN GRÁFICOS: Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos), NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" ni la línea "🔗 [Abrir Escena del Gráfico...]" para ese vídeo. En ese caso, incluye únicamente la línea "🔗 [Vídeo Completo: {videoTitle}](...)".
-- REGLA PARA CALCULAR {startSeconds} Y {endSeconds} (solo aplicable si el vídeo tiene gráficos):
-  1. Para los vídeos que sustentan la decisión, busca cualquier marca de tiempo de gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) y conviértela a segundos enteros.
-  2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 740, end es 800).
-- Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera el enlace de compartir público apuntando a la escena del vídeo de origen relevante inyectando el {videoId} real y los segundos calculados.
-- Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
+- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO):
+  - Si el vídeo tiene gráficos detectados en el campo "charts":
+    1. Busca la marca de tiempo del gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) para {startSeconds}.
+    2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 740, end es 800).
+    3. Extrae el título limpio, descriptivo y representativo del gráfico {cleanChartTitle} (ej. "Curva de Tipos 10A vs 2A", "Flujos Globales de Liquidez"). ESTÁ TERMINANTEMENTE PROHIBIDO usar textos de enlace genéricos como "Abrir Escena", "Ver gráfico", "Hacer clic aquí" o la URL en crudo.
+    4. Incluye siempre la carátula fija del gráfico con la sintaxis:
+       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+    5. El enlace hacia la escena acotada debe ser el propio nombre limpio del gráfico:
+       🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+    6. Añade obligatoriamente el enlace hacia el vídeo completo:
+       🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+  - Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos):
+    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni la carátula fotográfica, ni el enlace del gráfico acotado. En ese caso, incluye únicamente la línea del vídeo completo:
+    🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
 
 3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Investors - 24H" y continúa inmediatamente con la línea de separación "---".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
@@ -396,16 +396,20 @@ ${JSON.stringify(videoContexts, null, 2)}
 
 function generateDeterministicInvestors(priorityVideos: any[]): string {
   let output = "🚨 HIVEX Investors - 24H\n---\n\n";
+  output += "Presentamos las decisiones tácticas y estratégicas sintetizadas para la jornada de hoy por el comité de inversión de HIVEX, respaldadas por el análisis de mercado de las últimas 24 horas.\n\n";
 
   priorityVideos.forEach((video, idx) => {
-    const shareUrl = `https://hivex-backend.vercel.app/share/${video.id}?start=0&end=60`;
+    const chartTitle = `Gráfico de Análisis: ${video.title}`;
+    const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
+    const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
     output += `🚨 DECISIÓN ${idx + 1}: ASIGNACIÓN DEFENSIVA - ${video.title.toUpperCase()}\n\n`;
     output += `Se ha analizado una tesis crítica sobre flujos globales. Integramos esta perspectiva con las pautas de liquidez históricas de HIVEX para estructurar una decisión adaptativa de capital.\n\n`;
     output += `▫️ **Acción Recomendada**: Priorizar la asignación defensiva en activos tangibles o sectores con flujos de caja predecibles libres de deuda de corto plazo.\n`;
     output += `▫️ **Fronteras y Soporte**: Niveles técnicos clave bajo estudio activo en la cabina. Vigilar la velocidad de la rotación sectorial.\n\n`;
     output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-    output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n`;
-    output += `🔗 [Vídeo Completo: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
+    output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n`;
+    output += `🔗 [${chartTitle}](${boundedUrl})\n`;
+    output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n\n`;
   });
 
   return output.trim();
