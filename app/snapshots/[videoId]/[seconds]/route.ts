@@ -112,11 +112,69 @@ export async function GET(
   }
 
   // Construct public Supabase Storage URL
+  // Parse seconds to integer
+  const secondsInt = parseInt(fileKey.replace(".jpg", ""), 10);
+  if (isNaN(secondsInt)) {
+    return new NextResponse("Invalid seconds parameter", { status: 400 });
+  }
+
+  // Construct public Supabase Storage URL
   // The path inside the public "snapshots" bucket is [resolvedVideoId]/[seconds.jpg]
   const publicStorageUrl = `${supabaseUrl}/storage/v1/object/public/snapshots/${resolvedVideoId}/${fileKey}`;
 
   // Fetch the image from Supabase Storage and proxy it
   try {
+    // SPECIAL HANDLING FOR 0.jpg (Video Cover / Portada)
+    if (secondsInt === 0) {
+      const response = await fetch(publicStorageUrl);
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        // Ensure cover is authentic high quality (> 10 KB), not a tiny low-res thumbnail
+        if (buffer.byteLength > 10000) {
+          const contentType = response.headers.get("Content-Type") || "image/jpeg";
+          return new NextResponse(buffer, {
+            status: 200,
+            headers: {
+              "Content-Type": contentType,
+              "Cache-Control": "public, max-age=31536000, immutable",
+            },
+          });
+        }
+        console.warn(`[Snapshots Route] 0.jpg in storage for ${resolvedVideoId} is low-res (${buffer.byteLength} bytes). Refreshing with maxresdefault HD cover...`);
+      }
+
+      // Fetch official widescreen HD cover (maxresdefault.jpg) or fallback to hqdefault.jpg
+      let coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/maxresdefault.jpg`);
+      if (!coverRes.ok) {
+        coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`);
+      }
+
+      if (coverRes.ok) {
+        const coverBuffer = Buffer.from(await coverRes.arrayBuffer());
+        if (supabaseUrl && supabaseKey) {
+          const supabase = createClient(supabaseUrl, supabaseKey, {
+            auth: { persistSession: false },
+          });
+          supabase.storage
+            .from("snapshots")
+            .upload(`${resolvedVideoId}/0.jpg`, coverBuffer, {
+              contentType: "image/jpeg",
+              upsert: true,
+            })
+            .catch((upErr) => console.warn(`[Snapshots Route] Failed to cache 0.jpg cover:`, upErr?.message));
+        }
+
+        return new NextResponse(coverBuffer, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        });
+      }
+    }
+
+    // CHART SNAPSHOTS (secondsInt > 0)
     const response = await fetch(publicStorageUrl);
     if (response.ok) {
       const contentType = response.headers.get("Content-Type") || "image/jpeg";
@@ -145,14 +203,9 @@ export async function GET(
 
     if (isNotFound) {
       console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Checking for closest available match...`);
-      
-      // Parse seconds to integer
-      const secondsInt = parseInt(fileKey.replace(".jpg", ""), 10);
-      if (isNaN(secondsInt)) {
-        return new NextResponse("Invalid seconds parameter", { status: 400 });
-      }
 
       // Try closest available match resolution in the backend (using admin bypass listing)
+      // STRICT RULE: Only match real chart frames (s > 0). NEVER match 0.jpg!
       try {
         const supabase = createClient(supabaseUrl, supabaseKey, {
           auth: { persistSession: false },
@@ -164,7 +217,7 @@ export async function GET(
         if (!listErr && fileList && fileList.length > 0) {
           const availableSeconds = fileList
             .map((f) => parseInt(f.name.replace(".jpg", ""), 10))
-            .filter((s) => !isNaN(s));
+            .filter((s) => !isNaN(s) && s > 0);
 
           if (availableSeconds.length > 0) {
             let closest = availableSeconds[0];
@@ -177,7 +230,7 @@ export async function GET(
               }
             }
 
-            // Allow up to a generous 60-second window to resolve slightly shifted timestamps
+            // Allow up to a 60-second window to resolve slightly shifted timestamps
             if (minDiff <= 60) {
               const resolvedFileKey = `${closest}.jpg`;
               console.log(`[Snapshots Route] Resolved shifted timestamp ${secondsInt} to closest match ${resolvedFileKey}`);
@@ -210,13 +263,13 @@ export async function GET(
         youtubeUrl = `https://www.youtube.com/watch?v=${resolvedVideoId}`;
       }
 
-      // Helper to return distinct image fallback: in-video frames (1, 2, 3) for charts, hqdefault for video cover
+      // Helper to return distinct high-quality image fallback (HD cover for 0, HQ frame for charts)
       const getFallbackRedirectUrl = (id: string, sec: number) => {
         if (sec > 0) {
           const frameIndex = sec <= 300 ? 1 : sec <= 900 ? 2 : 3;
-          return `https://img.youtube.com/vi/${id}/${frameIndex}.jpg`;
+          return `https://img.youtube.com/vi/${id}/hq${frameIndex}.jpg`;
         }
-        return `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+        return `https://img.youtube.com/vi/${id}/maxresdefault.jpg`;
       };
 
       // Check if yt-dlp and ffmpeg are available on the host machine
@@ -230,8 +283,32 @@ export async function GET(
         await execAsync(`"${ytdlpPath}" --version`);
         await execAsync(`"${ffmpegPath}" -version`);
       } catch (err: any) {
-        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Gracefully redirecting to YouTube frame/cover.`);
-        return NextResponse.redirect(getFallbackRedirectUrl(resolvedVideoId, secondsInt), 302);
+        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Using high-resolution in-video frame fallback.`);
+        const frameIndex = secondsInt <= 300 ? 1 : secondsInt <= 900 ? 2 : 3;
+        const hqFrameUrl = `https://img.youtube.com/vi/${resolvedVideoId}/hq${frameIndex}.jpg`;
+        try {
+          const frameRes = await fetch(hqFrameUrl);
+          if (frameRes.ok) {
+            const frameBuf = Buffer.from(await frameRes.arrayBuffer());
+            if (supabaseUrl && supabaseKey) {
+              const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
+              supabase.storage
+                .from("snapshots")
+                .upload(`${resolvedVideoId}/${fileKey}`, frameBuf, { contentType: "image/jpeg", upsert: true })
+                .catch(() => {});
+            }
+            return new NextResponse(frameBuf, {
+              status: 200,
+              headers: {
+                "Content-Type": "image/jpeg",
+                "Cache-Control": "public, max-age=31536000, immutable",
+              },
+            });
+          }
+        } catch (frameErr) {
+          console.error("[Snapshots Route] Failed to fetch hq frame fallback:", frameErr);
+        }
+        return NextResponse.redirect(hqFrameUrl, 302);
       }
 
       console.log(`[Snapshots Route] Extraction tools verified. Starting on-demand extraction for ${resolvedVideoId} at ${secondsInt}s...`);
@@ -346,8 +423,8 @@ export async function GET(
     const secNum = isNaN(parsedSec) ? 0 : parsedSec;
     if (secNum > 0) {
       const frameIndex = secNum <= 300 ? 1 : secNum <= 900 ? 2 : 3;
-      return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/${frameIndex}.jpg`, 302);
+      return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hq${frameIndex}.jpg`, 302);
     }
-    return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+    return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/maxresdefault.jpg`, 302);
   }
 }

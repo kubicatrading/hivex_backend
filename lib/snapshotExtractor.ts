@@ -245,6 +245,30 @@ export async function extractSnapshotsInBackground(
         }
       }
 
+      // Ensure 0.jpg (video cover) is saved in Supabase Storage in widescreen HD
+      if (isYoutube && supabaseAdmin) {
+        try {
+          const coverPath = path.join(snapshotsDir, "0.jpg");
+          let coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/maxresdefault.jpg`);
+          if (!coverRes.ok) {
+            coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`);
+          }
+          if (coverRes.ok) {
+            const coverBuffer = Buffer.from(await coverRes.arrayBuffer());
+            fs.writeFileSync(coverPath, coverBuffer);
+            await supabaseAdmin.storage
+              .from("snapshots")
+              .upload(`${resolvedVideoId}/0.jpg`, coverBuffer, {
+                contentType: "image/jpeg",
+                upsert: true,
+              });
+            console.log(`[Snapshot Extractor] Saved & uploaded HD cover 0.jpg for ${resolvedVideoId}`);
+          }
+        } catch (coverErr: any) {
+          console.warn(`[Snapshot Extractor] Failed to save 0.jpg cover:`, coverErr?.message);
+        }
+      }
+
       for (const chart of charts) {
         const outputPath = path.join(snapshotsDir, `${chart.seconds}.jpg`);
         let extracted = false;

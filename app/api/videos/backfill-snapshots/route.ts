@@ -223,11 +223,14 @@ async function handleBackfill(request: NextRequest) {
 
       let streamUrl = await getStreamUrl();
 
-      // Also ensure 0.jpg (video cover) is present in Supabase Storage
+      // Also ensure 0.jpg (video cover) is present in Supabase Storage in widescreen HD
       const hasCover = uploadedNames.has("0.jpg");
       if (!hasCover && isYoutube) {
         try {
-          const coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`);
+          let coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/maxresdefault.jpg`);
+          if (!coverRes.ok) {
+            coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`);
+          }
           if (coverRes.ok) {
             const coverBuffer = Buffer.from(await coverRes.arrayBuffer());
             await supabaseAdmin.storage
@@ -261,11 +264,11 @@ async function handleBackfill(request: NextRequest) {
             await runCmd(ffmpegCmd);
             success = true;
           } catch (err: any) {
-            // Serverless fallback: in environments without ffmpeg/yt-dlp, download in-video frame
+            // Serverless fallback: in environments without ffmpeg/yt-dlp, download distinct in-video HQ frame
             if (isYoutube) {
               try {
                 const frameIndex = chart.seconds <= 300 ? 1 : chart.seconds <= 900 ? 2 : 3;
-                const frameRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/${frameIndex}.jpg`);
+                const frameRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hq${frameIndex}.jpg`);
                 if (frameRes.ok) {
                   const frameBuf = Buffer.from(await frameRes.arrayBuffer());
                   fs.writeFileSync(localPath, frameBuf);
