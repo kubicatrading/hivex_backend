@@ -196,8 +196,6 @@ async function handleBackfill(request: NextRequest) {
       }
 
       console.log(`[Backfill API] Video "${video.title}" has ${missingCharts.length} missing snapshots. Processing...`);
-      processedVideosLog.push(`Backfilled ${missingCharts.length} snapshots for "${video.title}".`);
-      backfilledCount++;
 
       // Create a writable tmp dir for serverless execution environment
       const tmpDir = path.join(os.tmpdir(), "snapshots", resolvedVideoId);
@@ -225,6 +223,27 @@ async function handleBackfill(request: NextRequest) {
 
       let streamUrl = await getStreamUrl();
 
+      // Also ensure 0.jpg (video cover) is present in Supabase Storage
+      const hasCover = uploadedNames.has("0.jpg");
+      if (!hasCover && isYoutube) {
+        try {
+          const coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`);
+          if (coverRes.ok) {
+            const coverBuffer = Buffer.from(await coverRes.arrayBuffer());
+            await supabaseAdmin.storage
+              .from("snapshots")
+              .upload(`${resolvedVideoId}/0.jpg`, coverBuffer, {
+                contentType: "image/jpeg",
+                upsert: true
+              });
+          }
+        } catch (coverErr: any) {
+          console.warn(`[Backfill API] Failed to ensure 0.jpg cover for ${resolvedVideoId}:`, coverErr?.message);
+        }
+      }
+
+      let actualUploadedForVideo = 0;
+
       for (const chart of missingCharts) {
         const localPath = path.join(tmpDir, `${chart.seconds}.jpg`);
         const offsetSeconds = chart.seconds + 5;
@@ -242,7 +261,20 @@ async function handleBackfill(request: NextRequest) {
             await runCmd(ffmpegCmd);
             success = true;
           } catch (err: any) {
-            console.error(`[Backfill API] Error extracting snapshot for ${chart.seconds}s:`, err?.message || err);
+            // Serverless fallback: in environments without ffmpeg/yt-dlp, download in-video frame
+            if (isYoutube) {
+              try {
+                const frameIndex = chart.seconds <= 300 ? 1 : chart.seconds <= 900 ? 2 : 3;
+                const frameRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/${frameIndex}.jpg`);
+                if (frameRes.ok) {
+                  const frameBuf = Buffer.from(await frameRes.arrayBuffer());
+                  fs.writeFileSync(localPath, frameBuf);
+                  success = true;
+                }
+              } catch (frameErr: any) {
+                console.error(`[Backfill API] Error in serverless fallback for ${chart.seconds}s:`, frameErr?.message || frameErr);
+              }
+            }
           }
         }
 
@@ -259,6 +291,8 @@ async function handleBackfill(request: NextRequest) {
 
           if (uploadError) {
             console.error(`[Backfill API] Failed to upload "${uploadPath}":`, uploadError.message);
+          } else {
+            actualUploadedForVideo++;
           }
 
           // Clean up local temp file immediately to conserve storage in /tmp
@@ -266,6 +300,11 @@ async function handleBackfill(request: NextRequest) {
             fs.unlinkSync(localPath);
           } catch {}
         }
+      }
+
+      if (actualUploadedForVideo > 0) {
+        processedVideosLog.push(`Backfilled ${actualUploadedForVideo} snapshots for "${video.title}".`);
+        backfilledCount++;
       }
 
       // Clean up local video temp folder

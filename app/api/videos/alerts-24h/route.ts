@@ -311,22 +311,20 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace de la cabina de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Devuelven líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO) - FORMATO JERÁRQUICO 4 PASOS:
+- REGLA 3 & REGLA 4 PARA LA CABINA DE ESTUDIO (GRÁFICOS / CHARTS):
   - Si el vídeo tiene gráficos detectados en el campo "charts":
-    1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros ({startSeconds}).
+    1. Busca la marca de tiempo exacta del gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros ({startSeconds}). ESTÁ TERMINANTEMENTE PROHIBIDO inventar marcas de tiempo o extraer segundos arbitrarios si no existe un gráfico real detectado.
     2. Suma siempre 60 segundos para obtener {endSeconds}.
     3. Extrae el título limpio, descriptivo y representativo del gráfico {cleanChartTitle} (ej. "Curva de Tipos 10A vs 2A", "Flujos Globales de Liquidez"). ESTÁ TERMINANTEMENTE PROHIBIDO usar textos genéricos como "Abrir Escena", "Ver gráfico", "Hacer clic aquí" o URLs en crudo.
-    4. Estructura la sección de la cabina de estudio con la siguiente jerarquía exacta (pegando cada captura a su enlace correspondiente):
-       3.1. Enlace limpio al vídeo corto:
+    4. Estructura la sección de la cabina de estudio con la jerarquía exacta de 4 pasos (pegando cada captura a su enlace correspondiente):
+       🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-       3.2. Captura del chart (pegada a su enlace):
        ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
-       3.3. Enlace limpio al vídeo completo:
+
        🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-       3.4. Carátula de portada del vídeo completo (pegada a su enlace):
        ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
   - Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos):
-    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni el enlace del gráfico acotado. Incluye únicamente la línea del vídeo completo y su carátula:
+    NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", ni el enlace del gráfico acotado, ni ninguna captura de fragmento. Incluye ÚNICAMENTE la línea del vídeo completo y su carátula:
     🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
     ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
@@ -370,22 +368,20 @@ CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
 - ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the public HIVEX dashboard URL.
 - NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
 - NO BACKTICKS: Do NOT use backticks (\`) anywhere around the titles, markdown links, or URLs.
-- RULE 3 & RULE 4 FOR CHARTS (STUDY CABIN) - 4-PART HIERARCHICAL FORMAT:
+- RULE 3 & RULE 4 FOR THE STUDY CABIN (CHARTS):
   - If the video has charts in the "charts" field:
-    1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds ({startSeconds}).
-    2. Always add 60 seconds to get {endSeconds}.
+    1. Look up the exact chart timestamp in the "charts" field (e.g. "04:15") and convert it to integer seconds ({startSeconds}). It is STRICTLY FORBIDDEN to invent timestamps or pick arbitrary seconds if no actual chart was detected.
+    2. Always add 60 seconds to obtain {endSeconds}.
     3. Extract a clean, descriptive, and representative chart title {cleanChartTitle} (e.g. "10Y vs 2Y Yield Curve", "Global Liquidity Flows"). STRICTLY FORBIDDEN to use generic link texts such as "Open Scene", "View Chart", "Click here", or raw URLs.
-    4. Structure the cabin section with the following exact hierarchy (gluing each snapshot to its companion link):
-       3.1. Friendly link to short video:
+    4. Structure the cabin section with the mandatory 4-step hierarchy (gluing each snapshot to its companion link):
+       🎬 **INTEGRATED PLAYER (STUDY CABIN)**
        🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
-       3.2. Chart snapshot (glued directly below its link):
        ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
-       3.3. Friendly link to full video:
+
        🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
-       3.4. Full video cover snapshot (glued directly below its link):
        ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
-  - If the "charts" field is empty or indicates no charts were detected:
-    Do NOT include "🎬 **INTEGRATED PLAYER (STUDY CABIN)**", nor the bounded chart link. Include only the full video link and its cover snapshot:
+  - If no chart was detected in the "charts" field (field is empty or indicates no charts):
+    Do NOT include the "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" heading, nor the short bounded link, nor any clip snapshot. Include ONLY the full video link and its cover:
     🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
     ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
@@ -476,6 +472,15 @@ ${JSON.stringify(videoContexts, null, 2)}
   }
 }
 
+function parseTimestampToSeconds(ts?: string): number {
+  if (!ts) return 60;
+  const parts = ts.split(":").map((p) => parseInt(p, 10));
+  if (parts.some(isNaN)) return 60;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 60;
+}
+
 function generateDeterministicAlerts(videoContexts: any[], lang: string): string {
   const isSpanish = lang === "es";
   let output = "🚨 HIVEX Alerts - 24H\n---\n\n";
@@ -483,30 +488,49 @@ function generateDeterministicAlerts(videoContexts: any[], lang: string): string
   videoContexts.forEach((video) => {
     output += `🚨 ${video.title.toUpperCase()}\n\n`;
 
+    const hasCharts = Array.isArray(video.charts) && video.charts.length > 0;
+    const firstChart = hasCharts ? video.charts[0] : null;
+    const startSec = firstChart ? parseTimestampToSeconds(firstChart.timestamp) : 60;
+    const endSec = startSec + 60;
+
     if (isSpanish) {
-      const chartTitle = `Gráfico de Análisis: ${video.title}`;
-      const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
       const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
 
       output += `Análisis macroeconómico de alto impacto detectado en el canal de ${video.channel}. Se detalla un estudio exhaustivo sobre las tendencias recientes de los activos financieros y flujos de capital globales.\n\n`;
       output += `▫️ **El Incidente**: Movimientos de volumen atípicos o catalizadores geopolíticos bajo análisis activo en la cabina de estudio.\n`;
       output += `▫️ **Ventaja Inversora**: Se aconseja revisar los flujos de liquidez y realizar seguimiento de los niveles marcados en el gráfico para capturar ventajas operativas.\n\n`;
-      output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-      output += `🔗 [${chartTitle}](${boundedUrl})\n`;
-      output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+
+      if (firstChart) {
+        const startSec = parseTimestampToSeconds(firstChart.timestamp);
+        const endSec = startSec + 60;
+        const chartTitle = firstChart.title || `Gráfico de Análisis: ${video.title}`;
+        const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=${startSec}&end=${endSec}&from=telegram`;
+
+        output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
+        output += `🔗 [${chartTitle}](${boundedUrl})\n`;
+        output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/${startSec}.jpg)\n\n`;
+      }
+
       output += `🔗 [Vídeo Completo: ${video.title}](${fullVideoUrl})\n`;
       output += `![${video.title}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
     } else {
-      const chartTitle = `Analysis Chart: ${video.title}`;
-      const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=0&end=60&from=telegram`;
       const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
 
       output += `High-impact macroeconomic analysis detected on the ${video.channel} channel. A comprehensive study on recent financial asset trends and global capital flows is detailed inside.\n\n`;
       output += `▫️ **The Incident**: Unusual volume movements or geopolitical catalysts under active analysis in the study cabin.\n`;
       output += `▫️ **Investor Advantage**: Careful review of liquidity flows and tracking levels marked in the chart is advised to capture operational advantages.\n\n`;
-      output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
-      output += `🔗 [${chartTitle}](${boundedUrl})\n`;
-      output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+
+      if (firstChart) {
+        const startSec = parseTimestampToSeconds(firstChart.timestamp);
+        const endSec = startSec + 60;
+        const chartTitle = firstChart.title || `Analysis Chart: ${video.title}`;
+        const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=${startSec}&end=${endSec}&from=telegram`;
+
+        output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
+        output += `🔗 [${chartTitle}](${boundedUrl})\n`;
+        output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/${startSec}.jpg)\n\n`;
+      }
+
       output += `🔗 [Full Video: ${video.title}](${fullVideoUrl})\n`;
       output += `![${video.title}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
     }

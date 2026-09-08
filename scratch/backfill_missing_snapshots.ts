@@ -136,7 +136,7 @@ async function run() {
   console.log(`[Backfill Snapshots] Found ${videos.length} video documents.`);
 
   console.log(`[Backfill Snapshots] Pre-filtering videos by existing snapshots in Supabase Storage...`);
-  const videosWithMissingSnapshots: { video: any, missingCharts: any[], parsedCharts: any[] }[] = [];
+  const videosWithMissingSnapshots: { video: any, missingCharts: any[], parsedCharts: any[], hasCover?: boolean }[] = [];
 
   await Promise.all(videos.map(async (video) => {
     const videoUrl = video.file_url;
@@ -176,7 +176,8 @@ async function run() {
         videosWithMissingSnapshots.push({
           video,
           missingCharts,
-          parsedCharts
+          parsedCharts,
+          hasCover: existingNames.has("0.jpg")
         });
       }
     } catch (e) {
@@ -186,7 +187,7 @@ async function run() {
 
   console.log(`[Backfill Snapshots] Pre-filtering complete. Found ${videosWithMissingSnapshots.length} videos needing snapshot extraction out of ${videos.length} total.`);
 
-  for (const { video, missingCharts, parsedCharts } of videosWithMissingSnapshots) {
+  for (const { video, missingCharts, parsedCharts, hasCover } of videosWithMissingSnapshots) {
     const videoUrl = video.file_url;
     console.log(`\n--------------------------------------------------------`);
     console.log(`[Backfill Snapshots] Processing video: "${video.title}"`);
@@ -201,47 +202,59 @@ async function run() {
 
     const isYoutube = videoUrl.includes("youtube.com") || videoUrl.includes("youtu.be");
 
-    const getStreamUrl = async (): Promise<string> => {
-      if (!isYoutube) return videoUrl;
+    // Ensure 0.jpg cover exists
+    if (!hasCover && isYoutube) {
       try {
-        console.log(`[Backfill Snapshots] Resolving stream URL via yt-dlp...`);
-        const resolved = await runCmd(`yt-dlp -f "best[ext=mp4]/best" -g "${videoUrl}"`);
-        if (resolved) return resolved;
-      } catch (err) {
-        console.warn(`[Backfill Snapshots] Standard yt-dlp resolution failed, trying fallback...`);
-        try {
-          const fallback = await runCmd(`yt-dlp -g "${videoUrl}"`);
-          if (fallback) return fallback;
-        } catch (fallbackErr) {
-          console.error(`[Backfill Snapshots] Failed to resolve video stream URL.`, fallbackErr);
+        const coverRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`);
+        if (coverRes.ok) {
+          const coverBuf = Buffer.from(await coverRes.arrayBuffer());
+          await supabaseClient.storage.from("snapshots").upload(`${resolvedVideoId}/0.jpg`, coverBuf, {
+            contentType: "image/jpeg",
+            upsert: true
+          });
+          console.log(`[Backfill Snapshots] Uploaded cover 0.jpg for ${resolvedVideoId}`);
         }
+      } catch (err: any) {
+        console.warn(`[Backfill Snapshots] Failed to upload 0.jpg cover:`, err?.message);
       }
-      return videoUrl;
-    };
-
-    let streamUrl = await getStreamUrl();
+    }
 
     for (const chart of missingCharts) {
       const outputPath = path.join(localDir, `${chart.seconds}.jpg`);
-      const offsetSeconds = chart.seconds + 5;
+      const secStart = chart.seconds;
+      const secEnd = chart.seconds + 5;
+      const tempSectionPath = path.join(localDir, `temp_${chart.seconds}.mp4`);
 
-      console.log(`[Backfill Snapshots] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s + 5s offset = ${offsetSeconds}s)...`);
+      console.log(`[Backfill Snapshots] Extracting snapshot at ${chart.timestamp} (${chart.seconds}s)...`);
       let success = false;
       try {
-        const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 -strict -2 "${outputPath}"`;
+        const ytdlpSectionCmd = `yt-dlp --download-sections "*${secStart}-${secEnd}" -f "bestvideo[ext=mp4]/bestvideo/best" --force-keyframes-at-cuts -o "${tempSectionPath}" "${videoUrl}"`;
+        await runCmd(ytdlpSectionCmd);
+        const ffmpegCmd = `ffmpeg -y -ss 00:00:02 -i "${tempSectionPath}" -vframes 1 -q:v 2 "${outputPath}"`;
         await runCmd(ffmpegCmd);
-        console.log(`[Backfill Snapshots] Saved locally: ${chart.seconds}.jpg`);
-        success = true;
-      } catch (err) {
-        console.warn(`[Backfill Snapshots] Ffmpeg failed. Re-resolving stream URL and retrying...`);
-        try {
-          streamUrl = await getStreamUrl();
-          const ffmpegCmd = `ffmpeg -y -ss ${offsetSeconds} -i "${streamUrl}" -vframes 1 -q:v 2 -strict -2 "${outputPath}"`;
-          await runCmd(ffmpegCmd);
-          console.log(`[Backfill Snapshots] Saved locally on retry: ${chart.seconds}.jpg`);
+        if (fs.existsSync(tempSectionPath)) {
+          try { fs.unlinkSync(tempSectionPath); } catch {}
+        }
+        if (fs.existsSync(outputPath)) {
           success = true;
-        } catch (retryErr) {
-          console.error(`[Backfill Snapshots] Error processing snapshot for ${chart.seconds}s on retry:`, retryErr);
+          console.log(`[Backfill Snapshots] Extracted full frame locally: ${chart.seconds}.jpg`);
+        }
+      } catch (err: any) {
+        console.warn(`[Backfill Snapshots] Local yt-dlp section extraction failed: ${err.message}. Trying YouTube frame fallback...`);
+      }
+
+      if (!success && isYoutube) {
+        try {
+          const frameIndex = chart.seconds <= 300 ? 1 : chart.seconds <= 900 ? 2 : 3;
+          const frameRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/${frameIndex}.jpg`);
+          if (frameRes.ok) {
+            const frameBuf = Buffer.from(await frameRes.arrayBuffer());
+            fs.writeFileSync(outputPath, frameBuf);
+            success = true;
+            console.log(`[Backfill Snapshots] Downloaded YouTube frame fallback: ${chart.seconds}.jpg`);
+          }
+        } catch (frameErr: any) {
+          console.error(`[Backfill Snapshots] YouTube frame fallback failed for ${chart.seconds}s:`, frameErr?.message);
         }
       }
 

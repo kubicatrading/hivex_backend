@@ -210,6 +210,15 @@ export async function GET(
         youtubeUrl = `https://www.youtube.com/watch?v=${resolvedVideoId}`;
       }
 
+      // Helper to return distinct image fallback: in-video frames (1, 2, 3) for charts, hqdefault for video cover
+      const getFallbackRedirectUrl = (id: string, sec: number) => {
+        if (sec > 0) {
+          const frameIndex = sec <= 300 ? 1 : sec <= 900 ? 2 : 3;
+          return `https://img.youtube.com/vi/${id}/${frameIndex}.jpg`;
+        }
+        return `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+      };
+
       // Check if yt-dlp and ffmpeg are available on the host machine
       let ytdlpPath: string;
       let ffmpegPath: string;
@@ -221,8 +230,8 @@ export async function GET(
         await execAsync(`"${ytdlpPath}" --version`);
         await execAsync(`"${ffmpegPath}" -version`);
       } catch (err: any) {
-        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Gracefully redirecting to YouTube cover to prevent Vercel block/timeout.`);
-        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Gracefully redirecting to YouTube frame/cover.`);
+        return NextResponse.redirect(getFallbackRedirectUrl(resolvedVideoId, secondsInt), 302);
       }
 
       console.log(`[Snapshots Route] Extraction tools verified. Starting on-demand extraction for ${resolvedVideoId} at ${secondsInt}s...`);
@@ -246,7 +255,7 @@ export async function GET(
           streamUrl = stdout.trim();
         } catch (fallbackErr: any) {
           console.error(`[Snapshots Route] yt-dlp fallback failed: ${fallbackErr.message}`);
-          return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+          return NextResponse.redirect(getFallbackRedirectUrl(resolvedVideoId, secondsInt), 302);
         }
       }
 
@@ -258,11 +267,11 @@ export async function GET(
         if (fs.existsSync(tempOut)) {
           try { fs.unlinkSync(tempOut); } catch (_) {}
         }
-        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+        return NextResponse.redirect(getFallbackRedirectUrl(resolvedVideoId, secondsInt), 302);
       }
 
       if (!fs.existsSync(tempOut)) {
-        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+        return NextResponse.redirect(getFallbackRedirectUrl(resolvedVideoId, secondsInt), 302);
       }
 
       // Verify if the extracted frame is a chart/graph/table using AI Snapshot Guard
@@ -272,8 +281,8 @@ export async function GET(
         try {
           fs.unlinkSync(tempOut);
         } catch (_) {}
-        // If it is not a chart, return the standard YouTube cover so we still have a beautiful preview
-        return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
+        // If it is not a chart, return the in-video frame or cover
+        return NextResponse.redirect(getFallbackRedirectUrl(resolvedVideoId, secondsInt), 302);
       }
 
       const fileBuffer = fs.readFileSync(tempOut);
@@ -333,7 +342,12 @@ export async function GET(
     return new NextResponse(`Failed to fetch image from storage: ${finalStatusText}`, { status: finalStatus });
   } catch (error) {
     console.error("Error proxying snapshot:", error);
-    // Fallback to direct redirect to prevent failure if proxy fails for unexpected reason
-    return NextResponse.redirect(publicStorageUrl, 302);
+    const parsedSec = parseInt(fileKey.replace(".jpg", ""), 10);
+    const secNum = isNaN(parsedSec) ? 0 : parsedSec;
+    if (secNum > 0) {
+      const frameIndex = secNum <= 300 ? 1 : secNum <= 900 ? 2 : 3;
+      return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/${frameIndex}.jpg`, 302);
+    }
+    return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hqdefault.jpg`, 302);
   }
 }
