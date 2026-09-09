@@ -129,8 +129,8 @@ export async function GET(
       const response = await fetch(publicStorageUrl);
       if (response.ok) {
         const buffer = await response.arrayBuffer();
-        // Ensure cover is authentic high quality (> 10 KB), not a tiny low-res thumbnail
-        if (buffer.byteLength > 10000) {
+        // Ensure cover is authentic high quality widescreen HD, not a video frame fallback or tiny thumbnail
+        if (buffer.byteLength >= 35000) {
           const contentType = response.headers.get("Content-Type") || "image/jpeg";
           return new NextResponse(buffer, {
             status: 200,
@@ -140,7 +140,7 @@ export async function GET(
             },
           });
         }
-        console.warn(`[Snapshots Route] 0.jpg in storage for ${resolvedVideoId} is low-res (${buffer.byteLength} bytes). Refreshing with maxresdefault HD cover...`);
+        console.warn(`[Snapshots Route] 0.jpg in storage for ${resolvedVideoId} may be low-res or frame fallback (${buffer.byteLength} bytes). Checking maxresdefault HD cover...`);
       }
 
       // Fetch official widescreen HD cover (maxresdefault.jpg) or fallback to hqdefault.jpg
