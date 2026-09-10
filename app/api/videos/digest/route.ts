@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { sendTelegramMessage, markdownToTelegramHtml, splitMarkdown, getTelegramLanguage, getYoutubeId } from "@/lib/telegram";
+import { sendTelegramMessageWithPhotos, sendTelegramMessage, markdownToTelegramHtml, splitMarkdown, getTelegramLanguage, getYoutubeId } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during daily synthesis
@@ -218,45 +218,36 @@ async function handleDigest(request: NextRequest) {
 
     // 7. Deliver to Telegram (unless dryRun)
     if (!dryRun) {
-      console.log("[Digest Route] Converting report to Telegram HTML and sending...");
+      console.log("[Digest Route] Converting report to Telegram multimedia messages and sending...");
       
-      const isSpanish = lang === "es";
-      const delimiter = isSpanish ? "🚨 ALERTA " : "🚨 ALERT ";
-      
-      // Split the generated markdown into separate alert segments using positive lookahead
-      const parts = reportMarkdown.split(new RegExp(`(?=${delimiter}\\d+)`, "g"));
+      // Split the generated markdown into header + individual alert segments
+      const parts = reportMarkdown.split(/(?=🚨\s+(?:ALERTA|ALERT)\s+\d+:|🚨\s+(?!HIVEX\s+Alerts)[A-Z0-9])/i);
       
       if (parts.length > 1) {
-        // parts[0] contains the header (e.g., "🚨 HIVEX Alerts - 24H\n\n")
-        const header = parts[0].trim() ? parts[0].trim() + "\n\n" : "";
-        const firstAlertMarkdown = header + parts[1].trim();
-        const firstAlertHtml = markdownToTelegramHtml(firstAlertMarkdown);
-        
-        console.log(`[Digest Route] Dispatching Alert 1 to Telegram...`);
-        await sendTelegramMessage(firstAlertHtml, customChatId || undefined);
-        
-        // Dispatch subsequent alerts chronologically with a slight delay to preserve Telegram ordering
-        for (let i = 2; i < parts.length; i++) {
+        // parts[0] contains the header + formal presentation
+        const hasHeader = parts[0].includes("HIVEX Alerts");
+        const startIndex = hasHeader ? 1 : 0;
+
+        if (hasHeader && parts[0].trim()) {
+          console.log(`[Digest Route] Dispatching Header and Formal Presentation to Telegram...`);
+          const headerHtml = markdownToTelegramHtml(parts[0].trim());
+          await sendTelegramMessage(headerHtml, customChatId || undefined);
+        }
+
+        // Dispatch each alert with full multimedia (snapshots and video covers)
+        for (let i = startIndex; i < parts.length; i++) {
           const alertMarkdown = parts[i].trim();
           if (alertMarkdown) {
-            const alertHtml = markdownToTelegramHtml(alertMarkdown);
-            await new Promise((resolve) => setTimeout(resolve, 800));
-            console.log(`[Digest Route] Dispatching Alert ${i} to Telegram...`);
-            await sendTelegramMessage(alertHtml, customChatId || undefined);
+            if (i > startIndex) {
+              await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+            console.log(`[Digest Route] Dispatching Alert ${i + 1 - startIndex} with photo/multimedia to Telegram...`);
+            await sendTelegramMessageWithPhotos(alertMarkdown, customChatId || undefined);
           }
         }
       } else {
-        // Fallback to sending as a single message (or chunks if too long) if splitting fails
-        const telegramHtml = markdownToTelegramHtml(reportMarkdown);
-        if (telegramHtml.length > 3500) {
-          const chunks = splitMarkdown(reportMarkdown, 3000);
-          for (let i = 0; i < chunks.length; i++) {
-            const chunkHtml = markdownToTelegramHtml(chunks[i]);
-            await sendTelegramMessage(chunkHtml, customChatId || undefined);
-          }
-        } else {
-          await sendTelegramMessage(telegramHtml, customChatId || undefined);
-        }
+        // Fallback to sending as a single multimedia message
+        await sendTelegramMessageWithPhotos(reportMarkdown, customChatId || undefined);
       }
       console.log("[Digest Route] Digest delivered successfully to Telegram.");
     } else {
@@ -293,80 +284,124 @@ async function generateSynthesizedDigest(videoContexts: any[], lang: string): Pr
     : `You are an elite financial news editor and investment analyst. Your task is to synthesize a daily premium investment news digest in English based on analyzed video materials, replicating a clean, high-impact, narrative-driven format. Always output standard Markdown without HTML tags.`;
 
   const promptText = isSpanish
-    ? `Eres un editor de noticias financieras de élite. Tu tarea es generar un informe unificado en español titulado "🚨 HIVEX Alerts - 24H" que sintetice las ideas clave de los vídeos analizados recientemente en HIVEX de forma extremadamente premium, limpia y asertiva.
+    ? `Eres un editor de noticias financieras de élite y un estratega bursátil en HIVEX. Tu tarea es generar un informe unificado en español titulado exactamente "🚨 HIVEX Alerts - 24H" que sintetice las ideas clave y alertas oportunas de los vídeos analizados recientemente en HIVEX de forma extremadamente premium, limpia, sobria y asertiva.
 
-Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
-1. El título principal del boletín debe ser exactamente:
+Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño (5 Reglas de Oro inquebrantables de HIVEX):
+1. El boletín debe iniciarse exactamente con el siguiente encabezado y una brevisima presentación formal del inversor (REGLA 1):
 🚨 HIVEX Alerts - 24H
 ---
 
+[Un párrafo de presentación formal del inversor de HIVEX extremadamente corto, sobrio, directo, conciso y premium (de 1 a 2 líneas, máximo 30-40 palabras) que exponga con claridad el propósito de las alertas presentadas hoy, sirviendo como preámbulo formal al inicio absoluto de la comunicación antes de cualquier alerta.]
+
 2. Cada vídeo analizado debe presentarse con la estructura de ALERTA premium descrita a continuación. Asegúrate de dejar una línea en blanco completa (doble salto de línea) entre cada apartado para una legibilidad óptima en móviles:
 
-🚨 ALERTA [Número]: [Título de Impacto]
+🚨 ALERTA [Número]: [Título de Impacto en Mayúsculas]
 
-[Párrafo narrativo integrado de 3 a 5 líneas. Debe ser un flujo editorial fluido, asertivo y de muy alto nivel, resumiendo de forma contundente la tesis central, la urgencia de la situación y la idea macroeconómica del ponente, sin usar subtítulos rígidos.]
+[Párrafo narrativo integrado de 3 a 5 líneas. Debe ser un flujo editorial fluido, asertivo y de muy alto nivel, resumiendo de forma contundente la tesis central, la urgencia de la situación macroeconómica y el evento de mercado detectado, sin usar subtítulos intermedios rígidos.]
 
-▫️ [Punto clave 1: un dato numérico preciso, porcentaje, precio, o un nivel de soporte o resistencia relevante.]
-▫️ [Punto clave 2: una implicación táctica directa para el inversor, flujo de liquidez o riesgo sistémico.]
+▫️ **El Incidente**: [Dato cuantitativo preciso, porcentaje, precio, nivel técnico de soporte/resistencia, o anomalía detectada.]
+▫️ **Ventaja Inversora**: [La implicación táctica directa, oportunidad de arbitraje o cobertura defensiva recomendada para obtener beneficio.]
 
 🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
-🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
-🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
+🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+
+🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
-- En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", y un espacio en blanco antes de "🚨 ALERTA 1:".
+- En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", la breve presentación formal, y un espacio en blanco antes de "🚨 ALERTA 1:".
 - Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la alerta para mantener el diseño premium y aireado.
-- PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace público "/share/" de HIVEX.
+- PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace de la cabina de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Deben ser líneas de texto independientes y limpias.
 - PROHIBICIÓN DE COMILLAS INVERTIDAS: No utilices comillas invertidas (\`) ni bloques de código para envolver los títulos o las URLs.
-- REGLA PARA VÍDEOS SIN GRÁFICOS: Si en el campo "charts" de un vídeo no se detectó ningún gráfico (o el campo está vacío o indica que no hay gráficos), NO agregues la cabecera "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" ni la línea "🔗 [Abrir Escena del Gráfico...]" para ese vídeo. En ese caso, incluye únicamente la línea "🔗 [Vídeo Completo: {videoTitle}](...)".
-- REGLA PARA CALCULAR {startSeconds} Y {endSeconds} (solo aplicable si el vídeo tiene gráficos):
-  1. Busca cualquier marca de tiempo de gráfico en el campo "charts" (ej. "04:15") y conviértela a segundos enteros (4 * 60 + 15 = 255).
-  2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 255, end es 315).
-- Para "🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](...)": Genera un link markdown directo apuntando a la ruta de compartir de HIVEX inyectando el {videoId} real (su UUID en HIVEX) y los parámetros de tiempo de inicio ({startSeconds}) y fin ({endSeconds}) calculados en la URL de "/share/".
-- Para "🔗 [Vídeo Completo: {videoTitle}](...)": Añade obligatoriamente este segundo enlace apuntando al vídeo completo sin parámetros de tiempo utilizando el título real del vídeo (propiedad "title" del objeto de datos) como el texto del enlace {videoTitle} y "/share/{videoId}" como URL.
+- REGLA 3 & REGLA 4 PARA GRÁFICOS (CABINA DE ESTUDIO) - FORMATO JERÁRQUICO 4 PASOS:
+  - Si el vídeo tiene gráficos detectados en el campo "charts":
+    1. Busca la marca de tiempo del gráfico relevante en el campo "charts" (ej. "12:20" -> 740s) para {startSeconds}.
+    2. Suma siempre 60 segundos para obtener {endSeconds} (ej. si start es 740, end es 800).
+    3. Inyecta el bloque exactamente con los 4 elementos emparejados (enlace acotado + captura fija JPG, y luego enlace completo + carátula 0.jpg):
+       🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**
+       🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
 
-3. PROHIBICIÓN DE NOTAS, COMENTARIOS DE IA O TABLAS: No escribas borradores, explicaciones ni notas. Comienza directamente con "🚨 HIVEX Alerts - 24H" and continúa inmediatamente con la línea de separación "---".
+       🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+       ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
+  - Si el vídeo NO tiene gráficos detectados (el campo "charts" está vacío, indica que no hay gráficos o no tiene marcas de tiempo):
+    - Está TERMINANTEMENTE PROHIBIDO inventar gráficos o segundos.
+    - OMITIR POR COMPLETO el encabezado "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**", el enlace de fragmento acotado y la captura fija del gráfico.
+    - Incluir ÚNICAMENTE el enlace del vídeo completo emparejado con su carátula:
+    🔗 [Vídeo Completo: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
+
+- REGLA 4 DE ENLACES COMPLETAMENTE LIMPIOS:
+  - El texto ancla del enlace debe ser el propio título descriptivo del gráfico o recurso (ej. \`[S&P 500 Soporte Clave](...)\` o \`[Vídeo Completo: Título]\`).
+  - Está TERMINANTEMENTE PROHIBIDO usar textos genéricos como "Abrir Escena del Gráfico en la Cabina de HIVEX", "Ver escena", "Hacer clic aquí", "Ver enlace" o poner URLs desnudas.
+- REGLA 5 DE PRECISIÓN Y VERACIDAD:
+  - Prohibido inventar datos, cotizaciones, fechas o análisis. Solo hechos sustentados en la videoteca.
+
+3. PROHIBICIÓN DE NOTAS O COMENTARIOS DE IA: No escribas borradores, explicaciones ni notas finales. Comienza directamente con "🚨 HIVEX Alerts - 24H".
 4. Genera únicamente Markdown estándar. No utilices etiquetas HTML en absoluto.
 5. Redacta todo el informe en español.
 
 Aquí tienes los datos de los vídeos recién analizados para sintetizar:
 ${JSON.stringify(videoContexts, null, 2)}
 `
-    : `You are an elite financial news editor. Your task is to generate a unified English report titled "🚨 HIVEX Alerts - 24H" that synthesizes the key insights from the videos recently analyzed on HIVEX in an extremely premium, clean, and assertive manner.
+    : `You are an elite financial news editor and an investment strategist at HIVEX. Your task is to generate a unified English report titled exactly "🚨 HIVEX Alerts - 24H" that synthesizes the key insights and timely alerts from recently analyzed videos in HIVEX in an extremely premium, clean, sober, and assertive manner.
 
-STRICTLY follow the formatting and style rules below:
-1. The main title must be exactly:
+STRICTLY follow the formatting and style rules below (HIVEX 5 Unbending Golden Rules):
+1. The bulletin must begin exactly with the following header and an extremely short formal investor presentation (RULE 1):
 🚨 HIVEX Alerts - 24H
 ---
 
+[A formal investor presentation paragraph that is extremely short, sober, direct, concise, and premium (1 to 2 lines, maximum 30-40 words) clearly setting out the purpose of the alerts presented today, serving as the formal opening of the communication before any alert.]
+
 2. Each analyzed video must be presented with the premium ALERT structure described below. Make sure to leave a full blank line (double newline) between each section for easy readability on mobile:
 
-🚨 ALERT [Number]: [Impact Title]
+🚨 ALERT [Number]: [Impact Title in Uppercase]
 
-[Narrative integrated paragraph of 3 to 5 lines. It must be a fluid, high-level, and assertive editorial flow, summarizing the central thesis, the urgency of the situation, and the speaker's macroeconomic insight without rigid subheaders.]
+[Narrative integrated paragraph of 3 to 5 lines. It must be a fluid, high-level, and assertive editorial flow, summarizing the central thesis, the urgency of the macroeconomic situation, and the detected market event, without using rigid intermediate subheaders.]
 
-▫️ [Key point 1: a precise numerical data point, percentage, price, or relevant support/resistance level.]
-▫️ [Key point 2: a direct tactical implication for the investor, liquidity flow, or systemic risk.]
+▫️ **The Incident**: [A precise numerical data point, percentage, price, technical support/resistance level, or detected anomaly.]
+▫️ **Investor Advantage**: [The direct tactical implication, arbitrage opportunity, or defensive hedge recommended to gain advantage.]
 
 🎬 **INTEGRATED PLAYER (STUDY CABIN)**
-🔗 [Open Chart Scene in HIVEX Study Cabin](https://hivex-backend.vercel.app/share/{videoId}?start={startSeconds}&end={endSeconds})
-🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/share/{videoId})
+🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
+
+🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
-- In the first alert, the main title "🚨 HIVEX Alerts - 24H" must be followed immediately by the line "---", and a blank space before "🚨 ALERT 1:".
+- In the first alert, the main title "🚨 HIVEX Alerts - 24H" must be followed immediately by the separator line "---", the brief formal presentation, and a blank space before "🚨 ALERT 1:".
 - Leave a full blank line (double newline) between every section of the alert to keep the design premium and airy.
-- ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the public HIVEX "/share/" URL.
+- ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the HIVEX study cabin URL.
 - NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
 - NO BACKTICKS: Do NOT use backticks (\`) anywhere around the titles, markdown links, or URLs.
-- RULE FOR VIDEOS WITHOUT CHARTS: If the "charts" field for a video is empty, states that no charts were detected, or has no valid timestamps, do NOT include the "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" heading or the "🔗 [Open Chart Scene...]" link for that video. Show only the "🔗 [Full Video: {videoTitle}](...)" link.
-- RULE TO CALCULATE {startSeconds} AND {endSeconds} (only applicable if the video has charts):
-  1. Find any chart timestamp in the "charts" field (e.g. "04:15") and convert it to seconds (4 * 60 + 15 = 255).
-  2. Always add 60 seconds to get {endSeconds} (e.g. if start is 255, end is 315).
-- For "🔗 [Open Chart Scene in HIVEX Study Cabin](...)": Generate a direct markdown link pointing to the HIVEX share route by injecting the real {videoId} (its UUID in HIVEX) and the start ({startSeconds}) and end ({endSeconds}) parameters in the "/share/" URL.
-- For "🔗 [Full Video: {videoTitle}](...)": Generate a direct markdown link pointing to the full video without time parameters by using the real title of the video (property "title" of the data object) as the link text {videoTitle} and "/share/{videoId}" as URL.
+- RULE 3 & RULE 4 FOR CHARTS (STUDY CABIN) - 4-STEP HIERARCHICAL FORMAT:
+  - If the video has charts detected in the "charts" field:
+    1. Find the timestamp of the relevant chart in the "charts" field (e.g. "12:20" -> 740s) for {startSeconds}.
+    2. Always add 60 seconds to get {endSeconds} (e.g. if start is 740, end is 800).
+    3. Inject the block with the 4 paired elements (bounded link + fixed JPG snapshot, and then full video link + cover 0.jpg):
+       🎬 **INTEGRATED PLAYER (STUDY CABIN)**
+       🔗 [{cleanChartTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&start={startSeconds}&end={endSeconds}&from=telegram)
+       ![{cleanChartTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/{startSeconds}.jpg)
 
-3. NO NOTES, AI COMMENTARY OR TABLES: Do not output any draft table, ID list, or final notes. Start immediately with "🚨 HIVEX Alerts - 24H" and follow immediately with the line "---".
+       🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+       ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
+  - If the video has NO charts detected (the "charts" field is empty, states that no charts were detected, or has no valid timestamps):
+    - It is STRICTLY FORBIDDEN to hallucinate charts or timestamps.
+    - COMPLETELY OMIT the "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" heading, the bounded clip link, and the fixed snapshot.
+    - Include ONLY the full video link paired with its cover:
+    🔗 [Full Video: {videoTitle}](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)
+    ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
+
+- RULE 4 FOR COMPLETELY CLEAN LINKS:
+  - The anchor text must be the clean descriptive title of the chart or resource (e.g. \`[S&P 500 Key Support](...)\` or \`[Full Video: Title]\`).
+  - It is STRICTLY FORBIDDEN to use generic anchor texts such as "Open Chart Scene in HIVEX Study Cabin", "View scene", "Click here", "View link", or raw URLs.
+- RULE 5 OF ACCURACY AND TRUTHFULNESS:
+  - Do not invent data, prices, dates, or analyses. Only facts backed by the video library.
+
+3. NO NOTES OR AI COMMENTARY: Do not output any draft table, ID list, or final notes. Start immediately with "🚨 HIVEX Alerts - 24H".
 4. Generate ONLY standard Markdown. Do not use HTML tags at all.
 5. Write the entire report in English.
 
@@ -552,33 +587,77 @@ function extractKeyAnalysis(content: string): string {
   return "Detailed analysis not available.";
 }
 
+function parseTimestampToSeconds(ts?: string): number {
+  if (!ts) return 60;
+  const parts = ts.split(":").map((p) => parseInt(p, 10));
+  if (parts.some(isNaN)) return 60;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 60;
+}
+
 function generateDeterministicDigest(videoContexts: any[], lang: string): string {
   const isSpanish = lang === "es";
-  let output = "🚨 HIVEX Alerts - 24H\n---\n\n";
+  const formalIntro = isSpanish
+    ? "Estimados asociados de HIVEX: Presentamos la síntesis de alertas y dinámicas de mercado detectadas en la videoteca durante las últimas 24 horas, orientadas a proteger capital y detectar ventajas tácticas."
+    : "Dear HIVEX Associates: We present the synthesized analysis of market alerts and dynamics detected in the video library over the last 24 hours, aimed at capital protection and tactical advantage.";
+
+  let output = `🚨 HIVEX Alerts - 24H\n---\n\n${formalIntro}\n\n`;
   const label = isSpanish ? "ALERTA" : "ALERT";
 
   videoContexts.forEach((video, idx) => {
     const keyAnalysisText = extractKeyAnalysis(video.content);
-    const shareUrl = `https://hivex-backend.vercel.app/share/${video.id}?start=0&end=60`;
+    const hasCharts = video.charts && video.charts.trim().length > 0 && !video.charts.toLowerCase().includes("no se detectaron");
+    const videoTitle = video.title.replace(/^[🚨\s\*]+|[🚨\s\*]+$/g, "").trim();
 
     output += `🚨 ${label} ${idx + 1}: ${cleanHeadline(video.title)}\n\n`;
 
     if (isSpanish) {
       output += `Análisis de mercado de alto impacto detectado en el canal de ${video.channel}. Se detalla un estudio exhaustivo sobre las tendencias recientes de los activos financieros y flujos de capital globales.\n\n`;
-      output += `▫️ Detalle clave: ${keyAnalysisText.slice(0, 160)}...\n`;
-      output += `▫️ Implicación táctica: Se aconseja revisar detenidamente la liquidez del mercado y el panel en la cabina.\n\n`;
+      output += `▫️ **El Incidente**: ${keyAnalysisText.slice(0, 160)}...\n`;
+      output += `▫️ **Ventaja Inversora**: Se aconseja revisar detenidamente la liquidez del mercado y el panel en la cabina de HIVEX.\n\n`;
 
-      output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
-      output += `🔗 [Abrir Escena del Gráfico en la Cabina de HIVEX](${shareUrl})\n`;
-      output += `🔗 [Vídeo Completo: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
+      if (hasCharts) {
+        const tsMatch = video.charts.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+        const startSec = tsMatch ? parseTimestampToSeconds(tsMatch[1]) : 60;
+        const endSec = startSec + 60;
+        const chartTitle = `Gráfico Clave: ${videoTitle.slice(0, 45)}`;
+        const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=${startSec}&end=${endSec}&from=telegram`;
+        const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
+
+        output += `🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**\n`;
+        output += `🔗 [${chartTitle}](${boundedUrl})\n`;
+        output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/${startSec}.jpg)\n\n`;
+        output += `🔗 [Vídeo Completo: ${videoTitle}](${fullVideoUrl})\n`;
+        output += `![${videoTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+      } else {
+        const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
+        output += `🔗 [Vídeo Completo: ${videoTitle}](${fullVideoUrl})\n`;
+        output += `![${videoTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+      }
     } else {
       output += `High-impact market analysis detected on the ${video.channel} channel. A comprehensive study on recent financial asset trends and global capital flows is detailed inside.\n\n`;
-      output += `▫️ Key detail: ${keyAnalysisText.slice(0, 160)}...\n`;
-      output += `▫️ Tactical implication: Careful review of market liquidity and the dashboard in the cabin is highly advised.\n\n`;
+      output += `▫️ **The Incident**: ${keyAnalysisText.slice(0, 160)}...\n`;
+      output += `▫️ **Investor Advantage**: Careful review of market liquidity and the dashboard in the HIVEX cabin is advised.\n\n`;
 
-      output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
-      output += `🔗 [Open Chart Scene in HIVEX Study Cabin](${shareUrl})\n`;
-      output += `🔗 [Full Video: ${video.title}](https://hivex-backend.vercel.app/share/${video.id})\n\n`;
+      if (hasCharts) {
+        const tsMatch = video.charts.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+        const startSec = tsMatch ? parseTimestampToSeconds(tsMatch[1]) : 60;
+        const endSec = startSec + 60;
+        const chartTitle = `Key Chart: ${videoTitle.slice(0, 45)}`;
+        const boundedUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&start=${startSec}&end=${endSec}&from=telegram`;
+        const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
+
+        output += `🎬 **INTEGRATED PLAYER (STUDY CABIN)**\n`;
+        output += `🔗 [${chartTitle}](${boundedUrl})\n`;
+        output += `![${chartTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/${startSec}.jpg)\n\n`;
+        output += `🔗 [Full Video: ${videoTitle}](${fullVideoUrl})\n`;
+        output += `![${videoTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+      } else {
+        const fullVideoUrl = `https://hivex-backend.vercel.app/dashboard/videos?id=${video.id}&from=telegram`;
+        output += `🔗 [Full Video: ${videoTitle}](${fullVideoUrl})\n`;
+        output += `![${videoTitle}](https://hivex-backend.vercel.app/snapshots/${video.id}/0.jpg)\n\n`;
+      }
     }
   });
 

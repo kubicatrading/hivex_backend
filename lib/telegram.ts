@@ -414,7 +414,11 @@ export async function setTelegramLanguage(lang: string): Promise<boolean> {
  * Server-side helper to safely transmit a message to Telegram.
  * Operates in mock mode if environment variables are missing.
  */
-export async function sendTelegramMessage(text: string, customChatId?: string): Promise<{
+export async function sendTelegramMessage(
+  text: string,
+  customChatId?: string,
+  disableWebPagePreview: boolean = true
+): Promise<{
   success: boolean;
   simulated: boolean;
   error?: string;
@@ -442,7 +446,7 @@ export async function sendTelegramMessage(text: string, customChatId?: string): 
         chat_id: chatId,
         text: text,
         parse_mode: "HTML",
-        disable_web_page_preview: false,
+        disable_web_page_preview: disableWebPagePreview,
       }),
     });
 

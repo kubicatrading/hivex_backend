@@ -278,16 +278,18 @@ async function generateSynthesizedAlerts(videoContexts: any[], lang: string): Pr
     : `You are an elite financial news editor and investment analyst. Your task is to synthesize daily premium investment alerts in English based on video materials, replicating a clean, high-impact, narrative-driven format. Always output standard Markdown without HTML tags.`;
 
   const promptText = isSpanish
-    ? `Eres un editor de noticias financieras de élite y un estratega bursátil en HIVEX. Tu tarea es generar un informe unificado en español titulado exactamente "🚨 HIVEX Alerts - 24H" que recopile todas las alertas oportunas de la videoteca desde la perspectiva de un inversor astuto. No agregues preámbulos formales ni presentaciones adicionales.
+    ? `Eres un editor de noticias financieras de élite y un estratega bursátil en HIVEX. Tu tarea es generar un informe unificado en español titulado exactamente "🚨 HIVEX Alerts - 24H" que recopile todas las alertas oportunas de la videoteca desde la perspectiva de un inversor astuto y premium.
   
 Debes enfocar este reporte estrictamente en:
 - Aspectos de importancia, urgencia o carácter atípico de los flujos de mercado y tendencias geopolíticas/macroeconómicas.
 - Ofrecer una ventaja inversora clara y asertiva que beneficie a nuestros asociados del canal.
 
-Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
-1. El boletín debe iniciarse exactamente con el siguiente encabezado, seguido de una línea de separación y un espacio en blanco (sin ningún tipo de introducción ni texto extra):
+Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño (5 Reglas de Oro inquebrantables de HIVEX):
+1. El boletín debe iniciarse exactamente con el siguiente encabezado y una brevisima presentación formal del inversor (REGLA 1):
 🚨 HIVEX Alerts - 24H
 ---
+
+[Un párrafo de presentación formal del inversor de HIVEX extremadamente corto, sobrio, directo, conciso y premium (de 1 a 2 líneas, máximo 30-40 palabras) que exponga con claridad el propósito de las alertas presentadas hoy, sirviendo como preámbulo formal al inicio absoluto de la comunicación antes de cualquier alerta.]
 
 2. Cada vídeo debe presentarse con la estructura de ALERTA premium descrita a continuación. Deja un doble salto de línea entre cada sección de la alerta para mantener un formato limpio. Está TERMINANTEMENTE PROHIBIDO anteponer etiquetas secuenciales como "ALERTA [numero]" o "ALERTA:":
 
@@ -306,7 +308,7 @@ Sigue ESTRICTAMENTE las siguientes reglas de formato y diseño:
 ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
-- El informe comienza directamente con el encabezado indicado y pasa de inmediato a las alertas. No agregues saludos, presentaciones, firmas, ni notas explicativas.
+- En la primera alerta, el título "🚨 HIVEX Alerts - 24H" debe ir seguido inmediatamente por la línea de separación "---", la breve presentación formal, y un espacio en blanco antes de la primera alerta. No agregues firmas ni notas explicativas.
 - Deja una línea en blanco completa (doble salto de línea) entre cada una de las secciones de la alerta para mantener el diseño premium y aireado.
 - PROHIBICIÓN ABSOLUTA DE ENLACES A YOUTUBE: Está terminantemente prohibido incluir enlaces a "youtube.com" o "youtu.be" en el cuerpo de texto del mensaje. El único hipervínculo que debe aparecer para el vídeo es el enlace de la cabina de HIVEX.
 - PROHIBICIÓN DE OTROS SÍMBOLOS O VIÑETAS EN ENLACES: Las líneas de "🎬 **REPRODUCTOR INTEGRADO (CABINA DE ESTUDIO)**" y "🔗" NO deben comenzar con viñetas de asteriscos, guiones ni puntos de lista. Devuelven líneas de texto independientes y limpias.
@@ -335,16 +337,18 @@ REGLAS CRÍTICAS DE MAQUETACIÓN Y SINTAXIS (CUMPLIMIENTO OBLIGATORIO):
 Aquí tienes los datos de los vídeos sincronizados para sintetizar:
 ${JSON.stringify(videoContexts, null, 2)}
 `
-    : `You are an elite financial news editor and a market strategist at HIVEX. Your task is to generate a unified English report titled exactly "🚨 HIVEX Alerts - 24H" summarizing all timely alerts from the video library from the perspective of an astute investor. Do not add formal intros or greetings.
+    : `You are an elite financial news editor and a market strategist at HIVEX. Your task is to generate a unified English report titled exactly "🚨 HIVEX Alerts - 24H" summarizing all timely alerts from the video library from the perspective of an astute and premium investor.
   
 You must focus this report strictly on:
 - Matters of significance, urgency, or unusual market flows and geopolitical/macroeconomic trends.
 - Offering a clear, assertive investment edge that benefits our channel associates.
 
-STRICTLY follow the formatting and style rules below:
-1. The newsletter must start exactly with the following header, followed by a separator line and a blank space (no other intro text or greeting):
+STRICTLY follow the formatting and style rules below (HIVEX 5 Unbending Golden Rules):
+1. The newsletter must start exactly with the following header and an extremely short formal investor presentation (RULE 1):
 🚨 HIVEX Alerts - 24H
 ---
+
+[A formal investor presentation paragraph that is extremely short, sober, direct, concise, and premium (1 to 2 lines, maximum 30-40 words) clearly setting out the purpose of the alerts presented today, serving as the formal opening of the communication before any alert.]
 
 2. Each video must be presented with the premium ALERT structure described below. Leave a double newline between each section of the alert to maintain a clean layout. DO NOT prepend sequential labels like "ALERT [number]" or "ALERT:":
 
@@ -363,7 +367,7 @@ STRICTLY follow the formatting and style rules below:
 ![{videoTitle}](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)
 
 CRITICAL LAYOUT AND SYNTAX RULES (MANDATORY COMPLIANCE):
-- The report starts directly with the header and goes immediately to the alerts. No introductions, greetings, signatures, or notes.
+- In the first alert, the main title "🚨 HIVEX Alerts - 24H" must be followed immediately by the separator line "---", the brief formal presentation, and a blank space before the first alert. No introductions, greetings, signatures, or notes.
 - Leave a full blank line (double newline) between every section of the alert to keep the design premium and airy.
 - ABSOLUTE PROHIBITION OF YOUTUBE LINKS: Do NOT include any links pointing to "youtube.com" or "youtu.be" inside the message text body. The only allowed URL is the public HIVEX dashboard URL.
 - NO BULLETS ON LINKS OR HEADERS: The lines starting with "🎬 **INTEGRATED PLAYER (STUDY CABIN)**" and "🔗" MUST NOT start with bullets, asterisks, or hyphens. They must be clean, top-level text lines.
@@ -483,7 +487,11 @@ function parseTimestampToSeconds(ts?: string): number {
 
 function generateDeterministicAlerts(videoContexts: any[], lang: string): string {
   const isSpanish = lang === "es";
-  let output = "🚨 HIVEX Alerts - 24H\n---\n\n";
+  const formalIntro = isSpanish
+    ? "Estimados asociados de HIVEX: Presentamos la selección de alertas bursátiles detectadas en las últimas horas, orientadas a identificar anomalías y optimizar posiciones tácticas."
+    : "Dear HIVEX Associates: We present the selection of market alerts detected over recent hours, aimed at pinpointing anomalies and optimizing tactical positions.";
+
+  let output = `🚨 HIVEX Alerts - 24H\n---\n\n${formalIntro}\n\n`;
 
   videoContexts.forEach((video) => {
     output += `🚨 ${video.title.toUpperCase()}\n\n`;
