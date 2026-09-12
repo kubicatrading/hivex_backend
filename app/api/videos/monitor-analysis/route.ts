@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 import { sendTelegramMessage, sendVideoNotification, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
+import { fetchAllDocumentFileUrls } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during long transcripts
@@ -236,11 +237,13 @@ async function saveVideoKnowledgeBaseServer(
         console.warn(`[Base de Conocimiento Monitor] Error al actualizar ${item.type} para ${videoDoc.title}:`, updateErr);
       } else {
         console.log(`[Base de Conocimiento Monitor] Actualizado con éxito ${item.type} para: ${videoDoc.title}`);
-        if (item.type === "knowledge_analysis") {
-          newlyAnalyzed = true;
-        }
       }
     }
+  }
+
+  // Prevent duplicate notifications: if video already notified on Telegram, skip dispatch
+  if (videoDoc.metadata?.telegram_notified) {
+    newlyAnalyzed = false;
   }
 
   if (newlyAnalyzed) {
@@ -278,6 +281,17 @@ async function saveVideoKnowledgeBaseServer(
 
       if (telegramResult.success) {
         console.log(`[Base de Conocimiento Monitor] Telegram notification dispatched successfully! ${telegramResult.simulated ? "(Simulated)" : ""}`);
+        // Persist telegram_notified: true into video metadata to prevent any future repeat notifications
+        await supabaseAdmin
+          .from("documents")
+          .update({
+            metadata: {
+              ...(videoDoc.metadata || {}),
+              telegram_notified: true,
+              telegram_notified_at: new Date().toISOString()
+            }
+          })
+          .eq("id", videoDoc.id);
       } else {
         console.warn(`[Base de Conocimiento Monitor] Telegram notification dispatch failed:`, telegramResult.error);
       }
@@ -319,27 +333,21 @@ export async function GET(request: NextRequest) {
       auth: { persistSession: false },
     });
 
-    // 3. Query all videos
+    // 3. Query recent videos (analyzing pending from newest to oldest)
     const { data: videos, error: videosError } = await supabaseAdmin
       .from("documents")
       .select("*")
       .eq("type", "video")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     if (videosError) throw videosError;
     if (!videos || videos.length === 0) {
       return NextResponse.json({ success: true, processed: [], message: "No videos found in the system." });
     }
 
-    // 4. Query existing knowledge_analysis documents to cross-reference
-    const { data: existingAnalyses, error: analysesError } = await supabaseAdmin
-      .from("documents")
-      .select("file_url")
-      .eq("type", "knowledge_analysis");
-
-    if (analysesError) throw analysesError;
-
-    const analyzedUrls = new Set<string>((existingAnalyses || []).map(doc => doc.file_url || ""));
+    // 4. Query existing knowledge_analysis documents using pagination to overcome PostgREST 1000-row limit
+    const analyzedUrls = await fetchAllDocumentFileUrls(supabaseAdmin, "knowledge_analysis");
 
     // 5. Filter videos that are pending financial analysis
     const pendingVideos = videos.filter((video: any) => {

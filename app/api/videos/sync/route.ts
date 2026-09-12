@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchAllDocumentFileUrls } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during sync operations
@@ -142,16 +143,9 @@ async function handleSync(request: Request) {
         const client = createClient(dbUrl, dbKey, {
           auth: { persistSession: false }
         });
-        const { data: existingDocs } = await client
-          .from("documents")
-          .select("file_url")
-          .eq("type", "video");
-        if (existingDocs) {
-          existingDocs.forEach((doc: any) => {
-            if (doc.file_url) existingGlobalUrls.add(doc.file_url);
-          });
-        }
-        console.log(`[Sync Pre-fetch] Found ${existingGlobalUrls.size} existing videos in the database.`);
+        const fetchedUrls = await fetchAllDocumentFileUrls(client, "video");
+        fetchedUrls.forEach(url => existingGlobalUrls.add(url));
+        console.log(`[Sync Pre-fetch] Found ${existingGlobalUrls.size} existing videos in the database (paginated).`);
       } catch (dbErr) {
         console.error("[Sync Pre-fetch] Error pre-fetching existing videos:", dbErr);
       }
@@ -317,16 +311,9 @@ async function handleSync(request: Request) {
         const supabaseAdmin = createClient(daemonSupabaseUrl, daemonServiceRoleKey, {
           auth: { persistSession: false }
         });
-        // 1. Obtener videos existentes de forma global en la videoteca compartida
-        const { data: existingDocs, error: fetchErr } = await supabaseAdmin
-          .from("documents")
-          .select("file_url")
-          .eq("type", "video");
+        // 1. Obtener videos existentes de forma global en la videoteca compartida (paginado)
+        const existingUrls = await fetchAllDocumentFileUrls(supabaseAdmin, "video");
 
-        if (fetchErr) {
-          console.error("[Daemon] Error al obtener videos existentes globales:", fetchErr);
-        } else {
-          const existingUrls = new Set((existingDocs || []).map((v) => v.file_url));
           const uniqueNewVideos: typeof syncedVideos = [];
 
           for (const fv of syncedVideos) {
@@ -374,7 +361,6 @@ async function handleSync(request: Request) {
           } else {
             console.log("[Daemon] La videoteca compartida ya está al día. 0 videos nuevos insertados.");
           }
-        }
       } catch (dbErr) {
         console.error("[Daemon] Error crítico durante la sincronización silenciosa del daemon:", dbErr);
       }

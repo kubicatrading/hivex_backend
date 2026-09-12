@@ -132,21 +132,25 @@ async function handleBackfill(request: NextRequest) {
 
     console.log("[Backfill API] Fetching documents from Supabase...");
 
-    // Fetch all relevant documents to scan for charts, ordered by created_at descending
-    const { data: allDocs, error } = await supabaseAdmin
-      .from("documents")
-      .select("id, title, type, file_url, created_at, metadata, description")
-      .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"])
-      .order("created_at", { ascending: false });
+    // Fetch all video documents with pagination to overcome 1000-row limit
+    let videos: any[] = [];
+    let page = 0;
+    while (true) {
+      const { data, error: vErr } = await supabaseAdmin
+        .from("documents")
+        .select("id, title, type, file_url, created_at, metadata, description")
+        .eq("type", "video")
+        .order("created_at", { ascending: false })
+        .range(page * 1000, (page + 1) * 1000 - 1);
 
-    if (error || !allDocs) {
-      return NextResponse.json({ success: false, error: `Failed to fetch documents: ${error?.message || "No data"}` }, { status: 500 });
+      if (vErr) {
+        return NextResponse.json({ success: false, error: `Failed to fetch videos: ${vErr.message}` }, { status: 500 });
+      }
+      if (!data || data.length === 0) break;
+      videos.push(...data);
+      if (data.length < 1000) break;
+      page++;
     }
-
-    const videos = allDocs.filter(d => d.type === "video");
-    const analyses = allDocs.filter(d => d.type === "knowledge_analysis");
-    const summaries = allDocs.filter(d => d.type === "knowledge_summary");
-    const chartsDocs = allDocs.filter(d => d.type === "knowledge_charts");
 
     const processedVideosLog: string[] = [];
     let backfilledCount = 0;
@@ -158,18 +162,8 @@ async function handleBackfill(request: NextRequest) {
       const videoUrl = video.file_url;
       if (!videoUrl) continue;
 
-      // Combine text fields to scan for chart markers
-      const matchingAnalysis = analyses.find(a => a.file_url === videoUrl);
-      const matchingSummary = summaries.find(s => s.file_url === videoUrl);
-      const matchingChartsDoc = chartsDocs.find(c => c.file_url === videoUrl);
-
       let textBody = "";
-      if (matchingAnalysis?.metadata?.informe_completo) textBody += "\n" + matchingAnalysis.metadata.informe_completo;
-      if (matchingAnalysis?.metadata?.report) textBody += "\n" + matchingAnalysis.metadata.report;
-      if (matchingSummary?.metadata?.resumen_markdown) textBody += "\n" + matchingSummary.metadata.resumen_markdown;
-      if (matchingSummary?.metadata?.summary) textBody += "\n" + matchingSummary.metadata.summary;
-      if (matchingChartsDoc?.metadata?.graficos_markdown) textBody += "\n" + matchingChartsDoc.metadata.graficos_markdown;
-      if (matchingChartsDoc?.metadata?.charts) textBody += "\n" + matchingChartsDoc.metadata.charts;
+      if (video.metadata?.transcription) textBody += video.metadata.transcription;
       if (video.description) textBody += "\n" + video.description;
 
       const parsedCharts = parseChartTimestamps(textBody);
@@ -177,12 +171,12 @@ async function handleBackfill(request: NextRequest) {
 
       const resolvedVideoId = extractYoutubeIdHelper(videoUrl, video.id) || video.id;
 
-      // Query already uploaded files in storage for this video
+      // Query already uploaded files in storage for this video (filtering out poisoned thumbnails < 15KB)
       const { data: uploadedFiles } = await supabaseAdmin.storage
         .from("snapshots")
         .list(resolvedVideoId);
 
-      const uploadedNames = new Set((uploadedFiles || []).map(f => f.name));
+      const uploadedNames = new Set((uploadedFiles || []).filter(f => (f.metadata?.size || 0) >= 15000).map(f => f.name));
       const missingCharts = parsedCharts.filter(c => !uploadedNames.has(`${c.seconds}.jpg`));
 
       if (missingCharts.length === 0) {
@@ -264,20 +258,7 @@ async function handleBackfill(request: NextRequest) {
             await runCmd(ffmpegCmd);
             success = true;
           } catch (err: any) {
-            // Serverless fallback: in environments without ffmpeg/yt-dlp, download distinct in-video HQ frame
-            if (isYoutube) {
-              try {
-                const frameIndex = chart.seconds <= 300 ? 1 : chart.seconds <= 900 ? 2 : 3;
-                const frameRes = await fetch(`https://img.youtube.com/vi/${resolvedVideoId}/hq${frameIndex}.jpg`);
-                if (frameRes.ok) {
-                  const frameBuf = Buffer.from(await frameRes.arrayBuffer());
-                  fs.writeFileSync(localPath, frameBuf);
-                  success = true;
-                }
-              } catch (frameErr: any) {
-                console.error(`[Backfill API] Error in serverless fallback for ${chart.seconds}s:`, frameErr?.message || frameErr);
-              }
-            }
+            console.warn(`[Backfill API] ffmpeg extraction failed for ${chart.seconds}s:`, err?.message || err);
           }
         }
 

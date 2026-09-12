@@ -128,7 +128,7 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
               }
             },
             {
-              text: "Analyze this video frame screenshot. Determine if this image displays a data representation, such as a bar chart, line chart, pie chart, stock market candles, financial graph, market trends, spreadsheet / Excel table, numeric dashboard, scatter plot, or any mathematical/statistical representation of numbers. Respond with 'YES' if it is a graph/chart/table of data. Respond with 'NO' if it shows a person/narrator, scenery, generic slide of text without numbers/charts, movie scene, or any other non-data visual. Your response must be exactly 'YES' or 'NO'."
+              text: "Analyze this video frame screenshot. Determine if this image displays ANY data representation, stock chart, candlestick chart, financial graph, market trend graph, statistical visual, numeric table, balance sheet, or economic graphic (EVEN IF a presenter/speaker is shown standing next to it, pointing at it, or in a picture-in-picture corner). Respond with 'YES' if a chart, graph, or data table is visible in the frame. Respond with 'NO' ONLY if the image is purely a full-screen shot of a person speaking, a movie clip, scenery, or a plain title slide with NO charts or numbers whatsoever. Your response must be exactly 'YES' or 'NO'."
             }
           ]
         }

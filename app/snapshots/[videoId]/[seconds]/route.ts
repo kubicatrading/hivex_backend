@@ -283,25 +283,20 @@ export async function GET(
         await execAsync(`"${ytdlpPath}" --version`);
         await execAsync(`"${ffmpegPath}" -version`);
       } catch (err: any) {
-        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Using high-resolution in-video frame fallback.`);
+        console.warn(`[Snapshots Route] Dynamic extraction tools not configured or failed execution on this host. Using temporary in-video frame fallback (not persisted to storage).`);
         const frameIndex = secondsInt <= 300 ? 1 : secondsInt <= 900 ? 2 : 3;
         const hqFrameUrl = `https://img.youtube.com/vi/${resolvedVideoId}/hq${frameIndex}.jpg`;
         try {
           const frameRes = await fetch(hqFrameUrl);
           if (frameRes.ok) {
             const frameBuf = Buffer.from(await frameRes.arrayBuffer());
-            if (supabaseUrl && supabaseKey) {
-              const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
-              supabase.storage
-                .from("snapshots")
-                .upload(`${resolvedVideoId}/${fileKey}`, frameBuf, { contentType: "image/jpeg", upsert: true })
-                .catch(() => {});
-            }
+            // ANTI-POISONING: Never upload generic YouTube thumbnail fallbacks to Supabase Storage.
+            // Return temporary fallback directly with no-cache so future authentic chart extractions will immediately show.
             return new NextResponse(frameBuf, {
               status: 200,
               headers: {
                 "Content-Type": "image/jpeg",
-                "Cache-Control": "public, max-age=31536000, immutable",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
               },
             });
           }

@@ -169,7 +169,12 @@ async function run() {
         console.error(`[Backfill Snapshots] Error listing storage files for video ${resolvedVideoId}:`, storageError.message);
       }
 
-      const existingNames = new Set((storageFiles || []).map((f) => f.name));
+      const existingNames = new Set(
+        (storageFiles || [])
+          .filter((f) => (f.metadata?.size || 0) >= 15000)
+          .map((f) => f.name)
+      );
+      const hasCover = (storageFiles || []).some((f) => f.name === "0.jpg");
       const missingCharts = parsedCharts.filter(c => !existingNames.has(`${c.seconds}.jpg`));
 
       if (missingCharts.length > 0) {
@@ -177,7 +182,7 @@ async function run() {
           video,
           missingCharts,
           parsedCharts,
-          hasCover: existingNames.has("0.jpg")
+          hasCover
         });
       }
     } catch (e) {
