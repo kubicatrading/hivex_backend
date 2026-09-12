@@ -81,11 +81,13 @@ export async function POST(request: NextRequest) {
         const transcriptionInstruction = "Por favor, transcribe exactamente lo que dice este mensaje de voz en español, palabra por palabra. Tu respuesta debe ser ÚNICAMENTE la transcripción literal sin comentarios, explicaciones, saludos ni notas.";
 
         const attemptTranscriptionUrls = [
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         ];
 
@@ -552,6 +554,14 @@ Tienes dos propósitos de servicio principales:
 
     const attempts = [
       {
+        name: "Gemini 3.8 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
+      },
+      {
+        name: "Gemini 3.7 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+      },
+      {
         name: "Gemini 3.6 Flash",
         url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
       },
@@ -569,7 +579,7 @@ Tienes dos propósitos de servicio principales:
       },
       {
         name: "Gemini 2.0 Flash",
-        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
       },
       {
         name: "Gemini 1.5 Flash",

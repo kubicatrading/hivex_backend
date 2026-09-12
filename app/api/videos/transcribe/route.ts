@@ -287,7 +287,7 @@ export async function transcribeVideoCore(params: {
   apiKey?: string;
   googleToken?: string | null;
 }) {
-  const { videoId, fileUrl, title, description = "", duration = "12:00", apiKey = process.env.GEMINI_API_KEY, googleToken = null } = params;
+  let { videoId, fileUrl, title, description = "", duration = "12:00", apiKey = process.env.GEMINI_API_KEY, googleToken = null } = params;
 
   if (!googleToken && !apiKey) {
     throw new Error("Falta la autenticación de Gemini. Por favor, configura la clave GEMINI_API_KEY en tu archivo .env.local para continuar.");
@@ -301,7 +301,7 @@ export async function transcribeVideoCore(params: {
     return generateNonSimulatedGenericResponse(title, description, duration);
   }
 
-  const intervalText = getRecommendedIntervalText(duration);
+  let intervalText = getRecommendedIntervalText(duration);
   let promptText = "";
   const SYSTEM_INSTRUCTION_ANALYSIS_ONLY = `You are the Google Gemini model, an elite financial analyst and content summarizer. Your task is to process a raw, auto-generated transcript of a YouTube video and generate a JSON response with exactly one property: "analysis" (containing the objective summary, detected charts, and the investment analysis report).`;
   let currentSystemInstruction = SYSTEM_INSTRUCTION_ANALYSIS_ONLY;
@@ -358,6 +358,22 @@ export async function transcribeVideoCore(params: {
     }
 
     if (transcriptLines && transcriptLines.length > 0) {
+      // Extract authentic duration from subtitles to guarantee 100% summary coverage
+      const lastLine = transcriptLines[transcriptLines.length - 1];
+      const totalSecs = Math.ceil(((lastLine.offset || 0) + (lastLine.duration || 0)) / 1000);
+      if (totalSecs > 0) {
+        const h = Math.floor(totalSecs / 3600);
+        const m = Math.floor((totalSecs % 3600) / 60);
+        const s = Math.floor(totalSecs % 60);
+        const detectedDurationStr = h > 0
+          ? `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
+          : `${m}:${s.toString().padStart(2, "0")}`;
+
+        console.log(`[Transcript] Detected authentic duration from subtitles for ${actualYtId}: ${detectedDurationStr} (${totalSecs}s, previous: "${duration}")`);
+        duration = detectedDurationStr;
+        intervalText = getRecommendedIntervalText(duration);
+      }
+
       // Format each line with its starting timestamp [MM:SS] or [HH:MM:SS] so that Gemini gets accurate timing information
       rawTranscriptText = transcriptLines.map(line => {
         const totalSeconds = Math.floor((line.offset || 0) / 1000);
@@ -467,7 +483,7 @@ INSTRUCTIONS FOR THE "analysis" SECTIONS:
 - CRITICAL FINANCIAL CREATOR RULE: Financial educational creators (such as Andrei Jikh, Coin Bureau, George Gammon, etc.) constantly display static graphical overlays, stat boxes, financial balance sheet cards, regulatory timelines, and data comparison tables whenever discussing numbers, dollar amounts, debt figures, reserve balances, interest rates, or banking initiatives. You MUST proactively identify all such moments as Detected Charts & Visualizations. DO NOT default to 'No charts were detected' if the transcript discusses numerical figures, sovereign debt, institutional balances, or economic data.
 - CRITICAL DETECTION RULE: If during the video precise percentages, numbers, or statistical data are mentioned sequentially (for example, TARP bailouts, Fed balance sheet sizes, stablecoin reserves, transaction volumes, yield figures, spreads, interest rates, or debt projections), assume with total confidence that at that moment a visual card, stat box, or static data chart was projected on screen. You must identify these moments as charts or data visualization resources grounded in the actual transcript.
 - GOLDEN RULE OF TRUTHFULNESS & NUMERICAL PRESERVATION: Extract only charts and visualizations that stem realistically and directly from the figures and topics detailed in the video. It is strictly forbidden to hallucinate financial assets, percentages, or specific timestamps that do not appear in the actual transcript. You must report all price levels and metrics exactly as they are detailed in the transcript (e.g., if the transcript says $4,100, do not alter it).
-- For each detected chart, add a section with a chronological heading showing its start and end range like: #### [MM:SS - MM:SS] or #### [HH:MM:SS - HH:MM:SS] **Descriptive Title of the Chart** showing precisely when the chart starts and ends in the video.
+- For each detected chart, add a section with a chronological heading showing its start and end range like: #### [MM:SS - MM:SS] or #### [HH:MM:SS - HH:MM:SS] **Descriptive Title of the Chart** showing when the chart starts and when the discussion or explanation of that chart concludes in the video (each chart segment should typically span 30 to 90 seconds covering the creator's full explanation).
 - Under each heading, write a bulleted list (-) describing the key metrics, data, or axes shown.
 - Immediately after the bullets, add a single line in italics: *Legend: [Brief summary explaining the key takeaway at the bottom of the chart].*
 - Only if the video is strictly an informal conversational vlog completely devoid of any numerical metrics, percentages, dates, or financial data, write exactly: *No charts were detected in this video.*
@@ -495,6 +511,16 @@ ${rawTranscriptText}`;
 
   const attempts = [
     {
+      name: "Google AI Studio Gemini 3.8 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`
+    },
+    {
+      name: "Google AI Studio Gemini 3.7 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent`
+    },
+    {
       name: "Google AI Studio Gemini 3.6 Flash (v1beta)",
       type: "google-ai",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent`
@@ -517,7 +543,7 @@ ${rawTranscriptText}`;
     {
       name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
       type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
     },
     {
       name: "Google AI Studio Gemini 1.5 Flash (v1beta)",
@@ -655,7 +681,8 @@ ${rawTranscriptText}`;
     }
     return {
       transcription: finalOutput,
-      modelUsed: finalModelName
+      modelUsed: finalModelName,
+      duration
     };
   } else {
     throw new Error(
@@ -897,7 +924,8 @@ async function syncVideoAndKnowledgeBaseServer(
   fileUrl: string,
   title: string,
   transcriptionText: string,
-  modelUsed: string
+  modelUsed: string,
+  detectedDuration?: string
 ) {
   try {
     console.log(`[Transcribe API Server Sync] Buscando documento de vídeo para: ${title}...`);
@@ -920,7 +948,8 @@ async function syncVideoAndKnowledgeBaseServer(
       const updatedMetadata = {
         ...(videoDoc.metadata || {}),
         transcription: transcriptionText,
-        transcription_model: modelUsed || "Google Vertex AI Gemini 1.5 Pro"
+        transcription_model: modelUsed || "Google AI Studio Gemini 3.8 Flash",
+        ...(detectedDuration && detectedDuration !== "15:00" ? { duration: detectedDuration } : {})
       };
 
       const { error: updateErr } = await supabaseAdmin
@@ -931,7 +960,7 @@ async function syncVideoAndKnowledgeBaseServer(
       if (updateErr) {
         console.error("[Transcribe API Server Sync] Error al actualizar metadatos del vídeo:", updateErr);
       } else {
-        console.log(`[Transcribe API Server Sync] Metadatos del vídeo ${videoDoc.id} actualizados correctamente.`);
+        console.log(`[Transcribe API Server Sync] Metadatos del vídeo ${videoDoc.id} actualizados correctamente (duración: ${updatedMetadata.duration || "sin cambio"}).`);
       }
 
       // Sincronizar las cuatro tarjetas de conocimiento bajo ADMIN_ID
@@ -1006,17 +1035,20 @@ export async function POST(request: Request) {
 
       // Sincronizar en la base de datos en segundo plano bajo ADMIN_ID
       if (supabaseAdmin) {
-        syncVideoAndKnowledgeBaseServer(supabaseAdmin, fileUrl, title, result.transcription, result.modelUsed).catch(err => {
+        const finalDuration = ("duration" in result ? (result as any).duration : undefined) || duration;
+        syncVideoAndKnowledgeBaseServer(supabaseAdmin, fileUrl, title, result.transcription, result.modelUsed, finalDuration).catch(err => {
           console.error("[Transcribe API Server Sync] Error sincronizando nueva transcripción:", err);
         });
       }
     }
 
+    const finalDuration = ("duration" in result ? (result as any).duration : undefined) || duration;
+
     return NextResponse.json({
       success: true,
       videoId,
       title,
-      duration,
+      duration: finalDuration,
       transcription: result.transcription,
       modelUsed: result.modelUsed,
       status: "completado"

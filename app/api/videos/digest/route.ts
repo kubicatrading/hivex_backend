@@ -411,6 +411,14 @@ ${JSON.stringify(videoContexts, null, 2)}
 
   const attempts = [
     {
+      name: "Google AI Studio Gemini 3.8 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
+    },
+    {
+      name: "Google AI Studio Gemini 3.7 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=${apiKey}`,
+    },
+    {
       name: "Google AI Studio Gemini 3.6 Flash (v1beta)",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
     },

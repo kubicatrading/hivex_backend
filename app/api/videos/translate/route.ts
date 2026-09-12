@@ -68,6 +68,16 @@ async function translateSingleChunk(
 
   const attempts = [
     {
+      name: "Google AI Studio Gemini 3.8 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`
+    },
+    {
+      name: "Google AI Studio Gemini 3.7 Flash (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent`
+    },
+    {
       name: "Google AI Studio Gemini 3.6 Flash (v1beta)",
       type: "google-ai",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent`
@@ -90,7 +100,7 @@ async function translateSingleChunk(
     {
       name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
       type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
     },
     {
       name: "Google AI Studio Gemini 1.5 Flash (v1beta)",

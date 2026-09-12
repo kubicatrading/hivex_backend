@@ -2850,7 +2850,7 @@ export default function NewsPage() {
                   </button>
                   <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900/80 border border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
                     <FileText className="w-3.5 h-3.5" />
-                    {selectedIssue.metadata?.page_count || 158} {currTrans.pagesShort.toUpperCase()}
+                    {selectedIssue.metadata?.page_count || (selectedIssue.metadata?.slug?.includes("18-august") ? 174 : selectedIssue.metadata?.slug?.includes("11-august") || selectedIssue.metadata?.slug?.includes("25-august") ? 148 : 158)} {currTrans.pagesShort.toUpperCase()}
                   </div>
                 </div>
               </div>
@@ -2945,7 +2945,7 @@ export default function NewsPage() {
                         />
 
                         <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded bg-black/80 text-[7.5px] font-bold text-zinc-300 font-mono tracking-wide">
-                          {issue.metadata?.page_count || 158} {currTrans.pagesShort}
+                          {issue.metadata?.page_count || (issue.metadata?.slug?.includes("18-august") ? 174 : issue.metadata?.slug?.includes("11-august") || issue.metadata?.slug?.includes("25-august") ? 148 : 158)} {currTrans.pagesShort}
                         </span>
                       </div>
 

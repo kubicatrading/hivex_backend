@@ -411,7 +411,48 @@ function formatSecondsToDuration(totalSeconds: number): string {
 // Helper to fetch and extract actual YouTube video duration
 async function fetchRealYoutubeDuration(videoId: string): Promise<{ duration: number; isLive: boolean }> {
   try {
-    // 1. Primary: Query YouTube Internal Player API (100% accurate lengthSeconds)
+    // 1. Primary: Query Supadata API if configured (rotates proxies and prevents Vercel IP blocking)
+    if (process.env.SUPADATA_API_KEY) {
+      try {
+        const supadataRes = await fetch(`https://api.supadata.ai/v1/youtube/video?videoId=${videoId}`, {
+          headers: {
+            "x-api-key": process.env.SUPADATA_API_KEY
+          }
+        });
+        if (supadataRes.ok) {
+          const videoMeta = await supadataRes.json();
+          const durationSecs = Number(videoMeta?.duration ?? videoMeta?.durationSeconds ?? 0);
+          const isLive = Boolean(videoMeta?.isLive || videoMeta?.isLiveContent);
+          if (durationSecs > 0) {
+            console.log(`[Sync] Supadata retrieved authentic duration for ${videoId}: ${durationSecs}s (isLive: ${isLive})`);
+            return { duration: durationSecs, isLive };
+          }
+        } else {
+          // Secondary Supadata check: fetch transcript and get duration from last segment
+          const transcriptRes = await fetch(`https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&mode=auto`, {
+            headers: {
+              "x-api-key": process.env.SUPADATA_API_KEY
+            }
+          });
+          if (transcriptRes.ok) {
+            const transcriptData = await transcriptRes.json();
+            const content = Array.isArray(transcriptData) ? transcriptData : transcriptData?.content;
+            if (Array.isArray(content) && content.length > 0) {
+              const lastLine = content[content.length - 1];
+              const totalSecs = Math.ceil(((lastLine.offset || 0) + (lastLine.duration || 0)) / 1000);
+              if (totalSecs > 0) {
+                console.log(`[Sync] Supadata transcript retrieved authentic duration for ${videoId}: ${totalSecs}s`);
+                return { duration: totalSecs, isLive: false };
+              }
+            }
+          }
+        }
+      } catch (supadataErr: any) {
+        console.warn(`[Sync] Supadata duration check failed for ${videoId}:`, supadataErr?.message);
+      }
+    }
+
+    // 2. Secondary: Query YouTube Internal Player API (direct fallback)
     const playerRes = await fetch("https://www.youtube.com/youtubei/v1/player", {
       method: "POST",
       headers: {

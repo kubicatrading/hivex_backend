@@ -746,7 +746,9 @@ async function handleSync(request: Request) {
           cover_url: finalCoverUrl,
           published_at: existingMeta.published_at || issueData.date.toISOString(),
           summary: newSummary || existingMeta.summary,
-          page_count: existingMeta.page_count !== undefined ? existingMeta.page_count : 158,
+          page_count: existingMeta.page_count !== undefined 
+            ? existingMeta.page_count 
+            : (issueSlug.includes("18-august") ? 174 : issueSlug.includes("11-august") || issueSlug.includes("25-august") ? 148 : 158),
           is_favorite: existingMeta.is_favorite !== undefined ? existingMeta.is_favorite : false,
           author: existingMeta.author || "Gerald Celente / Trends Journal"
         };

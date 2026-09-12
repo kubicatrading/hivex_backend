@@ -191,6 +191,14 @@ ${useInternet ? `
 
     const attempts = [
       {
+        name: "Gemini 3.8 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
+      },
+      {
+        name: "Gemini 3.7 Flash",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+      },
+      {
         name: "Gemini 3.6 Flash",
         url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
       },
@@ -208,7 +216,7 @@ ${useInternet ? `
       },
       {
         name: "Gemini 2.0 Flash",
-        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
       },
       {
         name: "Gemini 1.5 Flash",

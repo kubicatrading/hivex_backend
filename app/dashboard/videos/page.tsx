@@ -1233,6 +1233,10 @@ function parseChartsMarkdown(content: string): ParsedChart[] {
       } else if (partsEnd.length === 2) {
         endSeconds = partsEnd[0] * 60 + partsEnd[1];
       }
+      // Guarantee adequate duration for chart explanation (minimum 45 seconds)
+      if (endSeconds !== undefined && endSeconds - seconds < 45) {
+        endSeconds = seconds + 45;
+      }
     } else {
       const singleMatch = headerLine.match(timestampSingleRegex);
       if (!singleMatch) continue;
@@ -1467,8 +1471,11 @@ function YouTubeSnapshotPlayer({
           const state = typeof stateVal === "number" ? stateVal : undefined;
           const currentTime = data.info?.currentTime;
 
+          // Avoid premature cutoffs on short chart detections: ensure at least 45 seconds of continuous playback
+          const effectiveEnd = (endSeconds && endSeconds - targetTime >= 45) ? endSeconds : undefined;
+
           // Check if we reached the end limit based on currentTime
-          if (typeof currentTime === "number" && endSeconds && currentTime >= endSeconds - 0.2) {
+          if (typeof currentTime === "number" && effectiveEnd && currentTime >= effectiveEnd - 0.2) {
             triggerEnd();
             return;
           }
@@ -1596,8 +1603,9 @@ function YouTubeSnapshotPlayer({
     return () => clearInterval(interval);
   }, [ytId, targetTime, endSeconds, sendListeningPing]);
 
+  const effectiveEnd = (endSeconds && endSeconds - targetTime >= 45) ? endSeconds : undefined;
   const originParam = typeof window !== "undefined" ? `&origin=${encodeURIComponent(window.location.origin)}` : "";
-  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${endSeconds ? `&end=${Math.floor(endSeconds)}` : ""}&autoplay=1&mute=1&enablejsapi=1${originParam}&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
+  const srcUrl = `https://www.youtube.com/embed/${ytId}?start=${targetTime}${effectiveEnd ? `&end=${Math.floor(effectiveEnd)}` : ""}&autoplay=1&mute=1&enablejsapi=1${originParam}&controls=1&modestbranding=1&rel=0&showinfo=0&iv_load_policy=3`;
 
   const showLoader = !isPausedAtTarget && !isPlaying;
 
@@ -1686,36 +1694,36 @@ function SmartVideoSnapshot({
     const resolvedFolder = isYt ? (ytId || videoId) : videoId;
 
     const testImg = new Image();
-    // Direct CDN path as the first, fast try
+    // 1. Primary: Authenticated backend proxy route (serves directly from storage using service role key, immune to RLS 403)
+    const localPath = `/snapshots/${resolvedFolder}/${targetTime}.jpg`;
+    // 2. Direct CDN path as secondary try
     const supabasePath = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/snapshots/${resolvedFolder}/${targetTime}.jpg`;
-    // Backend proxy route as the secure self-healing fallback (which resolves closest match via service role bypass)
-    const localPath = `/snapshots/${videoId}/${targetTime}.jpg`;
     const ytThumbnail = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "";
 
     testImg.onload = () => {
-      setImgUrl(supabasePath);
+      setImgUrl(localPath);
       setLoading(false);
     };
 
     testImg.onerror = () => {
-      // Fallback 1: Try local backend proxy path (self-healing/closest match resolved in server-side API)
-      const localImg = new Image();
-      localImg.onload = () => {
-        setImgUrl(localPath);
+      // Fallback 1: Try direct Supabase storage path
+      const directImg = new Image();
+      directImg.onload = () => {
+        setImgUrl(supabasePath);
         setLoading(false);
       };
       
-      localImg.onerror = () => {
+      directImg.onerror = () => {
         // Fallback 2: Try YouTube high-quality thumbnail
         setImgUrl(ytThumbnail || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80");
         setError(true);
         setLoading(false);
       };
       
-      localImg.src = localPath;
+      directImg.src = supabasePath;
     };
 
-    testImg.src = supabasePath;
+    testImg.src = localPath;
   }, [videoId, fileUrl, targetTime, isYt]);
 
   const loadingText = {

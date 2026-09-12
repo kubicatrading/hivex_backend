@@ -61,6 +61,8 @@ export async function GET(
     return new NextResponse("Missing parameters", { status: 400 });
   }
 
+  try {
+
   // Clean up seconds parameter:
   // If it's a number like "83", make it "83.jpg"
   // If it's "83.jpg", keep it as "83.jpg"
@@ -123,24 +125,30 @@ export async function GET(
   const publicStorageUrl = `${supabaseUrl}/storage/v1/object/public/snapshots/${resolvedVideoId}/${fileKey}`;
 
   // Fetch the image from Supabase Storage and proxy it
-  try {
+    const supabase = (supabaseUrl && supabaseKey)
+      ? createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } })
+      : null;
+
     // SPECIAL HANDLING FOR 0.jpg (Video Cover / Portada)
     if (secondsInt === 0) {
-      const response = await fetch(publicStorageUrl);
-      if (response.ok) {
-        const buffer = await response.arrayBuffer();
-        // Ensure cover is authentic high quality widescreen HD, not a video frame fallback or tiny thumbnail
-        if (buffer.byteLength >= 35000) {
-          const contentType = response.headers.get("Content-Type") || "image/jpeg";
-          return new NextResponse(buffer, {
-            status: 200,
-            headers: {
-              "Content-Type": contentType,
-              "Cache-Control": "public, max-age=31536000, immutable",
-            },
-          });
+      if (supabase) {
+        const { data: coverData, error: coverDownloadError } = await supabase.storage
+          .from("snapshots")
+          .download(`${resolvedVideoId}/0.jpg`);
+
+        if (!coverDownloadError && coverData) {
+          const buffer = Buffer.from(await coverData.arrayBuffer());
+          if (buffer.byteLength >= 35000) {
+            return new NextResponse(buffer, {
+              status: 200,
+              headers: {
+                "Content-Type": "image/jpeg",
+                "Cache-Control": "public, max-age=31536000, immutable",
+              },
+            });
+          }
+          console.warn(`[Snapshots Route] 0.jpg in storage for ${resolvedVideoId} may be low-res (${buffer.byteLength} bytes). Checking maxresdefault HD cover...`);
         }
-        console.warn(`[Snapshots Route] 0.jpg in storage for ${resolvedVideoId} may be low-res or frame fallback (${buffer.byteLength} bytes). Checking maxresdefault HD cover...`);
       }
 
       // Fetch official widescreen HD cover (maxresdefault.jpg) or fallback to hqdefault.jpg
@@ -151,10 +159,7 @@ export async function GET(
 
       if (coverRes.ok) {
         const coverBuffer = Buffer.from(await coverRes.arrayBuffer());
-        if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey, {
-            auth: { persistSession: false },
-          });
+        if (supabase) {
           supabase.storage
             .from("snapshots")
             .upload(`${resolvedVideoId}/0.jpg`, coverBuffer, {
@@ -175,41 +180,28 @@ export async function GET(
     }
 
     // CHART SNAPSHOTS (secondsInt > 0)
-    const response = await fetch(publicStorageUrl);
-    if (response.ok) {
-      const contentType = response.headers.get("Content-Type") || "image/jpeg";
-      const buffer = await response.arrayBuffer();
+    // 1. Direct authenticated download from Supabase Storage
+    if (supabase) {
+      const { data: snapshotData, error: snapDownloadError } = await supabase.storage
+        .from("snapshots")
+        .download(`${resolvedVideoId}/${fileKey}`);
 
-      return new NextResponse(buffer, {
-        status: 200,
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "public, max-age=31536000, immutable",
-        },
-      });
-    }
-
-    let isNotFound = response.status === 404;
-    if (response.status === 400) {
-      try {
-        const json = await response.clone().json();
-        if (json && (json.statusCode === "404" || json.statusCode === 404 || json.error === "not_found" || json.message === "Object not found")) {
-          isNotFound = true;
-        }
-      } catch (e) {
-        // Ignore JSON parse errors
+      if (!snapDownloadError && snapshotData) {
+        const buffer = Buffer.from(await snapshotData.arrayBuffer());
+        return new NextResponse(buffer, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "public, max-age=31536000, immutable",
+          },
+        });
       }
-    }
 
-    if (isNotFound) {
       console.log(`[Snapshots Route] Snapshot ${fileKey} not found in storage. Checking for closest available match...`);
 
-      // Try closest available match resolution in the backend (using admin bypass listing)
+      // 2. Try closest available match resolution in storage (using admin bypass listing)
       // STRICT RULE: Only match real chart frames (s > 0). NEVER match 0.jpg!
       try {
-        const supabase = createClient(supabaseUrl, supabaseKey, {
-          auth: { persistSession: false },
-        });
         const { data: fileList, error: listErr } = await supabase.storage
           .from("snapshots")
           .list(resolvedVideoId, { limit: 100 });
@@ -234,16 +226,16 @@ export async function GET(
             if (minDiff <= 60) {
               const resolvedFileKey = `${closest}.jpg`;
               console.log(`[Snapshots Route] Resolved shifted timestamp ${secondsInt} to closest match ${resolvedFileKey}`);
-              const closestStorageUrl = `${supabaseUrl}/storage/v1/object/public/snapshots/${resolvedVideoId}/${resolvedFileKey}`;
-              const closestResponse = await fetch(closestStorageUrl);
-              if (closestResponse.ok) {
-                const contentType = closestResponse.headers.get("Content-Type") || "image/jpeg";
-                const buffer = await closestResponse.arrayBuffer();
+              const { data: closestData, error: closestErr } = await supabase.storage
+                .from("snapshots")
+                .download(`${resolvedVideoId}/${resolvedFileKey}`);
 
+              if (!closestErr && closestData) {
+                const buffer = Buffer.from(await closestData.arrayBuffer());
                 return new NextResponse(buffer, {
                   status: 200,
                   headers: {
-                    "Content-Type": contentType,
+                    "Content-Type": "image/jpeg",
                     "Cache-Control": "public, max-age=31536000, immutable",
                   },
                 });
@@ -254,6 +246,7 @@ export async function GET(
       } catch (matchErr) {
         console.error("[Snapshots Route] Closest match resolution crash:", matchErr);
       }
+    }
 
       console.log(`[Snapshots Route] Dynamic extraction fallback required for ${fileKey}...`);
 
@@ -398,22 +391,7 @@ export async function GET(
           "Cache-Control": "public, max-age=31536000, immutable",
         },
       });
-    }
 
-    let isNotFoundFinal = response.status === 404;
-    if (response.status === 400) {
-      try {
-        const json = await response.clone().json();
-        if (json && (json.statusCode === "404" || json.statusCode === 404 || json.error === "not_found" || json.message === "Object not found")) {
-          isNotFoundFinal = true;
-        }
-      } catch (e) {}
-    }
-    const finalStatus = isNotFoundFinal ? 404 : response.status;
-    const finalStatusText = isNotFoundFinal ? "Not Found" : response.statusText;
-    return new NextResponse(`Failed to fetch image from storage: ${finalStatusText}`, { status: finalStatus });
-  } catch (error) {
-    console.error("Error proxying snapshot:", error);
     const parsedSec = parseInt(fileKey.replace(".jpg", ""), 10);
     const secNum = isNaN(parsedSec) ? 0 : parsedSec;
     if (secNum > 0) {
@@ -421,5 +399,14 @@ export async function GET(
       return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/hq${frameIndex}.jpg`, 302);
     }
     return NextResponse.redirect(`https://img.youtube.com/vi/${resolvedVideoId}/maxresdefault.jpg`, 302);
+  } catch (error) {
+    console.error("Error proxying snapshot:", error);
+    let parsedSec = parseInt(seconds.replace(".jpg", ""), 10);
+    const secNum = isNaN(parsedSec) ? 0 : parsedSec;
+    if (secNum > 0) {
+      const frameIndex = secNum <= 300 ? 1 : secNum <= 900 ? 2 : 3;
+      return NextResponse.redirect(`https://img.youtube.com/vi/${videoId}/hq${frameIndex}.jpg`, 302);
+    }
+    return NextResponse.redirect(`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`, 302);
   }
 }
