@@ -4868,7 +4868,15 @@ export default function VideosPage() {
 
           {/* 2. THREE COLLAPSIBLE STUDY CABIN SECTIONS */}
           {(() => {
-            const { transcription, summary, charts, report } = splitTranscription(transcriptionText);
+            const splitCurrent = splitTranscription(transcriptionText);
+            const splitOriginal = splitTranscription(originalTranscriptionText);
+            
+            const transcription = splitCurrent.transcription || splitOriginal.transcription;
+            const summary = splitCurrent.summary || splitOriginal.summary;
+            const charts = (splitCurrent.charts && !splitCurrent.charts.includes("No charts were detected") && !splitCurrent.charts.includes("No se detectaron"))
+              ? splitCurrent.charts
+              : (splitOriginal.charts || splitCurrent.charts);
+            const report = splitCurrent.report || splitOriginal.report;
             
             return (
               <div className="space-y-6">
