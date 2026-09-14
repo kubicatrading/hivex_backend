@@ -2059,6 +2059,15 @@ export default function VideosPage() {
   const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
   const preloadGenerationRef = useRef<number>(0);
 
+  // Track loaded/in-flight batches per track (summary and report) to avoid duplicate loops
+  const loadedBatchesRef = useRef<{
+    summary: Set<number>;
+    report: Set<number>;
+  }>({
+    summary: new Set<number>(),
+    report: new Set<number>()
+  });
+
   const clearPreloadedBlobUrls = () => {
     Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
       try {
@@ -2077,6 +2086,9 @@ export default function VideosPage() {
       }
     });
     reportPreloadedBlobUrlsRef.current = {};
+
+    loadedBatchesRef.current.summary.clear();
+    loadedBatchesRef.current.report.clear();
   };
 
   const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string, isReport = false) => {
@@ -2101,28 +2113,46 @@ export default function VideosPage() {
     }
   };
 
-  const preloadAllSentencesSequentially = async (
+  const preloadBatchSequentially = async (
+    batchNumber: number, // 1, 2, or 3
     chunks: string[],
     voiceName: string,
     isReport: boolean,
     generation: number,
-    startFromIndex = 0
+    startFromIndex?: number
   ) => {
-    // We preload in sequence so we don't flood the network
-    for (let i = startFromIndex; i < chunks.length; i++) {
+    if (chunks.length === 0) return;
+    const trackKey = isReport ? 'report' : 'summary';
+
+    // Mark batch as queued/in-flight
+    loadedBatchesRef.current[trackKey].add(batchNumber);
+
+    const batchSize = Math.max(1, Math.ceil(chunks.length / 3));
+    const batchStartIndex = (batchNumber - 1) * batchSize;
+    const batchEndIndex = Math.min(chunks.length, batchNumber === 3 ? chunks.length : batchNumber * batchSize);
+
+    const actualStart = typeof startFromIndex === 'number' && startFromIndex >= batchStartIndex && startFromIndex < batchEndIndex
+      ? startFromIndex
+      : batchStartIndex;
+
+    console.log(`[Gemini Audio Preloader] Starting Batch ${batchNumber}/3 for ${trackKey} (sentences ${actualStart}..${batchEndIndex - 1}, gen ${generation})`);
+
+    for (let i = actualStart; i < batchEndIndex; i++) {
       if (generation !== preloadGenerationRef.current) {
-        console.log(`[Gemini Audio Preloader] Sequential preloader cancelled for generation ${generation} (current is ${preloadGenerationRef.current})`);
+        console.log(`[Gemini Audio Preloader] Batch ${batchNumber} cancelled for generation ${generation}`);
         break;
       }
-      
+
       const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
       if (blobRef.current[i]) continue; // Already preloaded!
 
       await preloadSentenceBlob(i, chunks, voiceName, isReport);
-      
-      // Small sleep of 100ms between requests to be gentle on the browser/network
-      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Ritmo suave: 350ms de pausa entre peticiones para no saturar la red ni activar el WAF
+      await new Promise((resolve) => setTimeout(resolve, 350));
     }
+
+    console.log(`[Gemini Audio Preloader] Finished Batch ${batchNumber}/3 for ${trackKey}`);
   };
 
   const startBackgroundPreloadingForActiveTrack = (specificIndex?: number) => {
@@ -2133,11 +2163,26 @@ export default function VideosPage() {
 
     const isReport = activeAudioModeRef.current === 'report';
     const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+    const trackKey = isReport ? 'report' : 'summary';
 
     if (chunks.length > 0) {
       const startIndex = typeof specificIndex === 'number' ? specificIndex : 0;
-      console.log(`[Gemini Audio Preloader] Prioritizing preloading for active track: ${isReport ? 'report' : 'summary'} starting from sentence ${startIndex} (generation ${gen})`);
-      preloadAllSentencesSequentially(chunks, voiceName, isReport, gen, startIndex);
+      const batchSize = Math.max(1, Math.ceil(chunks.length / 3));
+
+      let targetBatch = 1;
+      if (startIndex >= 2 * batchSize) {
+        targetBatch = 3;
+      } else if (startIndex >= batchSize) {
+        targetBatch = 2;
+      }
+
+      // Reset subsequent batches so they can re-trigger organically as playback advances
+      loadedBatchesRef.current[trackKey].delete(targetBatch);
+      if (targetBatch < 3) loadedBatchesRef.current[trackKey].delete(3);
+      if (targetBatch < 2) loadedBatchesRef.current[trackKey].delete(2);
+
+      console.log(`[Gemini Audio Preloader] Prioritizing Batch ${targetBatch}/3 for active track: ${trackKey} starting from sentence ${startIndex} (generation ${gen})`);
+      preloadBatchSequentially(targetBatch, chunks, voiceName, isReport, gen, startIndex);
     }
   };
 
@@ -2254,6 +2299,29 @@ export default function VideosPage() {
       }
     } else {
       console.log(`[Gemini Audio Queue] Using preloaded local Blob URL for sentence ${index} (Zero network request!)`);
+    }
+
+    // Lookahead batch trigger: ensure the next 1/3 batch is downloaded well before reaching it
+    if (chunks.length > 0) {
+      const batchSize = Math.max(1, Math.ceil(chunks.length / 3));
+      const trackKey = isReport ? 'report' : 'summary';
+      const gen = preloadGenerationRef.current;
+
+      // When reaching half of Batch 1 -> proactively start Batch 2
+      if (index >= Math.floor(batchSize / 2) && index < batchSize) {
+        if (!loadedBatchesRef.current[trackKey].has(2) && chunks.length > batchSize) {
+          console.log(`[Gemini Audio Preloader] Lookahead threshold reached: triggering Batch 2/3 for ${trackKey} (playing sentence ${index})`);
+          preloadBatchSequentially(2, chunks, voiceName, isReport, gen);
+        }
+      }
+
+      // When reaching half of Batch 2 -> proactively start Batch 3
+      if (index >= batchSize + Math.floor(batchSize / 2) && index < 2 * batchSize) {
+        if (!loadedBatchesRef.current[trackKey].has(3) && chunks.length > 2 * batchSize) {
+          console.log(`[Gemini Audio Preloader] Lookahead threshold reached: triggering Batch 3/3 for ${trackKey} (playing sentence ${index})`);
+          preloadBatchSequentially(3, chunks, voiceName, isReport, gen);
+        }
+      }
     }
     
     // Set the source on our persistent element
