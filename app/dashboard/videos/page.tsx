@@ -2042,10 +2042,19 @@ export default function VideosPage() {
   const prefetchedAudioRef = useRef<{ index: number; audio: HTMLAudioElement } | null>(null);
   
   // Store preloaded Blob URLs to enable background playback without network requests
+  // Store preloaded Blob URLs for immediate sentence start
   const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
   const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
-  const preloadGenerationRef = useRef<number>(0);
 
+  // Volatile cached consolidated audio tracks metadata
+  interface CachedTrackData {
+    audioUrl: string;
+    sentenceTimestamps: { sentenceIdx: number; text: string; startTime: number; endTime: number }[];
+    totalDuration: number;
+  }
+  const cachedAudioTracksRef = useRef<Record<string, CachedTrackData | null>>({});
+  const isSynthesizingRef = useRef<Record<string, boolean>>({});
+  const activeFullAudioRef = useRef<boolean>(false);
 
   const clearPreloadedBlobUrls = () => {
     Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
@@ -2067,133 +2076,71 @@ export default function VideosPage() {
     reportPreloadedBlobUrlsRef.current = {};
   };
 
-  const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string, isReport = false) => {
-    if (index < 0 || index >= chunks.length) return;
-    const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
-    if (blobRef.current[index]) return; // Already preloaded!
-
-    try {
-      console.log(`[Gemini Audio Preloader] Prefetching ${isReport ? 'report' : 'summary'} sentence ${index} as local Blob...`);
-      const res = await fetch("/api/videos/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: chunks[index], voice: voiceName })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      blobRef.current[index] = blobUrl;
-      console.log(`[Gemini Audio Preloader] ${isReport ? 'report' : 'summary'} Sentence ${index} successfully preloaded as local Blob URL.`);
-    } catch (err) {
-      console.warn(`[Gemini Audio Preloader] Failed to preload sentence ${index}:`, err);
-    }
+  const getVoiceNameFromId = (id: string): string => {
+    if (id === "gemini-aoede") return "Aoede";
+    if (id === "gemini-puck") return "Puck";
+    return "Charon"; // Default
   };
 
-  // Dedicated worker function for one of the 3 parallel blocks
-  const runPreloadWorker = async (
-    workerId: number, // 1, 2, or 3
-    startIndex: number,
-    endIndex: number,
-    chunks: string[],
-    voiceName: string,
-    isReport: boolean,
-    generation: number,
-    initialDelayMs: number
-  ) => {
-    if (startIndex >= endIndex) return;
-    const trackKey = isReport ? 'report' : 'summary';
-
-    // Stagger start to avoid hitting Vercel/WAF with 3 simultaneous network requests at the exact same millisecond
-    if (initialDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
-    }
-
-    if (generation !== preloadGenerationRef.current) return;
-
-    console.log(`[Gemini Audio Worker ${workerId}] Started for ${trackKey} (range [${startIndex}..${endIndex - 1}], gen ${generation})`);
-
-    for (let i = startIndex; i < endIndex; i++) {
-      if (generation !== preloadGenerationRef.current) {
-        console.log(`[Gemini Audio Worker ${workerId}] Cancelled for generation ${generation}`);
-        break;
-      }
-
-      const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
-      if (blobRef.current[i]) continue; // Already preloaded!
-
-      await preloadSentenceBlob(i, chunks, voiceName, isReport);
-
-      // Ritmo de cadencia por worker: 850ms de pausa entre peticiones de este worker.
-      // Dado que los 3 workers están desfasados en el tiempo (~300ms entre sí),
-      // el ritmo global combinado es de ~1 petición cada ~300ms (~3 peticiones cada 3 segundos),
-      // respetando al milímetro los límites de Vercel y evitando 403 / WAF.
-      await new Promise((resolve) => setTimeout(resolve, 850));
-    }
-
-    console.log(`[Gemini Audio Worker ${workerId}] Completed for ${trackKey}`);
-  };
-
-  const startBackgroundPreloadingForActiveTrack = (specificIndex?: number) => {
-    // Increment generation count to stop any ongoing workers instantly
-    preloadGenerationRef.current += 1;
-    const gen = preloadGenerationRef.current;
-    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-
-    const isReport = activeAudioModeRef.current === 'report';
+  // Background volatile cache pre-warmer: initiates synthesis of full track to Supabase Storage
+  const startBackgroundPreloadingForActiveTrack = (_specificIndex?: number) => {
+    if (!activeStudyVideo?.id) return;
+    const mode = activeAudioModeRef.current;
+    const isReport = mode === 'report';
     const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
-    const trackKey = isReport ? 'report' : 'summary';
-
     if (chunks.length === 0) return;
 
-    const total = chunks.length;
-    const batchSize = Math.max(1, Math.ceil(total / 3));
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    const lang = selectedLanguageRef.current || "en";
+    const cacheKey = `${activeStudyVideo.id}_${mode}_${voiceName}_${lang}`;
 
-    // Define 3 equal blocks across the audio
-    const block1Start = 0;
-    const block1End = Math.min(total, batchSize);
+    if (cachedAudioTracksRef.current[cacheKey]) return; // Already loaded!
+    if (isSynthesizingRef.current[cacheKey]) return; // In-flight!
+    isSynthesizingRef.current[cacheKey] = true;
 
-    const block2Start = block1End;
-    const block2End = Math.min(total, 2 * batchSize);
+    console.log(`[Cached Audio Preloader] Background pre-warming volatile cache for ${cacheKey}...`);
 
-    const block3Start = block2End;
-    const block3End = total;
-
-    console.log(`[Gemini Audio Preloader] Launching 3 parallel workers for ${trackKey} (total sentences: ${total}, batchSize: ${batchSize}, gen: ${gen})`);
-
-    // Worker 1: Block 1 [0..block1End) - starts immediately (0ms delay)
-    if (block1Start < block1End) {
-      const w1Start = (typeof specificIndex === 'number' && specificIndex >= block1Start && specificIndex < block1End)
-        ? specificIndex
-        : block1Start;
-      runPreloadWorker(1, w1Start, block1End, chunks, voiceName, isReport, gen, 0);
-    }
-
-    // Worker 2: Block 2 [block2Start..block2End) - starts with 350ms delay
-    if (block2Start < block2End) {
-      const w2Start = (typeof specificIndex === 'number' && specificIndex >= block2Start && specificIndex < block2End)
-        ? specificIndex
-        : block2Start;
-      runPreloadWorker(2, w2Start, block2End, chunks, voiceName, isReport, gen, 350);
-    }
-
-    // Worker 3: Block 3 [block3Start..block3End) - starts with 700ms delay
-    if (block3Start < block3End) {
-      const w3Start = (typeof specificIndex === 'number' && specificIndex >= block3Start && specificIndex < block3End)
-        ? specificIndex
-        : block3Start;
-      runPreloadWorker(3, w3Start, block3End, chunks, voiceName, isReport, gen, 700);
-    }
+    fetch("/api/videos/cached-audio", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        videoId: activeStudyVideo.id,
+        track: mode,
+        voice: voiceName,
+        language: lang,
+        sentences: chunks
+      })
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.audioUrl) {
+          cachedAudioTracksRef.current[cacheKey] = {
+            audioUrl: data.audioUrl,
+            sentenceTimestamps: data.sentenceTimestamps,
+            totalDuration: data.totalDuration
+          };
+          console.log(`[Cached Audio Preloader] Cache ready for ${cacheKey} (fromCache: ${data.fromCache}, duration: ${data.totalDuration}s)`);
+        }
+      })
+      .catch((err) => {
+        console.warn("[Cached Audio Preloader] Background fetch warning:", err);
+      })
+      .finally(() => {
+        isSynthesizingRef.current[cacheKey] = false;
+      });
   };
 
   const stopGeminiAudio = () => {
     const audio = activeAudioRef.current || domAudioRef.current;
     if (audio) {
       audio.pause();
+      audio.ontimeupdate = null;
       audio.onended = null;
       audio.onerror = null;
       audio.src = "";
     }
     activeAudioRef.current = null;
+    activeFullAudioRef.current = false;
 
     if (prefetchedAudioRef.current) {
       prefetchedAudioRef.current.audio.pause();
@@ -2206,26 +2153,20 @@ export default function VideosPage() {
     }
   };
 
-  const getVoiceNameFromId = (id: string): string => {
-    if (id === "gemini-aoede") return "Aoede";
-    if (id === "gemini-puck") return "Puck";
-    return "Charon"; // Default
-  };
-
   const playGeminiSentence = async (index: number) => {
-    setAudioError(null); // Reset audio error on any new sentence attempt
+    setAudioError(null);
     const mode = activeAudioModeRef.current;
     const isReport = mode === 'report';
     const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
     const activeIndexRef = isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef;
     const setActiveIndex = isReport ? setReportActiveSentenceIndex : setActiveSentenceIndex;
-    const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
 
     if (index < 0 || index >= chunks.length) {
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
       setActiveIndex(-1);
       activeIndexRef.current = -1;
+      activeFullAudioRef.current = false;
       if (typeof window !== "undefined" && "mediaSession" in navigator) {
         navigator.mediaSession.playbackState = "none";
       }
@@ -2237,93 +2178,167 @@ export default function VideosPage() {
     setActiveIndex(index);
     activeIndexRef.current = index;
 
-    // Retrieve or initialize the single, persistent Audio element (unlocked by user gesture on Play)
     if (!activeAudioRef.current && domAudioRef.current) {
       activeAudioRef.current = domAudioRef.current;
     }
     const audio = activeAudioRef.current || domAudioRef.current;
     if (!audio) {
-      console.warn("[Gemini Audio Queue] DOM audio element is not yet loaded.");
+      console.warn("[Gemini Audio] DOM audio element is not yet loaded.");
       return;
     }
 
-    // Temporarily clear event handlers and pause instantly to prevent overlaps
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    const videoId = activeStudyVideo?.id || "unknown";
+    const lang = selectedLanguageRef.current || "en";
+    const cacheKey = `${videoId}_${mode}_${voiceName}_${lang}`;
+    const cachedTrack = cachedAudioTracksRef.current[cacheKey];
+
+    const updateMediaSession = (currentSentenceIdx: number) => {
+      if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
+        try {
+          const trackTitle = isReport 
+            ? (lang === "es" ? "Informe de Inversión" : "Investment Report")
+            : (lang === "es" ? "Resumen Detallado" : "Detailed Summary");
+
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: `${selectedVideo.title} - ${trackTitle}`,
+            artist: lang === "es" 
+              ? `Frase ${currentSentenceIdx + 1} de ${chunks.length}` 
+              : lang === "de"
+              ? `Satz ${currentSentenceIdx + 1} von ${chunks.length}`
+              : lang === "tr"
+              ? `Cümle ${currentSentenceIdx + 1} / ${chunks.length}`
+              : `Sentence ${currentSentenceIdx + 1} of ${chunks.length}`,
+            album: lang === "es" ? "Narración Inteligente HIVEX" : "HIVEX Intelligent Narration",
+            artwork: selectedVideo.metadata.thumbnail ? [
+              { src: selectedVideo.metadata.thumbnail, sizes: "512x512", type: "image/jpeg" }
+            ] : [
+              { src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&h=512&q=80", sizes: "512x512", type: "image/jpeg" }
+            ]
+          });
+          navigator.mediaSession.playbackState = "playing";
+        } catch (_) {}
+      }
+    };
+
+    // ESCENARIO 1: El audio completo consolidado ya está en Supabase Cache.
+    // Reproducción nativa inmediata con soporte de HTTP Range (206) en iPad/Safari y karaoke fluido.
+    if (cachedTrack && cachedTrack.audioUrl) {
+      activeFullAudioRef.current = true;
+      audio.onended = null;
+      audio.ontimeupdate = null;
+      audio.onerror = null;
+
+      if (audio.src !== cachedTrack.audioUrl) {
+        audio.src = cachedTrack.audioUrl;
+        audio.preload = "auto";
+      }
+
+      const targetTs = cachedTrack.sentenceTimestamps[index];
+      if (targetTs) {
+        audio.currentTime = targetTs.startTime;
+      }
+      audio.playbackRate = playbackRateRef.current;
+
+      audio.ontimeupdate = () => {
+        if (!isPlayingAudioRef.current) return;
+        const curTime = audio.currentTime;
+        if (mode === 'summary') {
+          setSummaryElapsedSeconds(Math.floor(curTime));
+        } else {
+          setReportElapsedSeconds(Math.floor(curTime));
+        }
+
+        const stList = cachedTrack.sentenceTimestamps;
+        const foundIdx = stList.findIndex((st, i) => {
+          const nextStart = i < stList.length - 1 ? stList[i + 1].startTime : cachedTrack.totalDuration;
+          return curTime >= st.startTime && curTime < nextStart;
+        });
+
+        if (foundIdx !== -1 && foundIdx !== activeIndexRef.current) {
+          activeIndexRef.current = foundIdx;
+          setActiveIndex(foundIdx);
+          updateMediaSession(foundIdx);
+        }
+      };
+
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        setIsPausedAudio(false);
+        setActiveIndex(-1);
+        activeIndexRef.current = -1;
+        activeFullAudioRef.current = false;
+        if (typeof window !== "undefined" && "mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = "none";
+        }
+      };
+
+      audio.onerror = (e) => {
+        console.error("[Cached Audio Player Error]", e);
+        setAudioError("Error al reproducir pista consolidada.");
+        setIsPlayingAudio(false);
+        setIsPausedAudio(false);
+      };
+
+      updateMediaSession(index);
+      audio.play().catch((playErr: any) => {
+        if (playErr.name === "AbortError") return;
+        console.error("[Audio Play Failure]", playErr);
+      });
+      return;
+    }
+
+    // ESCENARIO 2: El audio completo aún no está listo -> "Arranque Inmediato"
+    // 2a. Lanzamos la síntesis en background para consolidar todo en Supabase
+    startBackgroundPreloadingForActiveTrack();
+
+    // 2b. Reproducimos de inmediato la frase solicitada con síntesis rápida (~300ms)
+    audio.ontimeupdate = null;
     audio.onended = null;
     audio.onerror = null;
     audio.pause();
 
-    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
-    
-    // Check if we have a preloaded Blob URL for this sentence
+    const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
     let audioSrc = blobRef.current[index];
+
     if (!audioSrc) {
-      console.log(`[Gemini Audio Queue] No preloaded Blob URL found for sentence ${index}, loading on-demand`);
       try {
         const res = await fetch("/api/videos/speak", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: chunks[index], voice: voiceName })
         });
-        
-        // Guard: If the user clicked seek or skipped to another sentence while we were fetching this one, abort!
-        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) {
-          console.log(`[Gemini Audio Queue] Guard triggered: Aborting on-demand load for sentence ${index} because active index changed`);
-          return;
-        }
 
-        if (!res.ok) {
-          let errMsg = `Error del servidor HTTP ${res.status}`;
-          try {
-            const errData = await res.json();
-            if (errData.error) errMsg = errData.error;
-          } catch {}
-          throw new Error(errMsg);
-        }
+        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const blob = await res.blob();
-        
-        // Final guard before creating and assigning blob url
-        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) {
-          return;
-        }
+        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) return;
 
         audioSrc = URL.createObjectURL(blob);
-        blobRef.current[index] = audioSrc; // Cache it so it's instant next time!
+        blobRef.current[index] = audioSrc;
       } catch (err: any) {
-        console.error(`[Gemini Audio Queue] On-demand fetch failed for sentence ${index}:`, err);
-        setAudioError(err.message || "Error al sintetizar la voz del fragmento.");
+        console.error(`[Immediate Start Speak Error] sentence ${index}:`, err);
+        setAudioError(err.message || "Error al reproducir audio inmediato.");
         setIsPlayingAudio(false);
         setIsPausedAudio(false);
         return;
       }
-    } else {
-      console.log(`[Gemini Audio Queue] Using preloaded local Blob URL for sentence ${index} (Zero network request!)`);
     }
 
-
-    
-    // Set the source on our persistent element
     audio.src = audioSrc;
     audio.preload = "auto";
-
-    // Apply playback rate
     audio.playbackRate = playbackRateRef.current;
 
-    // Setup events
+    // Conexión del traspaso transparente (Seamless Handover):
+    // Cuando la frase inmediata termina, si el audio consolidado ya está disponible en background,
+    // conmutamos automáticamente sin pausas ni peticiones extra.
     audio.onended = () => {
       if (!isPlayingAudioRef.current) return;
-      
-      // CRITICAL GUARD: Ensure we only advance if the sentence that just finished
-      // is indeed the currently active sentence.
-      if (index !== activeIndexRef.current) {
-        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onended event for sentence ${index} because active index is now ${activeIndexRef.current}`);
-        return;
-      }
-      
+      if (index !== activeIndexRef.current) return;
+
       const nextIdx = index + 1;
-      if (nextIdx < chunks.length) {
-        playGeminiSentence(nextIdx);
-      } else {
+      if (nextIdx >= chunks.length) {
         setIsPlayingAudio(false);
         setIsPausedAudio(false);
         setActiveIndex(-1);
@@ -2331,107 +2346,39 @@ export default function VideosPage() {
         if (typeof window !== "undefined" && "mediaSession" in navigator) {
           navigator.mediaSession.playbackState = "none";
         }
+        return;
+      }
+
+      const readyCachedTrack = cachedAudioTracksRef.current[cacheKey];
+      if (readyCachedTrack && readyCachedTrack.audioUrl) {
+        console.log(`[Arranque Inmediato] Traspaso transparente a pista consolidada en frase ${nextIdx}`);
+        playGeminiSentence(nextIdx);
+      } else {
+        // En caso excepcional de retraso en la síntesis, continuar con frase siguiente
+        playGeminiSentence(nextIdx);
       }
     };
 
     audio.onerror = (e) => {
-      if (index !== activeIndexRef.current) {
-        console.log(`[Gemini Audio Queue] Guard triggered: Ignoring onerror event for sentence ${index} because active index is now ${activeIndexRef.current}`);
-        return;
-      }
-      console.error("[Gemini Audio Player Error] Failed to play audio URL:", index, e);
+      if (index !== activeIndexRef.current) return;
+      console.error("[Audio Immediate Play Error]", e);
       setIsPlayingAudio(false);
       setIsPausedAudio(false);
-      setAudioError(`Error al reproducir el fragmento de audio (Código ${audio.error?.code || 'desconocido'}).`);
-      if (typeof window !== "undefined" && "mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "none";
-      }
     };
 
-    // Play current sentence immediately
+    updateMediaSession(index);
     audio.play().catch((playErr: any) => {
-      if (playErr.name === "AbortError") {
-        console.log("[Gemini Audio Player] Playback was aborted/paused for chunk:", index);
-        return;
-      }
-      console.error("[Gemini Play Failure] Could not play audio:", playErr);
-      if (playErr.name === "NotAllowedError") {
-        setAudioError("El navegador bloqueó la reproducción automática. Por favor haga clic en el botón de reproducción.");
-      } else {
-        setAudioError(`Bloqueo de reproducción en el navegador: ${playErr.message || "Por favor haga clic de nuevo para interactuar."}`);
-      }
-      setIsPlayingAudio(false);
-      setIsPausedAudio(false);
-      if (typeof window !== "undefined" && "mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "none";
-      }
+      if (playErr.name === "AbortError") return;
+      console.error("[Audio Immediate Play Failure]", playErr);
     });
-
-    // Update Media Session API for Lock Screen metadata and controls
-    if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
-      try {
-        const trackTitle = isReport 
-          ? (selectedLanguage === "es" ? "Informe de Inversión" : "Investment Report")
-          : (selectedLanguage === "es" ? "Resumen Detallado" : "Detailed Summary");
-
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: `${selectedVideo.title} - ${trackTitle}`,
-          artist: selectedLanguage === "es" 
-            ? `Frase ${index + 1} de ${chunks.length}` 
-            : selectedLanguage === "de"
-            ? `Satz ${index + 1} von ${chunks.length}`
-            : selectedLanguage === "tr"
-            ? `Cümle ${index + 1} / ${chunks.length}`
-            : `Sentence ${index + 1} of ${chunks.length}`,
-          album: selectedLanguage === "es" ? "Narración Inteligente HIVEX" : "HIVEX Intelligent Narration",
-          artwork: selectedVideo.metadata.thumbnail ? [
-            { src: selectedVideo.metadata.thumbnail, sizes: "512x512", type: "image/jpeg" }
-          ] : [
-            { src: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=512&h=512&q=80", sizes: "512x512", type: "image/jpeg" }
-          ]
-        });
-
-        navigator.mediaSession.playbackState = "playing";
-
-        // Lock screen media controls
-        navigator.mediaSession.setActionHandler("play", () => {
-          resumeAudio();
-        });
-
-        navigator.mediaSession.setActionHandler("pause", () => {
-          pauseAudio();
-        });
-
-        navigator.mediaSession.setActionHandler("previoustrack", () => {
-          const prevIdx = activeIndexRef.current - 1;
-          if (prevIdx >= 0) {
-            playGeminiSentence(prevIdx);
-          }
-        });
-
-        navigator.mediaSession.setActionHandler("nexttrack", () => {
-          const nextIdx = activeIndexRef.current + 1;
-          if (nextIdx < chunks.length) {
-            playGeminiSentence(nextIdx);
-          }
-        });
-      } catch (mediaSessionErr) {
-        console.warn("[Media Session] Failed to register metadata/handlers:", mediaSessionErr);
-      }
-    }
-
-    // Prefetch subsequent sentences in the background as local Blob URLs.
-    const prefetchWindowSize = 5;
-    for (let w = 1; w <= prefetchWindowSize; w++) {
-      const nextIdx = index + w;
-      if (nextIdx < chunks.length) {
-        preloadSentenceBlob(nextIdx, chunks, voiceName, isReport);
-      }
-    }
   };
 
   // Multilingual states
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en"); // Default is English ("en")
+  const selectedLanguageRef = useRef<string>("en");
+  useEffect(() => {
+    selectedLanguageRef.current = selectedLanguage;
+  }, [selectedLanguage]);
   const [translationsCache, setTranslationsCache] = useState<Record<string, Record<string, {
     text: string;
     loading: boolean;
@@ -2561,7 +2508,7 @@ export default function VideosPage() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isPlayingAudio && !isPausedAudio) {
+    if (isPlayingAudio && !isPausedAudio && !activeFullAudioRef.current) {
       timer = setInterval(() => {
         if (activeAudioMode === 'summary') {
           setSummaryElapsedSeconds(prev => {
