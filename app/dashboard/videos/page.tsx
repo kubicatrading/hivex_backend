@@ -481,103 +481,90 @@ function getEmbedUrl(url: string, seconds: number | null): string {
 function splitTranscription(text: string) {
   if (!text) return { transcription: "", summary: "", charts: "", report: "" };
   
-  // Step 1: Attempt standard robust split using various markdown horizontal line syntaxes
-  // Matches: ---, ***, ===, ___, - - - with optional spaces or trailing text (like "--- Parte 2 ---")
-  const regexSplit = /\n\s*(?:---|===|\*\*\*|___|- - -)[^\n]*\n/;
-  const parts = text.split(regexSplit);
-  
+  // Step 1: Heading-based Slicing (Primary, immune to internal markdown horizontal rules)
+  const lines = text.split("\n");
+  let summaryIdx = -1;
+  let chartsIdx = -1;
+  let reportIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim().toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // strip accents
+    
+    if (trimmed.startsWith("#") || trimmed.startsWith("- #") || trimmed.startsWith("**")) {
+      const headerText = trimmed.replace(/^[\s\-\*#]*/, "").replace(/^\*\*|\*\*$/g, "").trim();
+      
+      if (summaryIdx === -1) {
+        if (headerText.includes("resumen") || headerText.includes("summary") || headerText.includes("zusammenfassung") || headerText.includes("ozet") || headerText.includes("part 2") || headerText.includes("parte 2") || headerText.includes("teil 2") || headerText.includes("bolum 2") || headerText.includes("kisim 2")) {
+          summaryIdx = i;
+        }
+      } else if (chartsIdx === -1) {
+        if (headerText.includes("grafico") || headerText.includes("grafik") || headerText.includes("chart") || headerText.includes("diagram") || headerText.includes("visualizac") || headerText.includes("visualis") || headerText.includes("gorsel") || headerText.includes("part 3") || headerText.includes("parte 3") || headerText.includes("teil 3") || headerText.includes("bolum 3") || headerText.includes("kisim 3")) {
+          const isReport = headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim");
+          if (isReport && !headerText.includes("grafic") && !headerText.includes("grafik") && !headerText.includes("chart") && !headerText.includes("visualizac") && !headerText.includes("visualis") && !headerText.includes("gorsel")) {
+            reportIdx = i;
+          } else {
+            chartsIdx = i;
+          }
+        }
+      } else if (reportIdx === -1) {
+        if (headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim") || headerText.includes("part 4") || headerText.includes("parte 4") || headerText.includes("teil 4") || headerText.includes("bolum 4") || headerText.includes("kisim 4")) {
+          reportIdx = i;
+        }
+      }
+    }
+  }
+
   let transcription = "";
   let summary = "";
   let charts = "";
   let report = "";
-  
-  if (parts.length >= 4) {
-    transcription = parts[0] || "";
-    summary = parts[1] || "";
-    charts = parts[2] || "";
-    report = parts.slice(3).join("\n---\n") || "";
-  } else if (parts.length === 3) {
-    transcription = parts[0] || "";
-    summary = parts[1] || "";
+
+  if (summaryIdx !== -1 && chartsIdx !== -1 && reportIdx !== -1 && reportIdx > chartsIdx && chartsIdx > summaryIdx) {
+    transcription = lines.slice(0, summaryIdx).join("\n").trim();
+    summary = lines.slice(summaryIdx, chartsIdx).join("\n").trim();
+    charts = lines.slice(chartsIdx, reportIdx).join("\n").trim();
+    report = lines.slice(reportIdx).join("\n").trim();
+  } else if (summaryIdx !== -1 && reportIdx !== -1 && reportIdx > summaryIdx) {
+    transcription = lines.slice(0, summaryIdx).join("\n").trim();
+    summary = lines.slice(summaryIdx, reportIdx).join("\n").trim();
     charts = "";
-    report = parts[2] || "";
+    report = lines.slice(reportIdx).join("\n").trim();
+  } else if (summaryIdx !== -1 && chartsIdx !== -1 && chartsIdx > summaryIdx) {
+    transcription = lines.slice(0, summaryIdx).join("\n").trim();
+    summary = lines.slice(summaryIdx, chartsIdx).join("\n").trim();
+    charts = lines.slice(chartsIdx).join("\n").trim();
+    report = "";
+  } else if (summaryIdx !== -1) {
+    transcription = lines.slice(0, summaryIdx).join("\n").trim();
+    summary = lines.slice(summaryIdx).join("\n").trim();
+    charts = "";
+    report = "";
   } else {
-    // Step 2: Heuristic Heading-based Fallback Slicing
-    const lines = text.split("\n");
-    let summaryIdx = -1;
-    let chartsIdx = -1;
-    let reportIdx = -1;
-
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim().toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // strip accents
-      
-      if (trimmed.startsWith("#") || trimmed.startsWith("- #") || trimmed.startsWith("**")) {
-        const headerText = trimmed.replace(/^[\s\-\*#]*/, "").replace(/^\*\*|\*\*$/g, "").trim();
-        
-        if (summaryIdx === -1) {
-          if (headerText.includes("resumen") || headerText.includes("summary") || headerText.includes("zusammenfassung") || headerText.includes("ozet") || headerText.includes("part 2") || headerText.includes("parte 2") || headerText.includes("teil 2") || headerText.includes("bolum 2") || headerText.includes("kisim 2")) {
-            summaryIdx = i;
-          }
-        } else if (chartsIdx === -1) {
-          if (headerText.includes("grafico") || headerText.includes("grafik") || headerText.includes("chart") || headerText.includes("diagram") || headerText.includes("visualizac") || headerText.includes("visualis") || headerText.includes("gorsel") || headerText.includes("part 3") || headerText.includes("parte 3") || headerText.includes("teil 3") || headerText.includes("bolum 3") || headerText.includes("kisim 3")) {
-            const isReport = headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim");
-            if (isReport && !headerText.includes("grafic") && !headerText.includes("grafik") && !headerText.includes("chart") && !headerText.includes("visualizac") && !headerText.includes("visualis") && !headerText.includes("gorsel")) {
-              reportIdx = i;
-            } else {
-              chartsIdx = i;
-            }
-          }
-        } else if (reportIdx === -1) {
-          if (headerText.includes("informe") || headerText.includes("report") || headerText.includes("bericht") || headerText.includes("rapor") || headerText.includes("analisis") || headerText.includes("analysis") || headerText.includes("analyse") || headerText.includes("analiz") || headerText.includes("invers") || headerText.includes("invest") || headerText.includes("yatirim") || headerText.includes("part 4") || headerText.includes("parte 4") || headerText.includes("teil 4") || headerText.includes("bolum 4") || headerText.includes("kisim 4")) {
-            reportIdx = i;
-          }
-        }
-      }
-    }
-
-    if (summaryIdx !== -1 && chartsIdx !== -1 && reportIdx !== -1 && reportIdx > chartsIdx && chartsIdx > summaryIdx) {
-      transcription = lines.slice(0, summaryIdx).join("\n");
-      summary = lines.slice(summaryIdx, chartsIdx).join("\n");
-      charts = lines.slice(chartsIdx, reportIdx).join("\n");
-      report = lines.slice(reportIdx).join("\n");
-    } else if (summaryIdx !== -1 && reportIdx !== -1 && reportIdx > summaryIdx) {
-      transcription = lines.slice(0, summaryIdx).join("\n");
-      summary = lines.slice(summaryIdx, reportIdx).join("\n");
-      charts = "";
-      report = lines.slice(reportIdx).join("\n");
-    } else if (summaryIdx !== -1 && chartsIdx !== -1 && chartsIdx > summaryIdx) {
-      transcription = lines.slice(0, summaryIdx).join("\n");
-      summary = lines.slice(summaryIdx, chartsIdx).join("\n");
-      charts = lines.slice(chartsIdx).join("\n");
-      report = "";
-    } else if (summaryIdx !== -1) {
-      transcription = lines.slice(0, summaryIdx).join("\n");
-      summary = lines.slice(summaryIdx).join("\n");
-      charts = "";
-      report = "";
-    } else {
+    // Step 2: Fallback to markdown horizontal line split
+    const regexSplit = /\n\s*(?:---|===|\*\*\*|___|- - -)[^\n]*\n/;
+    const parts = text.split(regexSplit);
+    
+    if (parts.length >= 4) {
       transcription = parts[0] || "";
       summary = parts[1] || "";
       charts = parts[2] || "";
       report = parts.slice(3).join("\n---\n") || "";
-      
-      if (parts.length === 1) {
-        transcription = text;
-        summary = "";
-        charts = "";
-        report = "";
-      } else if (parts.length === 2) {
-        transcription = parts[0] || "";
-        summary = parts[1] || "";
-        charts = "";
-        report = "";
-      } else if (parts.length === 3) {
-        transcription = parts[0] || "";
-        summary = parts[1] || "";
-        charts = "";
-        report = parts[2] || "";
-      }
+    } else if (parts.length === 3) {
+      transcription = parts[0] || "";
+      summary = parts[1] || "";
+      charts = "";
+      report = parts[2] || "";
+    } else if (parts.length === 2) {
+      transcription = parts[0] || "";
+      summary = parts[1] || "";
+      charts = "";
+      report = "";
+    } else {
+      transcription = text;
+      summary = "";
+      charts = "";
+      report = "";
     }
   }
   
@@ -2059,14 +2046,6 @@ export default function VideosPage() {
   const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
   const preloadGenerationRef = useRef<number>(0);
 
-  // Track loaded/in-flight batches per track (summary and report) to avoid duplicate loops
-  const loadedBatchesRef = useRef<{
-    summary: Set<number>;
-    report: Set<number>;
-  }>({
-    summary: new Set<number>(),
-    report: new Set<number>()
-  });
 
   const clearPreloadedBlobUrls = () => {
     Object.values(preloadedBlobUrlsRef.current).forEach((url) => {
@@ -2086,9 +2065,6 @@ export default function VideosPage() {
       }
     });
     reportPreloadedBlobUrlsRef.current = {};
-
-    loadedBatchesRef.current.summary.clear();
-    loadedBatchesRef.current.report.clear();
   };
 
   const preloadSentenceBlob = async (index: number, chunks: string[], voiceName: string, isReport = false) => {
@@ -2113,33 +2089,32 @@ export default function VideosPage() {
     }
   };
 
-  const preloadBatchSequentially = async (
-    batchNumber: number, // 1, 2, or 3
+  // Dedicated worker function for one of the 3 parallel blocks
+  const runPreloadWorker = async (
+    workerId: number, // 1, 2, or 3
+    startIndex: number,
+    endIndex: number,
     chunks: string[],
     voiceName: string,
     isReport: boolean,
     generation: number,
-    startFromIndex?: number
+    initialDelayMs: number
   ) => {
-    if (chunks.length === 0) return;
+    if (startIndex >= endIndex) return;
     const trackKey = isReport ? 'report' : 'summary';
 
-    // Mark batch as queued/in-flight
-    loadedBatchesRef.current[trackKey].add(batchNumber);
+    // Stagger start to avoid hitting Vercel/WAF with 3 simultaneous network requests at the exact same millisecond
+    if (initialDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
+    }
 
-    const batchSize = Math.max(1, Math.ceil(chunks.length / 3));
-    const batchStartIndex = (batchNumber - 1) * batchSize;
-    const batchEndIndex = Math.min(chunks.length, batchNumber === 3 ? chunks.length : batchNumber * batchSize);
+    if (generation !== preloadGenerationRef.current) return;
 
-    const actualStart = typeof startFromIndex === 'number' && startFromIndex >= batchStartIndex && startFromIndex < batchEndIndex
-      ? startFromIndex
-      : batchStartIndex;
+    console.log(`[Gemini Audio Worker ${workerId}] Started for ${trackKey} (range [${startIndex}..${endIndex - 1}], gen ${generation})`);
 
-    console.log(`[Gemini Audio Preloader] Starting Batch ${batchNumber}/3 for ${trackKey} (sentences ${actualStart}..${batchEndIndex - 1}, gen ${generation})`);
-
-    for (let i = actualStart; i < batchEndIndex; i++) {
+    for (let i = startIndex; i < endIndex; i++) {
       if (generation !== preloadGenerationRef.current) {
-        console.log(`[Gemini Audio Preloader] Batch ${batchNumber} cancelled for generation ${generation}`);
+        console.log(`[Gemini Audio Worker ${workerId}] Cancelled for generation ${generation}`);
         break;
       }
 
@@ -2148,15 +2123,18 @@ export default function VideosPage() {
 
       await preloadSentenceBlob(i, chunks, voiceName, isReport);
 
-      // Ritmo suave: 350ms de pausa entre peticiones para no saturar la red ni activar el WAF
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      // Ritmo de cadencia por worker: 850ms de pausa entre peticiones de este worker.
+      // Dado que los 3 workers están desfasados en el tiempo (~300ms entre sí),
+      // el ritmo global combinado es de ~1 petición cada ~300ms (~3 peticiones cada 3 segundos),
+      // respetando al milímetro los límites de Vercel y evitando 403 / WAF.
+      await new Promise((resolve) => setTimeout(resolve, 850));
     }
 
-    console.log(`[Gemini Audio Preloader] Finished Batch ${batchNumber}/3 for ${trackKey}`);
+    console.log(`[Gemini Audio Worker ${workerId}] Completed for ${trackKey}`);
   };
 
   const startBackgroundPreloadingForActiveTrack = (specificIndex?: number) => {
-    // Increment generation count to stop any ongoing loops instantly
+    // Increment generation count to stop any ongoing workers instantly
     preloadGenerationRef.current += 1;
     const gen = preloadGenerationRef.current;
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
@@ -2165,24 +2143,45 @@ export default function VideosPage() {
     const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
     const trackKey = isReport ? 'report' : 'summary';
 
-    if (chunks.length > 0) {
-      const startIndex = typeof specificIndex === 'number' ? specificIndex : 0;
-      const batchSize = Math.max(1, Math.ceil(chunks.length / 3));
+    if (chunks.length === 0) return;
 
-      let targetBatch = 1;
-      if (startIndex >= 2 * batchSize) {
-        targetBatch = 3;
-      } else if (startIndex >= batchSize) {
-        targetBatch = 2;
-      }
+    const total = chunks.length;
+    const batchSize = Math.max(1, Math.ceil(total / 3));
 
-      // Reset subsequent batches so they can re-trigger organically as playback advances
-      loadedBatchesRef.current[trackKey].delete(targetBatch);
-      if (targetBatch < 3) loadedBatchesRef.current[trackKey].delete(3);
-      if (targetBatch < 2) loadedBatchesRef.current[trackKey].delete(2);
+    // Define 3 equal blocks across the audio
+    const block1Start = 0;
+    const block1End = Math.min(total, batchSize);
 
-      console.log(`[Gemini Audio Preloader] Prioritizing Batch ${targetBatch}/3 for active track: ${trackKey} starting from sentence ${startIndex} (generation ${gen})`);
-      preloadBatchSequentially(targetBatch, chunks, voiceName, isReport, gen, startIndex);
+    const block2Start = block1End;
+    const block2End = Math.min(total, 2 * batchSize);
+
+    const block3Start = block2End;
+    const block3End = total;
+
+    console.log(`[Gemini Audio Preloader] Launching 3 parallel workers for ${trackKey} (total sentences: ${total}, batchSize: ${batchSize}, gen: ${gen})`);
+
+    // Worker 1: Block 1 [0..block1End) - starts immediately (0ms delay)
+    if (block1Start < block1End) {
+      const w1Start = (typeof specificIndex === 'number' && specificIndex >= block1Start && specificIndex < block1End)
+        ? specificIndex
+        : block1Start;
+      runPreloadWorker(1, w1Start, block1End, chunks, voiceName, isReport, gen, 0);
+    }
+
+    // Worker 2: Block 2 [block2Start..block2End) - starts with 350ms delay
+    if (block2Start < block2End) {
+      const w2Start = (typeof specificIndex === 'number' && specificIndex >= block2Start && specificIndex < block2End)
+        ? specificIndex
+        : block2Start;
+      runPreloadWorker(2, w2Start, block2End, chunks, voiceName, isReport, gen, 350);
+    }
+
+    // Worker 3: Block 3 [block3Start..block3End) - starts with 700ms delay
+    if (block3Start < block3End) {
+      const w3Start = (typeof specificIndex === 'number' && specificIndex >= block3Start && specificIndex < block3End)
+        ? specificIndex
+        : block3Start;
+      runPreloadWorker(3, w3Start, block3End, chunks, voiceName, isReport, gen, 700);
     }
   };
 
@@ -2301,28 +2300,7 @@ export default function VideosPage() {
       console.log(`[Gemini Audio Queue] Using preloaded local Blob URL for sentence ${index} (Zero network request!)`);
     }
 
-    // Lookahead batch trigger: ensure the next 1/3 batch is downloaded well before reaching it
-    if (chunks.length > 0) {
-      const batchSize = Math.max(1, Math.ceil(chunks.length / 3));
-      const trackKey = isReport ? 'report' : 'summary';
-      const gen = preloadGenerationRef.current;
 
-      // When reaching half of Batch 1 -> proactively start Batch 2
-      if (index >= Math.floor(batchSize / 2) && index < batchSize) {
-        if (!loadedBatchesRef.current[trackKey].has(2) && chunks.length > batchSize) {
-          console.log(`[Gemini Audio Preloader] Lookahead threshold reached: triggering Batch 2/3 for ${trackKey} (playing sentence ${index})`);
-          preloadBatchSequentially(2, chunks, voiceName, isReport, gen);
-        }
-      }
-
-      // When reaching half of Batch 2 -> proactively start Batch 3
-      if (index >= batchSize + Math.floor(batchSize / 2) && index < 2 * batchSize) {
-        if (!loadedBatchesRef.current[trackKey].has(3) && chunks.length > 2 * batchSize) {
-          console.log(`[Gemini Audio Preloader] Lookahead threshold reached: triggering Batch 3/3 for ${trackKey} (playing sentence ${index})`);
-          preloadBatchSequentially(3, chunks, voiceName, isReport, gen);
-        }
-      }
-    }
     
     // Set the source on our persistent element
     audio.src = audioSrc;
