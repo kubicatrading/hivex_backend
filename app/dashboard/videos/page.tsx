@@ -2213,6 +2213,7 @@ export default function VideosPage() {
       if (audio) {
         audio.pause();
         audio.muted = false;
+        audio.volume = 1;
         audio.ontimeupdate = null;
         audio.onended = null;
         audio.onerror = null;
@@ -2309,15 +2310,8 @@ export default function VideosPage() {
       const seekTo = targetTs ? targetTs.startTime : 0;
 
       const playTrack = () => {
-        if (Math.abs(audio.currentTime - seekTo) > 0.3) {
-          audio.muted = true;
-          const onSeeked = () => {
-            audio.muted = false;
-            audio.removeEventListener("seeked", onSeeked);
-          };
-          audio.addEventListener("seeked", onSeeked, { once: true });
-          setTimeout(() => { audio.muted = false; }, 500);
-        }
+        audio.muted = false;
+        audio.volume = 1;
         audio.currentTime = seekTo;
         audio.playbackRate = playbackRateRef.current;
         audio.play().catch((playErr: any) => {
@@ -2395,7 +2389,7 @@ export default function VideosPage() {
     // Si aún no está en memoria local (ej. arranque en la frase 0), esperamos su síntesis ultra-rápida (~2s)
     if (!audioSrc) {
       if (activeAudioRef.current) {
-        activeAudioRef.current.muted = true;
+        activeAudioRef.current.pause();
       }
       audioSrc = await prefetchSentenceAudio(index, mode) || "";
       if (!audioSrc) {
@@ -2421,6 +2415,7 @@ export default function VideosPage() {
     if (!currentAudio) return;
     activeAudioRef.current = currentAudio;
     currentAudio.muted = false;
+    currentAudio.volume = 1;
 
     currentAudio.ontimeupdate = null;
     currentAudio.onended = null;

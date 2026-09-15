@@ -926,17 +926,11 @@ export default function NewsPage() {
     const audio = singleAudioRef.current;
     if (!audio) return;
 
+    audio.muted = false;
+    audio.volume = 1;
+
     const ts = sentenceTimestamps[index];
     if (ts) {
-      // Silenciar de inmediato la frase actual para corte instantáneo sin romper el promise de play()
-      audio.muted = true;
-      const onSeeked = () => {
-        audio.muted = false;
-        audio.removeEventListener("seeked", onSeeked);
-      };
-      audio.addEventListener("seeked", onSeeked, { once: true });
-      setTimeout(() => { audio.muted = false; }, 400);
-
       audio.currentTime = ts.startTime;
       audio.play().catch(console.error);
       setIsPlayingAudio(true);
@@ -954,14 +948,6 @@ export default function NewsPage() {
     } else if (sentenceChunksRef.current[index]) {
       const total = sentenceChunksRef.current.length;
       if (total > 0 && audio.duration) {
-        audio.muted = true;
-        const onSeeked = () => {
-          audio.muted = false;
-          audio.removeEventListener("seeked", onSeeked);
-        };
-        audio.addEventListener("seeked", onSeeked, { once: true });
-        setTimeout(() => { audio.muted = false; }, 400);
-
         const ratio = index / total;
         audio.currentTime = ratio * audio.duration;
         audio.play().catch(console.error);
@@ -984,6 +970,8 @@ export default function NewsPage() {
   // Play, Pause and Rate controls for Single Audio
   const startCabinAudio = () => {
     if (!singleAudioRef.current) return;
+    singleAudioRef.current.muted = false;
+    singleAudioRef.current.volume = 1;
     singleAudioRef.current.play().then(() => {
       setIsPlayingAudio(true);
       setIsPausedAudio(false);
