@@ -155,11 +155,11 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
     });
   }
 
-  // Sequence of dedicated Gemini TTS models (Flash first for ~350ms ultra-low latency generation)
+  // Sequence of dedicated Gemini TTS models (gemini-3.1-flash-tts-preview first for ~2.5s rapid synthesis)
   const models = [
+    "gemini-3.1-flash-tts-preview",
     "gemini-2.5-flash-preview-tts",
-    "gemini-2.5-pro-preview-tts",
-    "gemini-3.1-flash-tts-preview"
+    "gemini-2.5-pro-preview-tts"
   ];
 
   let base64Audio = "";

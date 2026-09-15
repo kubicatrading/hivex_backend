@@ -2035,16 +2035,19 @@ export default function VideosPage() {
     selectedVoiceIdRef.current = selectedVoiceId;
   }, [selectedVoiceId]);
 
-  // Audio queue references for playing
-  const domAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Audio queue references for playing with Dual-Channel Gapless Engine
+  const domAudioARef = useRef<HTMLAudioElement | null>(null);
+  const domAudioBRef = useRef<HTMLAudioElement | null>(null);
+  const domAudioRef = domAudioARef; // Reference alias for backwards compatibility
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeChannelRef = useRef<'A' | 'B'>('A');
   const activeObjectUrlRef = useRef<string | null>(null);
   const prefetchedAudioRef = useRef<{ index: number; audio: HTMLAudioElement } | null>(null);
   
-  // Store preloaded Blob URLs to enable background playback without network requests
-  // Store preloaded Blob URLs for immediate sentence start
+  // Store preloaded Blob URLs for immediate, zero-latency sentence playback
   const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
   const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
+  const inFlightFetchesRef = useRef<Set<string>>(new Set());
 
   // Volatile cached consolidated audio tracks metadata
   interface CachedTrackData {
@@ -2074,12 +2077,74 @@ export default function VideosPage() {
       }
     });
     reportPreloadedBlobUrlsRef.current = {};
+    inFlightFetchesRef.current.clear();
   };
 
   const getVoiceNameFromId = (id: string): string => {
     if (id === "gemini-aoede") return "Aoede";
     if (id === "gemini-puck") return "Puck";
     return "Charon"; // Default
+  };
+
+  // Continuous Lookahead Prefetcher: aggressively pre-fetches sentences in memory
+  const prefetchSentenceAudio = async (targetIndex: number, mode: 'summary' | 'report'): Promise<string | null> => {
+    if (!activeStudyVideo?.id) return null;
+    const isReport = mode === 'report';
+    const chunks = isReport ? reportSentenceChunksRef.current : sentenceChunksRef.current;
+    if (targetIndex < 0 || targetIndex >= chunks.length) return null;
+
+    const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
+    if (blobRef.current[targetIndex]) return blobRef.current[targetIndex];
+
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    const lang = selectedLanguageRef.current || "en";
+    const fetchKey = `${activeStudyVideo.id}_${mode}_${targetIndex}_${voiceName}_${lang}`;
+
+    if (inFlightFetchesRef.current.has(fetchKey)) return null;
+    inFlightFetchesRef.current.add(fetchKey);
+
+    try {
+      const res = await fetch("/api/videos/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: chunks[targetIndex], voice: voiceName })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+
+      // Only save if voice and language are still aligned
+      const currentLang = selectedLanguageRef.current || "en";
+      const currentVoice = getVoiceNameFromId(selectedVoiceIdRef.current);
+      if (lang === currentLang && voiceName === currentVoice) {
+        const objUrl = URL.createObjectURL(blob);
+        blobRef.current[targetIndex] = objUrl;
+
+        // Pre-arm the standby channel if this sentence is next in line
+        const activeIdx = (isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef).current;
+        if (targetIndex === activeIdx + 1 && activeAudioModeRef.current === mode) {
+          const standbyAudio = activeChannelRef.current === 'A' ? domAudioBRef.current : domAudioARef.current;
+          if (standbyAudio && standbyAudio.src !== objUrl) {
+            standbyAudio.src = objUrl;
+            standbyAudio.preload = "auto";
+            standbyAudio.load();
+          }
+        }
+        return objUrl;
+      }
+    } catch (err) {
+      console.warn(`[Lookahead Prefetcher] Error fetching sentence ${targetIndex}:`, err);
+    } finally {
+      inFlightFetchesRef.current.delete(fetchKey);
+    }
+    return null;
+  };
+
+  const ensureLookaheadWindow = (currentIndex: number, mode: 'summary' | 'report') => {
+    // Sliding lookahead window: pre-load the next 3 sentences concurrently
+    for (let offset = 0; offset <= 3; offset++) {
+      const idx = currentIndex + offset;
+      prefetchSentenceAudio(idx, mode);
+    }
   };
 
   // Background volatile cache pre-warmer: initiates synthesis of full track to Supabase Storage
@@ -2131,16 +2196,18 @@ export default function VideosPage() {
   };
 
   const stopGeminiAudio = () => {
-    const audio = activeAudioRef.current || domAudioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.ontimeupdate = null;
-      audio.onended = null;
-      audio.onerror = null;
-      audio.src = "";
-    }
+    [domAudioARef.current, domAudioBRef.current].forEach((audio) => {
+      if (audio) {
+        audio.pause();
+        audio.ontimeupdate = null;
+        audio.onended = null;
+        audio.onerror = null;
+        audio.src = "";
+      }
+    });
     activeAudioRef.current = null;
     activeFullAudioRef.current = false;
+    activeChannelRef.current = 'A';
 
     if (prefetchedAudioRef.current) {
       prefetchedAudioRef.current.audio.pause();
@@ -2178,15 +2245,6 @@ export default function VideosPage() {
     setActiveIndex(index);
     activeIndexRef.current = index;
 
-    if (!activeAudioRef.current && domAudioRef.current) {
-      activeAudioRef.current = domAudioRef.current;
-    }
-    const audio = activeAudioRef.current || domAudioRef.current;
-    if (!audio) {
-      console.warn("[Gemini Audio] DOM audio element is not yet loaded.");
-      return;
-    }
-
     const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
     const videoId = activeStudyVideo?.id || "unknown";
     const lang = selectedLanguageRef.current || "en";
@@ -2222,23 +2280,40 @@ export default function VideosPage() {
     };
 
     // ESCENARIO 1: El audio completo consolidado ya está en Supabase Cache.
-    // Reproducción nativa inmediata con soporte de HTTP Range (206) en iPad/Safari y karaoke fluido.
+    // Reproducción nativa continua de alta fidelidad con karaoke fluido y soporte HTTP 206 en Apple/Safari.
     if (cachedTrack && cachedTrack.audioUrl) {
       activeFullAudioRef.current = true;
+      const audio = domAudioARef.current;
+      if (!audio) return;
+      activeAudioRef.current = audio;
+
       audio.onended = null;
       audio.ontimeupdate = null;
       audio.onerror = null;
 
+      const targetTs = cachedTrack.sentenceTimestamps[index];
+      const seekTo = targetTs ? targetTs.startTime : 0;
+
+      const playTrack = () => {
+        audio.currentTime = seekTo;
+        audio.playbackRate = playbackRateRef.current;
+        audio.play().catch((playErr: any) => {
+          if (playErr.name === "AbortError") return;
+          console.error("[Audio Play Failure]", playErr);
+        });
+      };
+
       if (audio.src !== cachedTrack.audioUrl) {
         audio.src = cachedTrack.audioUrl;
         audio.preload = "auto";
+        if (audio.readyState >= 1) {
+          playTrack();
+        } else {
+          audio.addEventListener("loadedmetadata", playTrack, { once: true });
+        }
+      } else {
+        playTrack();
       }
-
-      const targetTs = cachedTrack.sentenceTimestamps[index];
-      if (targetTs) {
-        audio.currentTime = targetTs.startTime;
-      }
-      audio.playbackRate = playbackRateRef.current;
 
       audio.ontimeupdate = () => {
         if (!isPlayingAudioRef.current) return;
@@ -2281,59 +2356,63 @@ export default function VideosPage() {
       };
 
       updateMediaSession(index);
-      audio.play().catch((playErr: any) => {
-        if (playErr.name === "AbortError") return;
-        console.error("[Audio Play Failure]", playErr);
-      });
       return;
     }
 
-    // ESCENARIO 2: El audio completo aún no está listo -> "Arranque Inmediato"
-    // 2a. Lanzamos la síntesis en background para consolidar todo en Supabase
+    // ESCENARIO 2: "Arranque Inmediato con Motor Ping-Pong de Doble Canal y Zero-Latency Lookahead"
+    // 2a. Desencadenar la síntesis en background para consolidar todo en Supabase
     startBackgroundPreloadingForActiveTrack();
 
-    // 2b. Reproducimos de inmediato la frase solicitada con síntesis rápida (~300ms)
-    audio.ontimeupdate = null;
-    audio.onended = null;
-    audio.onerror = null;
-    audio.pause();
+    // 2b. Desencadenar prefetch por adelantado de la ventana deslizante (siguientes 3 frases)
+    ensureLookaheadWindow(index, mode);
 
     const blobRef = isReport ? reportPreloadedBlobUrlsRef : preloadedBlobUrlsRef;
     let audioSrc = blobRef.current[index];
 
+    // Si aún no está en memoria local (ej. arranque en la frase 0), esperamos su síntesis ultra-rápida (~2s)
     if (!audioSrc) {
-      try {
-        const res = await fetch("/api/videos/speak", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunks[index], voice: voiceName })
-        });
-
+      audioSrc = await prefetchSentenceAudio(index, mode) || "";
+      if (!audioSrc) {
         if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) return;
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const blob = await res.blob();
-        if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) return;
-
-        audioSrc = URL.createObjectURL(blob);
-        blobRef.current[index] = audioSrc;
-      } catch (err: any) {
-        console.error(`[Immediate Start Speak Error] sentence ${index}:`, err);
-        setAudioError(err.message || "Error al reproducir audio inmediato.");
+        setAudioError("Error al sintetizar audio inmediato.");
         setIsPlayingAudio(false);
         setIsPausedAudio(false);
         return;
       }
     }
 
-    audio.src = audioSrc;
-    audio.preload = "auto";
-    audio.playbackRate = playbackRateRef.current;
+    if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) return;
 
-    // Conexión del traspaso transparente (Seamless Handover):
-    // Cuando la frase inmediata termina, si el audio consolidado ya está disponible en background,
-    // conmutamos automáticamente sin pausas ni peticiones extra.
-    audio.onended = () => {
+    // Seleccionar canal activo (A o B) y canal de relevo (standby)
+    const currentAudio = activeChannelRef.current === 'A' ? domAudioARef.current : domAudioBRef.current;
+    const standbyAudio = activeChannelRef.current === 'A' ? domAudioBRef.current : domAudioARef.current;
+
+    if (!currentAudio) return;
+    activeAudioRef.current = currentAudio;
+
+    currentAudio.ontimeupdate = null;
+    currentAudio.onended = null;
+    currentAudio.onerror = null;
+
+    if (currentAudio.src !== audioSrc) {
+      currentAudio.src = audioSrc;
+      currentAudio.preload = "auto";
+    }
+    currentAudio.playbackRate = playbackRateRef.current;
+
+    // Pre-armar el canal standby con la frase siguiente (index + 1) para reproducción con 0ms de retardo
+    const nextSentenceIdx = index + 1;
+    if (nextSentenceIdx < chunks.length && standbyAudio) {
+      const nextSrc = blobRef.current[nextSentenceIdx];
+      if (nextSrc && standbyAudio.src !== nextSrc) {
+        standbyAudio.src = nextSrc;
+        standbyAudio.preload = "auto";
+        standbyAudio.load();
+      }
+    }
+
+    // Configuración del relevo sin silencios (Zero-Gap Ping-Pong Handover)
+    currentAudio.onended = () => {
       if (!isPlayingAudioRef.current) return;
       if (index !== activeIndexRef.current) return;
 
@@ -2349,17 +2428,20 @@ export default function VideosPage() {
         return;
       }
 
+      // Comprobar si la pista consolidada ya terminó de sintetizarse en Supabase
       const readyCachedTrack = cachedAudioTracksRef.current[cacheKey];
       if (readyCachedTrack && readyCachedTrack.audioUrl) {
-        console.log(`[Arranque Inmediato] Traspaso transparente a pista consolidada en frase ${nextIdx}`);
+        console.log(`[Zero-Gap Audio] Traspaso transparente a pista consolidada en frase ${nextIdx}`);
         playGeminiSentence(nextIdx);
-      } else {
-        // En caso excepcional de retraso en la síntesis, continuar con frase siguiente
-        playGeminiSentence(nextIdx);
+        return;
       }
+
+      // Alternar canal instantáneamente (A <-> B)
+      activeChannelRef.current = activeChannelRef.current === 'A' ? 'B' : 'A';
+      playGeminiSentence(nextIdx);
     };
 
-    audio.onerror = (e) => {
+    currentAudio.onerror = (e) => {
       if (index !== activeIndexRef.current) return;
       console.error("[Audio Immediate Play Error]", e);
       setIsPlayingAudio(false);
@@ -2367,7 +2449,7 @@ export default function VideosPage() {
     };
 
     updateMediaSession(index);
-    audio.play().catch((playErr: any) => {
+    currentAudio.play().catch((playErr: any) => {
       if (playErr.name === "AbortError") return;
       console.error("[Audio Immediate Play Failure]", playErr);
     });
@@ -2805,6 +2887,7 @@ export default function VideosPage() {
       
       // Prioritize background preloading for the newly activated track starting from startIdx
       startBackgroundPreloadingForActiveTrack(startIdx);
+      ensureLookaheadWindow(startIdx, mode);
       
       playGeminiSentence(startIdx);
     }
@@ -2823,6 +2906,7 @@ export default function VideosPage() {
 
     // Prioritize background preloading starting from the new seek position
     startBackgroundPreloadingForActiveTrack(targetIdx);
+    ensureLookaheadWindow(targetIdx, 'summary');
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
@@ -2842,6 +2926,7 @@ export default function VideosPage() {
 
     // Prioritize background preloading starting from the new seek position
     startBackgroundPreloadingForActiveTrack(targetIdx);
+    ensureLookaheadWindow(targetIdx, 'report');
 
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
       playGeminiSentence(targetIdx);
@@ -3028,8 +3113,9 @@ export default function VideosPage() {
       }
     }
 
-    // Trigger prioritized background preloading for the active track
+    // Trigger prioritized background preloading and pre-buffering for the active track
     startBackgroundPreloadingForActiveTrack();
+    ensureLookaheadWindow(0, activeAudioModeRef.current);
   }, [activeStudyVideo, selectedLanguage, transcriptionStates, translationsCache]);
 
   // Trigger translation automatically when video, selected language, or original transcription changes
@@ -4881,8 +4967,9 @@ export default function VideosPage() {
             
             return (
               <div className="space-y-6">
-                {/* Persistent Hidden Audio Tag Shared by Both Narration Players */}
-                <audio ref={domAudioRef} className="hidden" playsInline preload="auto" />
+                {/* Persistent Hidden Dual Audio Elements for Gapless Ping-Pong Playback */}
+                <audio ref={domAudioARef} className="hidden" playsInline preload="auto" />
+                <audio ref={domAudioBRef} className="hidden" playsInline preload="auto" />
 
                 {/* A. TRANSCRIPCIÓN LITERAL ORIGINAL */}
                 <div className="rounded-2xl border border-zinc-900 bg-zinc-900/5 overflow-hidden shadow-xl">
