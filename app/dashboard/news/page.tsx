@@ -923,24 +923,60 @@ export default function NewsPage() {
 
   // Jump to specific sentence index in the single audio file
   const handleSentenceClick = (index: number) => {
+    const audio = singleAudioRef.current;
+    if (!audio) return;
+
     const ts = sentenceTimestamps[index];
-    if (ts && singleAudioRef.current) {
-      singleAudioRef.current.currentTime = ts.startTime;
-      singleAudioRef.current.play().catch(console.error);
+    if (ts) {
+      // Silenciar de inmediato la frase actual para corte instantáneo sin romper el promise de play()
+      audio.muted = true;
+      const onSeeked = () => {
+        audio.muted = false;
+        audio.removeEventListener("seeked", onSeeked);
+      };
+      audio.addEventListener("seeked", onSeeked, { once: true });
+      setTimeout(() => { audio.muted = false; }, 400);
+
+      audio.currentTime = ts.startTime;
+      audio.play().catch(console.error);
       setIsPlayingAudio(true);
       setIsPausedAudio(false);
       setActiveSentenceIdx(index);
       activeSentenceIndexRef.current = index;
-    } else if (sentenceChunksRef.current[index] && singleAudioRef.current) {
+
+      const targetId = ts.elementId || chunkTargetElementIdsRef.current[index];
+      if (targetId) {
+        const el = document.getElementById(targetId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    } else if (sentenceChunksRef.current[index]) {
       const total = sentenceChunksRef.current.length;
-      if (total > 0 && singleAudioRef.current.duration) {
+      if (total > 0 && audio.duration) {
+        audio.muted = true;
+        const onSeeked = () => {
+          audio.muted = false;
+          audio.removeEventListener("seeked", onSeeked);
+        };
+        audio.addEventListener("seeked", onSeeked, { once: true });
+        setTimeout(() => { audio.muted = false; }, 400);
+
         const ratio = index / total;
-        singleAudioRef.current.currentTime = ratio * singleAudioRef.current.duration;
-        singleAudioRef.current.play().catch(console.error);
+        audio.currentTime = ratio * audio.duration;
+        audio.play().catch(console.error);
         setIsPlayingAudio(true);
         setIsPausedAudio(false);
         setActiveSentenceIdx(index);
         activeSentenceIndexRef.current = index;
+
+        const targetId = chunkTargetElementIdsRef.current[index];
+        if (targetId) {
+          const el = document.getElementById(targetId);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
       }
     }
   };
