@@ -2308,6 +2308,8 @@ export default function VideosPage() {
       const seekTo = targetTs ? targetTs.startTime : 0;
 
       const playTrack = () => {
+        // Pausar síncronamente antes de reposicionar currentTime para silenciar la frase anterior de inmediato
+        audio.pause();
         audio.currentTime = seekTo;
         audio.playbackRate = playbackRateRef.current;
         audio.play().catch((playErr: any) => {
@@ -2384,6 +2386,9 @@ export default function VideosPage() {
 
     // Si aún no está en memoria local (ej. arranque en la frase 0), esperamos su síntesis ultra-rápida (~2s)
     if (!audioSrc) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+      }
       audioSrc = await prefetchSentenceAudio(index, mode) || "";
       if (!audioSrc) {
         // Reintento automático en caso de micro-latencia
@@ -2922,6 +2927,10 @@ export default function VideosPage() {
     setActiveSentenceIndex(targetIdx);
     activeSentenceIndexRef.current = targetIdx;
 
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+    }
+
     // Prioritize background preloading starting from the new seek position
     startBackgroundPreloadingForActiveTrack(targetIdx);
     ensureLookaheadWindow(targetIdx, 'summary');
@@ -2942,6 +2951,10 @@ export default function VideosPage() {
     setReportActiveSentenceIndex(targetIdx);
     reportActiveSentenceIndexRef.current = targetIdx;
 
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+    }
+
     // Prioritize background preloading starting from the new seek position
     startBackgroundPreloadingForActiveTrack(targetIdx);
     ensureLookaheadWindow(targetIdx, 'report');
@@ -2960,6 +2973,10 @@ export default function VideosPage() {
     });
 
     if (index >= 0) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+      }
+
       if (isReport) {
         setActiveAudioMode('report');
         activeAudioModeRef.current = 'report';
