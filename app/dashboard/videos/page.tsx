@@ -2047,7 +2047,7 @@ export default function VideosPage() {
   // Store preloaded Blob URLs for immediate, zero-latency sentence playback
   const preloadedBlobUrlsRef = useRef<Record<number, string>>({});
   const reportPreloadedBlobUrlsRef = useRef<Record<number, string>>({});
-  const inFlightFetchesRef = useRef<Set<string>>(new Set());
+  const inFlightPromisesRef = useRef<Map<string, Promise<string | null>>>(new Map());
 
   // Volatile cached consolidated audio tracks metadata
   interface CachedTrackData {
@@ -2077,7 +2077,7 @@ export default function VideosPage() {
       }
     });
     reportPreloadedBlobUrlsRef.current = {};
-    inFlightFetchesRef.current.clear();
+    inFlightPromisesRef.current.clear();
   };
 
   const getVoiceNameFromId = (id: string): string => {
@@ -2100,43 +2100,56 @@ export default function VideosPage() {
     const lang = selectedLanguageRef.current || "en";
     const fetchKey = `${activeStudyVideo.id}_${mode}_${targetIndex}_${voiceName}_${lang}`;
 
-    if (inFlightFetchesRef.current.has(fetchKey)) return null;
-    inFlightFetchesRef.current.add(fetchKey);
-
-    try {
-      const res = await fetch("/api/videos/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: chunks[targetIndex], voice: voiceName })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-
-      // Only save if voice and language are still aligned
-      const currentLang = selectedLanguageRef.current || "en";
-      const currentVoice = getVoiceNameFromId(selectedVoiceIdRef.current);
-      if (lang === currentLang && voiceName === currentVoice) {
-        const objUrl = URL.createObjectURL(blob);
-        blobRef.current[targetIndex] = objUrl;
-
-        // Pre-arm the standby channel if this sentence is next in line
-        const activeIdx = (isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef).current;
-        if (targetIndex === activeIdx + 1 && activeAudioModeRef.current === mode) {
-          const standbyAudio = activeChannelRef.current === 'A' ? domAudioBRef.current : domAudioARef.current;
-          if (standbyAudio && standbyAudio.src !== objUrl) {
-            standbyAudio.src = objUrl;
-            standbyAudio.preload = "auto";
-            standbyAudio.load();
-          }
-        }
-        return objUrl;
-      }
-    } catch (err) {
-      console.warn(`[Lookahead Prefetcher] Error fetching sentence ${targetIndex}:`, err);
-    } finally {
-      inFlightFetchesRef.current.delete(fetchKey);
+    // If fetch is already in flight, return and await the existing promise rather than failing
+    const existing = inFlightPromisesRef.current.get(fetchKey);
+    if (existing) {
+      return existing;
     }
-    return null;
+
+    const fetchPromise = (async (): Promise<string | null> => {
+      try {
+        const res = await fetch("/api/videos/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunks[targetIndex], voice: voiceName })
+        });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          console.error(`[Speak API] Sentence ${targetIndex} error HTTP ${res.status}:`, errText);
+          return null;
+        }
+        const blob = await res.blob();
+
+        // Only save if voice and language are still aligned
+        const currentLang = selectedLanguageRef.current || "en";
+        const currentVoice = getVoiceNameFromId(selectedVoiceIdRef.current);
+        if (lang === currentLang && voiceName === currentVoice) {
+          const objUrl = URL.createObjectURL(blob);
+          blobRef.current[targetIndex] = objUrl;
+
+          // Pre-arm the standby channel if this sentence is next in line
+          const activeIdx = (isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef).current;
+          if (targetIndex === activeIdx + 1 && activeAudioModeRef.current === mode) {
+            const standbyAudio = activeChannelRef.current === 'A' ? domAudioBRef.current : domAudioARef.current;
+            if (standbyAudio && standbyAudio.src !== objUrl) {
+              standbyAudio.src = objUrl;
+              standbyAudio.preload = "auto";
+              standbyAudio.load();
+            }
+          }
+          return objUrl;
+        }
+        return null;
+      } catch (err) {
+        console.warn(`[Lookahead Prefetcher] Error fetching sentence ${targetIndex}:`, err);
+        return null;
+      } finally {
+        inFlightPromisesRef.current.delete(fetchKey);
+      }
+    })();
+
+    inFlightPromisesRef.current.set(fetchKey, fetchPromise);
+    return fetchPromise;
   };
 
   const ensureLookaheadWindow = (currentIndex: number, mode: 'summary' | 'report') => {
@@ -2372,6 +2385,11 @@ export default function VideosPage() {
     // Si aún no está en memoria local (ej. arranque en la frase 0), esperamos su síntesis ultra-rápida (~2s)
     if (!audioSrc) {
       audioSrc = await prefetchSentenceAudio(index, mode) || "";
+      if (!audioSrc) {
+        // Reintento automático en caso de micro-latencia
+        await new Promise((r) => setTimeout(r, 400));
+        audioSrc = await prefetchSentenceAudio(index, mode) || "";
+      }
       if (!audioSrc) {
         if (index !== activeIndexRef.current || mode !== activeAudioModeRef.current) return;
         setAudioError("Error al sintetizar audio inmediato.");
