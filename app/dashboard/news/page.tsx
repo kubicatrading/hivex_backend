@@ -923,49 +923,24 @@ export default function NewsPage() {
 
   // Jump to specific sentence index in the single audio file
   const handleSentenceClick = (index: number) => {
-    if (singleAudioRef.current) {
-      // Corte síncrono inmediato del audio previo para evitar solapamientos al saltar hacia adelante
-      singleAudioRef.current.pause();
-    }
-
     const ts = sentenceTimestamps[index];
     if (ts && singleAudioRef.current) {
       singleAudioRef.current.currentTime = ts.startTime;
-      singleAudioRef.current.play().catch((err) => {
-        if (err.name !== "AbortError") console.error(err);
-      });
+      singleAudioRef.current.play().catch(console.error);
       setIsPlayingAudio(true);
       setIsPausedAudio(false);
       setActiveSentenceIdx(index);
       activeSentenceIndexRef.current = index;
-
-      const targetId = ts.elementId || chunkTargetElementIdsRef.current[index];
-      if (targetId) {
-        const el = document.getElementById(targetId);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-      }
     } else if (sentenceChunksRef.current[index] && singleAudioRef.current) {
       const total = sentenceChunksRef.current.length;
       if (total > 0 && singleAudioRef.current.duration) {
         const ratio = index / total;
         singleAudioRef.current.currentTime = ratio * singleAudioRef.current.duration;
-        singleAudioRef.current.play().catch((err) => {
-          if (err.name !== "AbortError") console.error(err);
-        });
+        singleAudioRef.current.play().catch(console.error);
         setIsPlayingAudio(true);
         setIsPausedAudio(false);
         setActiveSentenceIdx(index);
         activeSentenceIndexRef.current = index;
-
-        const targetId = chunkTargetElementIdsRef.current[index];
-        if (targetId) {
-          const el = document.getElementById(targetId);
-          if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
-          }
-        }
       }
     }
   };
