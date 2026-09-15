@@ -2264,6 +2264,16 @@ export default function VideosPage() {
     const cacheKey = `${videoId}_${mode}_${voiceName}_${lang}`;
     const cachedTrack = cachedAudioTracksRef.current[cacheKey];
 
+    // Cortar de inmediato cualquier audio previo para reacción reactiva instantánea al click o salto
+    if (!cachedTrack || !cachedTrack.audioUrl) {
+      [domAudioARef.current, domAudioBRef.current].forEach(a => {
+        if (a) {
+          a.pause();
+          a.onended = null;
+        }
+      });
+    }
+
     const updateMediaSession = (currentSentenceIdx: number) => {
       if (typeof window !== "undefined" && "mediaSession" in navigator && selectedVideo) {
         try {
@@ -2974,6 +2984,7 @@ export default function VideosPage() {
 
       // Prioritize background preloading starting from the clicked sentence
       startBackgroundPreloadingForActiveTrack(index);
+      ensureLookaheadWindow(index, isReport ? 'report' : 'summary');
 
       playGeminiSentence(index);
     }
