@@ -501,6 +501,20 @@ async function handleSync(request: Request) {
     const issuesList = Object.keys(issuesMap);
     console.log(`[Sync Scraper] Found ${issuesList.length} valid weekly issues to sync.`);
 
+    if (searchParams.get("debug") === "1") {
+      return NextResponse.json({
+        debug: true,
+        loginSuccess: cookieHeader.includes("wordpress_logged_in_"),
+        cookieHeaderSnippet: cookieHeader.substring(0, 150),
+        homeStatusCode: homeRes.statusCode,
+        homeDataLength: homeRes.data?.length,
+        homeDataSnippet: homeRes.data?.substring(0, 600),
+        discoveredIssueSlugs: Array.from(discoveredIssueSlugs),
+        issuesMapKeys: Object.keys(issuesMap),
+        issuesList
+      });
+    }
+
     let totalArticlesSynced = 0;
     const syncedIssuesDetails = [];
 
