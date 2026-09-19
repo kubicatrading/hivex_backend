@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { processMagazineTranscribeAndSynthesis } from "../transcribe/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend to maximum Vercel limit to ensure async scraping runs smoothly without timing out
@@ -912,16 +913,12 @@ async function handleSync(request: Request) {
         }
       }
 
-      // Automatically trigger page-sliced transcription for this issue
+      // Automatically execute page-sliced v7 transcription & 18kbps audio synthesis for this issue
       try {
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://hivex-backend.vercel.app";
-        fetch(`${baseUrl}/api/news/transcribe`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ issueSlug })
-        }).catch((err) => console.warn(`[Sync Scraper] Error triggering transcribe for ${issueSlug}:`, err.message));
-      } catch (e: any) {
-        console.warn(`[Sync Scraper] Transcribe trigger exception:`, e.message);
+        console.log(`[Sync Scraper] Initiating automatic v7 transcription & synthesis for ${issueSlug}...`);
+        await processMagazineTranscribeAndSynthesis(issueSlug);
+      } catch (transcribeErr: any) {
+        console.error(`[Sync Scraper] Error in automatic v7 transcription for ${issueSlug}:`, transcribeErr?.message || transcribeErr);
       }
 
       syncedIssuesDetails.push({

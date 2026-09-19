@@ -38,8 +38,8 @@ export function encodePcmToMp3(pcmBuffer: Buffer, sampleRate = 24000, bitrateKbp
     // Fallback to pure JS lamejs
   }
 
-  // 2. Pure JS LAME fallback: lamejs fails and produces silence at <48kbps, so clamp to min 48kbps
-  const safeBitrate = Math.max(48, bitrateKbps);
+  // 2. Pure JS LAME fallback: encode at requested bitrate (default 18kbps)
+  const safeBitrate = bitrateKbps || 18;
   const numSamples = Math.floor(pcmBuffer.length / 2);
   const samples = new Int16Array(numSamples);
   for (let i = 0; i < numSamples; i++) {
