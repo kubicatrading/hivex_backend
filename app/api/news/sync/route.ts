@@ -502,13 +502,49 @@ async function handleSync(request: Request) {
     console.log(`[Sync Scraper] Found ${issuesList.length} valid weekly issues to sync.`);
 
     if (searchParams.get("debug") === "1") {
+      const browserHeaders = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://trendsjournal.com/login/",
+        "Cookie": cookieHeader
+      };
+
+      const testHomeWithHeaders = await makeRequest({
+        hostname: "trendsjournal.com",
+        path: "/",
+        method: "GET",
+        headers: browserHeaders
+      });
+
+      const testIssueRes = await makeRequest({
+        hostname: "trendsjournal.com",
+        path: "/issue/september-15-2026/",
+        method: "GET",
+        headers: browserHeaders
+      });
+
+      const testArtRes = await makeRequest({
+        hostname: "trendsjournal.com",
+        path: "/lvmh-share-price-crashes-as-global-chaos-crimps-luxury-sales/",
+        method: "GET",
+        headers: browserHeaders
+      });
+
       return NextResponse.json({
         debug: true,
         loginSuccess: cookieHeader.includes("wordpress_logged_in_"),
         cookieHeaderSnippet: cookieHeader.substring(0, 150),
-        homeStatusCode: homeRes.statusCode,
-        homeDataLength: homeRes.data?.length,
-        homeDataSnippet: homeRes.data?.substring(0, 600),
+        homeOriginalStatusCode: homeRes.statusCode,
+        homeWithHeadersStatus: testHomeWithHeaders.statusCode,
+        homeWithHeadersLength: testHomeWithHeaders.data?.length,
+        homeWithHeadersSnippet: testHomeWithHeaders.data?.substring(0, 200),
+        issueStatus: testIssueRes.statusCode,
+        issueLength: testIssueRes.data?.length,
+        issueSnippet: testIssueRes.data?.substring(0, 200),
+        artStatus: testArtRes.statusCode,
+        artLength: testArtRes.data?.length,
+        artSnippet: testArtRes.data?.substring(0, 200),
         discoveredIssueSlugs: Array.from(discoveredIssueSlugs),
         issuesMapKeys: Object.keys(issuesMap),
         issuesList
