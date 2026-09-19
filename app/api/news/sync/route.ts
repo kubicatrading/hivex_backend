@@ -6,6 +6,13 @@ export const maxDuration = 300; // Extend to maximum Vercel limit to ensure asyn
 // The ADMIN Profile ID used to store global documents visible to all HIVEX users
 const GLOBAL_ADMIN_USER_ID = "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
 
+const DEFAULT_BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
+  "Upgrade-Insecure-Requests": "1"
+};
+
 interface ArticleMetadata {
   is_magazine_article: boolean;
   issue_slug: string;
@@ -19,7 +26,16 @@ interface ArticleMetadata {
 function makeRequest(options: any, postData: string | null = null, redirectCount: number = 0): Promise<{ statusCode: number; headers: any; data: string }> {
   const https = require("https");
   return new Promise((resolve, reject) => {
-    const req = https.request(options, (res: any) => {
+    const mergedHeaders = {
+      ...DEFAULT_BROWSER_HEADERS,
+      ...(options.headers || {})
+    };
+    const reqOptions = {
+      ...options,
+      headers: mergedHeaders
+    };
+
+    const req = https.request(reqOptions, (res: any) => {
       let data = "";
       res.on("data", (chunk: string) => { data += chunk; });
       res.on("end", async () => {
@@ -46,6 +62,11 @@ function makeRequest(options: any, postData: string | null = null, redirectCount
             // Fallback to current response on redirect parse error
           }
         }
+
+        if (res.statusCode === 403 || data.includes("<title>Just a moment...</title>")) {
+          console.warn(`[Sync Scraper] Cloudflare bot challenge/403 encountered on ${options.path}`);
+        }
+
         resolve({
           statusCode: res.statusCode || 200,
           headers: res.headers,
@@ -64,12 +85,21 @@ function makeRequest(options: any, postData: string | null = null, redirectCount
 function downloadBinaryFile(options: any, postData: string | null = null): Promise<Buffer> {
   const https = require("https");
   return new Promise((resolve, reject) => {
-    const req = https.request(options, (res: any) => {
+    const mergedHeaders = {
+      ...DEFAULT_BROWSER_HEADERS,
+      ...(options.headers || {})
+    };
+    const reqOptions = {
+      ...options,
+      headers: mergedHeaders
+    };
+
+    const req = https.request(reqOptions, (res: any) => {
       const chunks: any[] = [];
       res.on("data", (chunk: any) => { chunks.push(chunk); });
       res.on("end", () => {
         if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`Failed to download binary file, status code: ${res.statusCode}`));
+          reject(new Error(`Failed to download binary file from ${options.path}, status code: ${res.statusCode}`));
         } else {
           resolve(Buffer.concat(chunks));
         }
@@ -83,11 +113,20 @@ function downloadBinaryFile(options: any, postData: string | null = null): Promi
   });
 }
 
+function normalizeIssueSlug(rawSlug: string): string {
+  const clean = rawSlug.toLowerCase().replace("category-", "").trim();
+  const d = parseIssueCategoryToDate(clean);
+  if (!d) return clean;
+  const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  return `${d.getUTCDate()}-${months[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+}
+
 async function fetchIssuePage(cookieHeader: string, issueSlug: string, homeHtml: string): Promise<{ data: string; resolvedSlug: string } | null> {
-  const parts = issueSlug.split("-");
+  const normalizedSlug = normalizeIssueSlug(issueSlug);
+  const parts = normalizedSlug.split("-");
   let resolvedSlug = issueSlug;
 
-  const issuePageRegex = /href="https:\/\/trendsjournal.com\/issue\/([^/"]+)\/?"/gi;
+  const issuePageRegex = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/gi;
   let match;
   const foundIssueSlugs: string[] = [];
   while ((match = issuePageRegex.exec(homeHtml)) !== null) {
@@ -95,26 +134,28 @@ async function fetchIssuePage(cookieHeader: string, issueSlug: string, homeHtml:
   }
 
   if (parts.length === 3) {
-    const day = parts[0].match(/^\d+$/) ? parts[0] : parts[1];
-    const month = parts[0].match(/^\d+$/) ? parts[1] : parts[0];
+    const day = parts[0];
+    const month = parts[1];
     const year = parts[2];
 
-    const matched = foundIssueSlugs.find(slug => 
-      slug.includes(year) && 
-      slug.includes(month.toLowerCase()) && 
-      (slug.includes(`-${day}-`) || slug.startsWith(`${day}-`) || slug.endsWith(`-${day}`))
-    );
+    const matched = foundIssueSlugs.find(slug => {
+      const s = slug.toLowerCase();
+      return s.includes(year) && 
+        s.includes(month.toLowerCase()) && 
+        (s.includes(`-${day}-`) || s.startsWith(`${day}-`) || s.endsWith(`-${day}`));
+    });
     if (matched) {
       resolvedSlug = matched;
       console.log(`[Sync Scraper] Dynamically resolved WordPress page slug to: ${resolvedSlug} (for ${issueSlug})`);
     }
   }
 
-  const pathsToTry = [
+  const pathsToTry = Array.from(new Set([
     `/issue/${resolvedSlug}/`,
     `/issue/${resolvedSlug}`,
-    `/issue/${issueSlug}/`
-  ];
+    `/issue/${issueSlug}/`,
+    `/issue/${normalizedSlug}/`
+  ]));
 
   for (const path of pathsToTry) {
     try {
@@ -124,11 +165,11 @@ async function fetchIssuePage(cookieHeader: string, issueSlug: string, homeHtml:
         path: path,
         method: "GET",
         headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Cookie": cookieHeader
+          "Cookie": cookieHeader,
+          "Referer": "https://trendsjournal.com/"
         }
       });
-      if (res.statusCode === 200 && res.data.length > 5000) {
+      if (res.statusCode === 200 && res.data.length > 5000 && !res.data.includes("<title>Just a moment...</title>")) {
         return { data: res.data, resolvedSlug: resolvedSlug };
       }
     } catch (e) {
@@ -174,8 +215,8 @@ function parseIssueCategoryToDate(categorySlug: string): Date | null {
 
 // Map English month names to beautiful Spanish titles
 function formatSpanishIssueTitle(slug: string): string {
-  // Format: 4-august-2026
-  const parts = slug.split("-");
+  const norm = normalizeIssueSlug(slug);
+  const parts = norm.split("-");
   if (parts.length === 3) {
     const day = parts[0];
     const monthEn = parts[1].toLowerCase();
@@ -361,8 +402,8 @@ async function handleSync(request: Request) {
       path: "/",
       method: "GET",
       headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Cookie": cookieHeader
+        "Cookie": cookieHeader,
+        "Referer": "https://trendsjournal.com/login/"
       }
     });
 
@@ -406,7 +447,7 @@ async function handleSync(request: Request) {
         const issueDate = parseIssueCategoryToDate(issueCategory);
         if (!issueDate || issueDate < limitDate) continue;
 
-        const issueSlug = rawIssueSlug;
+        const issueSlug = normalizeIssueSlug(rawIssueSlug);
 
         // Extract title and URL
         const titleMatch = /<h3 class="cmsmasters_[a-z_]+_title[^>]*>\s*<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h3>/i.exec(content);
@@ -424,7 +465,9 @@ async function handleSync(request: Request) {
         const classList = classes.split(/\s+/);
         const subCategoryClass = classList.find(cls => 
           cls.startsWith("category-") && 
-          !cls.endsWith(issueSlug) && 
+          !cls.endsWith(rawIssueSlug) && 
+          !cls.endsWith(issueSlug) &&
+          cls !== `category-${rawIssueSlug}` &&
           cls !== `category-${issueSlug}` &&
           !cls.match(/^category-((\d{1,2}-[a-z]+-\d{4})|([a-z]+-\d{1,2}-\d{4}))$/i)
         );
@@ -459,7 +502,7 @@ async function handleSync(request: Request) {
 
     const issuesMap = parseArticlesFromHtml(homeRes.data);
 
-    // Extract all issue links from the homepage (e.g. /issue/august-25-2026/, /issue/august-18-2026/, /issue/august-11-2026/, /issue/august-4-2026/, /issue/july-28-2026/)
+    // Extract all issue links from the homepage
     const issueLinkRegex = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/gi;
     let linkMatch;
     const discoveredIssueSlugs = new Set<string>();
@@ -475,7 +518,8 @@ async function handleSync(request: Request) {
 
     // Crawl archive page for any discovered issue link not fully populated from homepage
     for (const slug of Array.from(discoveredIssueSlugs)) {
-      const alreadyPresent = Object.keys(issuesMap).some(s => s.includes(slug) || slug.includes(s));
+      const normSlug = normalizeIssueSlug(slug);
+      const alreadyPresent = Object.keys(issuesMap).some(s => normalizeIssueSlug(s) === normSlug);
       if (!alreadyPresent) {
         console.log(`[Sync Scraper] Fetching archive page for issue link: /issue/${slug}/ ...`);
         const pageRes = await makeRequest({
@@ -483,73 +527,88 @@ async function handleSync(request: Request) {
           path: `/issue/${slug}/`,
           method: "GET",
           headers: {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Cookie": cookieHeader
+            "Cookie": cookieHeader,
+            "Referer": "https://trendsjournal.com/"
           }
         });
-        if (pageRes.statusCode === 200 && pageRes.data) {
+        if (pageRes.statusCode === 200 && pageRes.data && !pageRes.data.includes("<title>Just a moment...</title>")) {
           const pageIssues = parseArticlesFromHtml(pageRes.data);
           Object.keys(pageIssues).forEach(s => {
-            if (!issuesMap[s]) {
-              issuesMap[s] = pageIssues[s];
+            const normalizedKey = normalizeIssueSlug(s);
+            if (!issuesMap[normalizedKey]) {
+              issuesMap[normalizedKey] = pageIssues[s];
             }
           });
         }
       }
     }
 
-    const issuesList = Object.keys(issuesMap);
-    console.log(`[Sync Scraper] Found ${issuesList.length} valid weekly issues to sync.`);
-
-    if (searchParams.get("debug") === "1") {
-      const browserHeaders = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://trendsjournal.com/login/",
-        "Cookie": cookieHeader
-      };
-
-      const testHomeWithHeaders = await makeRequest({
+    // Also discover recent articles from public RSS feed as a secondary high-resilience layer
+    try {
+      const rssRes = await makeRequest({
         hostname: "trendsjournal.com",
-        path: "/",
+        path: "/feed/",
         method: "GET",
-        headers: browserHeaders
+        headers: {
+          "Referer": "https://trendsjournal.com/"
+        }
       });
+      if (rssRes.statusCode === 200 && rssRes.data) {
+        const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+        let itemMatch;
+        while ((itemMatch = itemRegex.exec(rssRes.data)) !== null) {
+          const itemContent = itemMatch[1];
+          const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(itemContent);
+          const linkMatch = /<link>([\s\S]*?)<\/link>/i.exec(itemContent);
+          const descMatch = /<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/i.exec(itemContent) || /<description>([\s\S]*?)<\/description>/i.exec(itemContent);
+          const guidMatch = /<guid[^>]*>https:\/\/trendsjournal\.com\/\?p=(\d+)<\/guid>/i.exec(itemContent);
 
-      const testIssueRes = await makeRequest({
-        hostname: "trendsjournal.com",
-        path: "/issue/september-15-2026/",
-        method: "GET",
-        headers: browserHeaders
-      });
+          const catRegex = /<category><!\[CDATA\[(.*?)\]\]><\/category>/gi;
+          let cMatch;
+          let issueDate: Date | null = null;
+          let rawIssueSlug = "";
+          let articleCat = "GENERAL";
 
-      const testArtRes = await makeRequest({
-        hostname: "trendsjournal.com",
-        path: "/lvmh-share-price-crashes-as-global-chaos-crimps-luxury-sales/",
-        method: "GET",
-        headers: browserHeaders
-      });
+          while ((cMatch = catRegex.exec(itemContent)) !== null) {
+            const catText = cMatch[1].trim();
+            const d = parseIssueCategoryToDate(`category-${catText.toLowerCase().replace(/\s+/g, "-")}`);
+            if (d && !issueDate) {
+              issueDate = d;
+              rawIssueSlug = catText.toLowerCase().replace(/\s+/g, "-");
+            } else if (catText.toUpperCase().startsWith("TRENDS") || catText.toUpperCase().startsWith("THE ") || !catText.match(/\d/)) {
+              articleCat = catText.toUpperCase();
+            }
+          }
 
-      return NextResponse.json({
-        debug: true,
-        loginSuccess: cookieHeader.includes("wordpress_logged_in_"),
-        cookieHeaderSnippet: cookieHeader.substring(0, 150),
-        homeOriginalStatusCode: homeRes.statusCode,
-        homeWithHeadersStatus: testHomeWithHeaders.statusCode,
-        homeWithHeadersLength: testHomeWithHeaders.data?.length,
-        homeWithHeadersSnippet: testHomeWithHeaders.data?.substring(0, 200),
-        issueStatus: testIssueRes.statusCode,
-        issueLength: testIssueRes.data?.length,
-        issueSnippet: testIssueRes.data?.substring(0, 200),
-        artStatus: testArtRes.statusCode,
-        artLength: testArtRes.data?.length,
-        artSnippet: testArtRes.data?.substring(0, 200),
-        discoveredIssueSlugs: Array.from(discoveredIssueSlugs),
-        issuesMapKeys: Object.keys(issuesMap),
-        issuesList
-      });
+          if (issueDate && issueDate >= limitDate && titleMatch && linkMatch && rawIssueSlug) {
+            const normSlug = normalizeIssueSlug(rawIssueSlug);
+            const title = titleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, "$1").trim();
+            const url = linkMatch[1].trim();
+            const excerpt = descMatch ? descMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+            const postId = guidMatch ? guidMatch[1] : (url.split("/").filter(Boolean).pop() || url);
+
+            if (!issuesMap[normSlug]) {
+              issuesMap[normSlug] = { date: issueDate, articles: [] };
+            }
+            if (!issuesMap[normSlug].articles.some(a => a.url === url || a.id === postId)) {
+              issuesMap[normSlug].articles.push({
+                id: postId,
+                title,
+                url,
+                imgUrl: "",
+                category: articleCat,
+                excerpt
+              });
+            }
+          }
+        }
+      }
+    } catch (rssErr: any) {
+      console.warn("[Sync Scraper] RSS feed discovery skipped:", rssErr.message);
     }
+
+    const issuesList = Object.keys(issuesMap);
+    console.log(`[Sync Scraper] Found ${issuesList.length} valid weekly issues to sync:`, issuesList);
 
     let totalArticlesSynced = 0;
     const syncedIssuesDetails = [];
@@ -575,6 +634,7 @@ async function handleSync(request: Request) {
       let existingSummaryText = existingIssue?.metadata?.summary || "";
       let resolvedPdfUrl = existingIssue?.file_url || "";
       let pdfUpdated = false;
+      let detectedPageCount = 0;
 
       // If there's no PDF, or the URL doesn't point to Supabase Storage, fetch and upload it
       if (!resolvedPdfUrl || !resolvedPdfUrl.includes(".supabase.co/")) {
@@ -602,12 +662,22 @@ async function handleSync(request: Request) {
                 path: pdfUrlObj.pathname,
                 method: "GET",
                 headers: {
-                  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                  "Cookie": cookieHeader
+                  "Cookie": cookieHeader,
+                  "Referer": "https://trendsjournal.com/"
                 }
               });
 
               if (pdfBuffer && pdfBuffer.length > 10000) {
+                const pdfText = pdfBuffer.toString("latin1");
+                const countMatch = pdfText.match(/\/Count\s+(\d+)/);
+                if (countMatch) {
+                  detectedPageCount = parseInt(countMatch[1]);
+                } else {
+                  const pageMatches = pdfText.match(/\/Type\s*\/Page\b/g);
+                  if (pageMatches) detectedPageCount = pageMatches.length;
+                }
+                console.log(`[Sync Scraper] Detected ${detectedPageCount} pages in PDF for ${issueSlug}`);
+
                 const storagePath = `magazines/${issueSlug}.pdf`;
                 const { error: uploadError } = await supabase.storage
                   .from("documents")
@@ -669,8 +739,8 @@ async function handleSync(request: Request) {
           path: artUrlObj.pathname,
           method: "GET",
           headers: {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Cookie": cookieHeader
+            "Cookie": cookieHeader,
+            "Referer": "https://trendsjournal.com/"
           }
         });
 
@@ -756,8 +826,8 @@ async function handleSync(request: Request) {
               path: coverUrlObj.pathname + coverUrlObj.search,
               method: "GET",
               headers: {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                "Cookie": cookieHeader
+                "Cookie": cookieHeader,
+                "Referer": "https://trendsjournal.com/"
               }
             });
 
@@ -798,7 +868,7 @@ async function handleSync(request: Request) {
           summary: newSummary || existingMeta.summary,
           page_count: existingMeta.page_count !== undefined 
             ? existingMeta.page_count 
-            : (issueSlug.includes("18-august") ? 174 : issueSlug.includes("11-august") || issueSlug.includes("25-august") ? 148 : 158),
+            : (detectedPageCount || (issueSlug.includes("18-august") ? 174 : issueSlug.includes("11-august") || issueSlug.includes("25-august") ? 148 : 191)),
           is_favorite: existingMeta.is_favorite !== undefined ? existingMeta.is_favorite : false,
           author: existingMeta.author || "Gerald Celente / Trends Journal"
         };
