@@ -189,19 +189,23 @@ const newsTranslations: Record<string, any> = {
 function getValidCoverUrl(coverUrl?: string, slug?: string, title?: string): string {
   let s = slug;
   if (!s || s === "undefined") {
-    const t = title || "";
-    if (t.includes("25")) s = "25-august-2026";
+    const t = (title || "").toLowerCase();
+    if (t.includes("15") || t.includes("september") || t.includes("septiembre")) s = "15-september-2026";
+    else if (t.includes("25")) s = "25-august-2026";
     else if (t.includes("18")) s = "18-august-2026";
     else if (t.includes("11")) s = "11-august-2026";
     else s = "4-august-2026";
   }
   if (!s) s = "4-august-2026";
 
-  if (coverUrl && coverUrl.includes("documents/covers/") && coverUrl.includes("?v=hivex3")) {
+  if (coverUrl && coverUrl.startsWith("http")) {
+    if (coverUrl.includes("documents/covers/")) {
+      return coverUrl.includes("?v=") ? coverUrl : `${coverUrl}?v=hivex4`;
+    }
     return coverUrl;
   }
 
-  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex3`;
+  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex4`;
 }
 
 const getLocalizedTitle = (title: string, lang: string) => {
@@ -2813,8 +2817,13 @@ export default function NewsPage() {
                     referrerPolicy="no-referrer"
                     onError={(e) => {
                       const target = e.currentTarget;
-                      const s = selectedIssue?.metadata?.slug || (selectedIssue?.title?.includes("18") ? "18-august-2026" : selectedIssue?.title?.includes("11") ? "11-august-2026" : "4-august-2026");
-                      target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex3`;
+                      const s = selectedIssue?.metadata?.slug || (
+                        selectedIssue?.title?.includes("15") ? "15-september-2026" :
+                        selectedIssue?.title?.includes("25") ? "25-august-2026" :
+                        selectedIssue?.title?.includes("18") ? "18-august-2026" :
+                        selectedIssue?.title?.includes("11") ? "11-august-2026" : "4-august-2026"
+                      );
+                      target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex4`;
                     }}
                   />
                 </div>
@@ -2963,8 +2972,13 @@ export default function NewsPage() {
                           referrerPolicy="no-referrer"
                           onError={(e) => {
                             const target = e.currentTarget;
-                            const s = issue.metadata?.slug || (issue.title?.includes("18") ? "18-august-2026" : issue.title?.includes("11") ? "11-august-2026" : "4-august-2026");
-                            target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex3`;
+                            const s = issue.metadata?.slug || (
+                              issue.title?.includes("15") ? "15-september-2026" :
+                              issue.title?.includes("25") ? "25-august-2026" :
+                              issue.title?.includes("18") ? "18-august-2026" :
+                              issue.title?.includes("11") ? "11-august-2026" : "4-august-2026"
+                            );
+                            target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex4`;
                           }}
                         />
 

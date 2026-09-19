@@ -623,13 +623,16 @@ async function handleSync(request: Request) {
       const coverUrl = firstWithImage ? firstWithImage.imgUrl : "";
 
       // Check if this Weekly Issue document already exists
-      const { data: existingIssue } = await supabase
+      const { data: existingIssues } = await supabase
         .from("documents")
         .select("*")
-        .in("type", ["knowledge_transcription", "knowledge_summary"])
+        .eq("type", "knowledge_transcription")
+        .eq("metadata->>is_magazine_issue", "true")
         .eq("metadata->>slug", issueSlug)
-        .maybeSingle();
+        .order("created_at", { ascending: true })
+        .limit(1);
 
+      const existingIssue = existingIssues && existingIssues.length > 0 ? existingIssues[0] : null;
       let issueDocId = existingIssue?.id;
       let existingSummaryText = existingIssue?.metadata?.summary || "";
       let resolvedPdfUrl = existingIssue?.file_url || "";
@@ -817,47 +820,48 @@ async function handleSync(request: Request) {
           existingSummaryText = newSummary;
         }
 
-        let supabaseCoverUrl = "";
-        if (coverUrl && coverUrl.startsWith("http")) {
-          try {
-            const coverUrlObj = new URL(coverUrl);
-            const coverBuffer = await downloadBinaryFile({
-              hostname: coverUrlObj.hostname,
-              path: coverUrlObj.pathname + coverUrlObj.search,
-              method: "GET",
-              headers: {
-                "Cookie": cookieHeader,
-                "Referer": "https://trendsjournal.com/"
-              }
-            });
+        const existingMeta = existingIssue?.metadata || {};
+        const defaultStorageCover = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${issueSlug}.jpg?v=hivex4`;
+        let finalCoverUrl = existingMeta.cover_url;
 
-            if (coverBuffer && coverBuffer.length > 5000) {
-              const coverStoragePath = `covers/${issueSlug}.jpg`;
-              const { error: coverUploadError } = await supabase.storage
-                .from("documents")
-                .upload(coverStoragePath, coverBuffer, {
-                  contentType: "image/jpeg",
-                  upsert: true
-                });
+        // Only attempt fallback image upload if there is genuinely no cover configured
+        if (!finalCoverUrl || !finalCoverUrl.startsWith("http")) {
+          finalCoverUrl = defaultStorageCover;
+          if (coverUrl && coverUrl.startsWith("http")) {
+            try {
+              const coverUrlObj = new URL(coverUrl);
+              const coverBuffer = await downloadBinaryFile({
+                hostname: coverUrlObj.hostname,
+                path: coverUrlObj.pathname + coverUrlObj.search,
+                method: "GET",
+                headers: {
+                  "Cookie": cookieHeader,
+                  "Referer": "https://trendsjournal.com/"
+                }
+              });
 
-              if (!coverUploadError) {
-                const { data: { publicUrl } } = supabase.storage
+              if (coverBuffer && coverBuffer.length > 5000) {
+                const coverStoragePath = `covers/${issueSlug}.jpg`;
+                const { error: coverUploadError } = await supabase.storage
                   .from("documents")
-                  .getPublicUrl(coverStoragePath);
-                supabaseCoverUrl = publicUrl;
-                console.log(`[Sync Scraper] Uploaded cover image to Supabase Storage: ${publicUrl}`);
+                  .upload(coverStoragePath, coverBuffer, {
+                    contentType: "image/jpeg",
+                    upsert: false // Do not overwrite an existing official cover
+                  });
+
+                if (!coverUploadError) {
+                  const { data: { publicUrl } } = supabase.storage
+                    .from("documents")
+                    .getPublicUrl(coverStoragePath);
+                  finalCoverUrl = `${publicUrl}?v=hivex4`;
+                  console.log(`[Sync Scraper] Uploaded initial cover image to Supabase Storage: ${finalCoverUrl}`);
+                }
               }
+            } catch (err: any) {
+              console.warn(`[Sync Scraper] Cover image upload skipped for ${issueSlug}:`, err.message);
             }
-          } catch (err: any) {
-            console.warn(`[Sync Scraper] Cover image upload failed for ${issueSlug}:`, err.message);
           }
         }
-
-        const existingMeta = existingIssue?.metadata || {};
-        const finalCoverUrl = supabaseCoverUrl ||
-          (existingMeta.cover_url && existingMeta.cover_url.startsWith("http")
-            ? existingMeta.cover_url
-            : `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${issueSlug}.jpg`);
 
         const mergedMetadata = {
           ...existingMeta,
