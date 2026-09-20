@@ -53,6 +53,12 @@ async function handleHealthCheck(request: NextRequest) {
     let failedVideosList: any[] = [];
     let dbErrorMessage = "";
 
+    // News / Magazines metrics
+    let totalMagazines = 0;
+    let readyMagazinesCount = 0;
+    let pendingMagazinesCount = 0;
+    let pendingMagazinesList: any[] = [];
+
     try {
       const dbStart = Date.now();
       // Test basic connectivity and query recent videos
@@ -94,6 +100,67 @@ async function handleHealthCheck(request: NextRequest) {
             });
           }
         });
+      }
+
+      // Query magazine issues for News Health Check
+      const { data: rawIssues, error: issuesErr } = await supabaseAdmin
+        .from("documents")
+        .select("id, title, file_url, created_at, metadata")
+        .eq("metadata->>is_magazine_issue", "true")
+        .order("created_at", { ascending: false });
+
+      if (issuesErr) {
+        console.warn("[Health Check] Error querying magazine issues:", issuesErr);
+      }
+
+      const magazineIssues = (rawIssues || []).filter(issue => {
+        const title = issue.title || "";
+        return !title.startsWith("[Resumen]") && !title.startsWith("[Análisis]") && !title.startsWith("[Gráficos]");
+      });
+
+      // Query articles to cross-reference with issues
+      const { data: allArticles } = await supabaseAdmin
+        .from("documents")
+        .select("id, metadata->>issue_slug, metadata->>start_page")
+        .eq("metadata->>is_magazine_article", "true");
+
+      const articlesBySlug: Record<string, any[]> = {};
+      (allArticles || []).forEach((a: any) => {
+        const s = a.issue_slug;
+        if (!articlesBySlug[s]) articlesBySlug[s] = [];
+        articlesBySlug[s].push(a);
+      });
+
+      totalMagazines = magazineIssues.length;
+
+      for (const mag of magazineIssues) {
+        const slug = mag.metadata?.slug;
+        const arts = slug ? articlesBySlug[slug] || [] : [];
+        const artCount = arts.length;
+        const hasValidPages = artCount > 0 && arts.some(a => a.start_page !== null && a.start_page !== undefined);
+
+        const hasAudio = !!mag.metadata?.audio_url && mag.metadata?.audio_status === "ready";
+        const timestampsCount = Array.isArray(mag.metadata?.sentence_timestamps) ? mag.metadata.sentence_timestamps.length : 0;
+        const hasTimestamps = timestampsCount > 50;
+
+        const isComplete = artCount > 0 && hasValidPages && hasAudio && hasTimestamps;
+
+        if (isComplete) {
+          readyMagazinesCount++;
+        } else {
+          pendingMagazinesCount++;
+          pendingMagazinesList.push({
+            title: mag.title,
+            slug: slug || mag.id,
+            artCount,
+            hasValidPages,
+            hasAudio,
+            audioDuration: mag.metadata?.audio_duration || 0,
+            timestampsCount,
+            hasTimestamps,
+            created_at: mag.created_at
+          });
+        }
       }
     } catch (err: any) {
       dbErrorMessage = err?.message || JSON.stringify(err);
@@ -154,6 +221,28 @@ async function handleHealthCheck(request: NextRequest) {
       reportMd += `🌟 <b>¡Cola de procesamiento al día!</b> Todos los contenidos han sido analizados y publicados con éxito.\n\n`;
     }
 
+    reportMd += `<b>📰 ESTADO DE REVISTAS / NEWS (CABINA EDITORIAL)</b>\n`;
+    reportMd += `• <b>Ediciones registradas:</b> ${totalMagazines}\n`;
+    reportMd += `• <b>Ediciones completas (Texto v7, Audio 18k, Timestamps):</b> ${readyMagazinesCount} ✅\n`;
+    reportMd += `• <b>Ediciones pendientes o encalladas:</b> ${pendingMagazinesCount} ${pendingMagazinesCount > 0 ? "⏳" : "🟢"}\n\n`;
+
+    if (pendingMagazinesCount > 0 && dbReachable) {
+      reportMd += `<b>⚠️ EDICIONES PENDIENTES DE PROCESAMIENTO EDITORIAL</b>\n`;
+      pendingMagazinesList.forEach((m, idx) => {
+        const cleanTitle = m.title.replace(/[\[\]()]/g, "");
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://hivex-backend.vercel.app";
+        const viewerUrl = `${appUrl}/dashboard/news?slug=${m.slug}`;
+
+        reportMd += `${idx + 1}. <a href="${viewerUrl}">${cleanTitle}</a>\n`;
+        reportMd += `   • Artículos segmentados: <code>${m.artCount} artículos</code> (${m.hasValidPages ? "Páginas mapeadas ✅" : "⚠️ Falta mapeo de página"})\n`;
+        reportMd += `   • Audio (18kbps): ${m.hasAudio ? `<code>Listo (${Math.round(m.audioDuration / 60)} min) ✅</code>` : "<code>⏳ Pendiente / En síntesis</code>"}\n`;
+        reportMd += `   • Marcas de tiempo: ${m.hasTimestamps ? `<code>${m.timestampsCount} marcas ✅</code>` : "<code>⏳ Pendiente</code>"}\n`;
+      });
+      reportMd += `\n<i>Nota: La sincronización v7 consolida la extracción jerárquica de 3 niveles, corte de páginas del PDF y síntesis continua a 18kbps.</i>\n\n`;
+    } else if (dbReachable) {
+      reportMd += `🌟 <b>¡Hemeroteca editorial al día!</b> Todas las revistas cuentan con segmentación de páginas, audio a 18kbps y marcas de tiempo verificadas.\n\n`;
+    }
+
     reportMd += `<i>Mesa de Operaciones de HIVEX</i>`;
 
     if (!dryRun) {
@@ -171,6 +260,10 @@ async function handleHealthCheck(request: NextRequest) {
         total_videos_24h: totalVideos24h,
         analyzed_count: analyzedVideosCount,
         pending_count: pendingVideosCount,
+        news_total_magazines: totalMagazines,
+        news_ready_count: readyMagazinesCount,
+        news_pending_count: pendingMagazinesCount,
+        news_pending_magazines: pendingMagazinesList,
         dispatched_telegram: !dryRun
       }
     });
