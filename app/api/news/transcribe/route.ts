@@ -4,13 +4,14 @@ import { PDFParse } from "pdf-parse";
 import crypto from "crypto";
 import { sendMagazineNotification } from "@/lib/telegram";
 import { encodePcmToMp3 } from "@/lib/audio/mp3Encoder";
+import { cleanSummaryForSpeech, splitParagraphIntoSentences, extractMagazineSentences } from "@/lib/magazineSentences";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 function getSupabaseClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://lhtlrztsmkllcqiziftn.supabase.co";
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "dummy";
+  const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "https://lhtlrztsmkllcqiziftn.supabase.co";
+  const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "dummy";
   return createClient(supabaseUrl, supabaseServiceKey);
 }
 
@@ -92,68 +93,6 @@ function cleanLeadingHeaders(rawBody: string, mainCategory = "", subcategory = "
   return text;
 }
 
-function cleanSummaryForSpeech(text: string): string {
-  if (!text) return "";
-  let clean = text.replace(/<[^>]*>/g, "");
-  clean = clean.replace(/[*_~#`]/g, "");
-  clean = clean.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-  clean = clean.replace(/https?:\/\/\S+/g, "");
-  clean = clean.replace(/--+/g, " ");
-  clean = clean.replace(/^\s*[-+*]\s+/gm, "");
-  clean = clean.replace(/^\s*\d+\.\s+/gm, "");
-  clean = clean.replace(/^\s*>\s*/gm, "");
-  clean = clean.replace(/\s+/g, " ").trim();
-  return clean;
-}
-
-function splitParagraphIntoSentences(text: string): string[] {
-  if (!text) return [];
-  let protectedText = text;
-
-  // Protect ellipses
-  protectedText = protectedText.replace(/…/g, " _ELLIP_ ");
-  protectedText = protectedText.replace(/\.{2,}/g, " _ELLIP_ ");
-
-  // Protect decimal numbers
-  protectedText = protectedText.replace(/\b(\d+)\.(\d+)\b/g, "$1_DEC_DOT_$2");
-
-  // Protect acronyms
-  protectedText = protectedText.replace(/\b([A-Za-z]{1,4}(?:\.[A-Za-z]{1,4})+)\b\.?/gi, (match) => {
-    return match.replace(/\./g, "_ACR_DOT_");
-  });
-
-  // Protect common abbreviations
-  const abbrevs = [
-    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "vs", "fed", "corp", "inc",
-    "co", "ltd", "bros", "ca", "jan", "feb", "mar", "apr", "jun", "jul", "aug",
-    "sep", "oct", "nov", "dec", "etc", "no", "nos", "st", "ave", "blvd", "vol",
-    "vols", "ed", "eds", "pp", "p.m", "a.m"
-  ];
-  abbrevs.forEach(abbrev => {
-    const regex = new RegExp("\\b(" + abbrev + ")\\.(?=\\s|$)", "gi");
-    protectedText = protectedText.replace(regex, "$1_ABB_DOT_");
-  });
-
-  // Protect initials
-  protectedText = protectedText.replace(/\b([A-Z])\.(?=\s+[A-Z])/g, "$1_INI_DOT_");
-
-  const sentences = protectedText.match(/[^.!?]+[.!?]*/g) || [protectedText];
-
-  return sentences
-    .map((s) => {
-      return s
-        .replace(/_DEC_DOT_/g, ".")
-        .replace(/_ACR_DOT_/g, ".")
-        .replace(/_ABB_DOT_/g, ".")
-        .replace(/_INI_DOT_/g, ".")
-        .replace(/_ELLIP_/g, "...")
-        .trim();
-    })
-    .filter((s) => {
-      const clean = s.replace(/[\s.!?…"':;,\-–—()\[\]]/g, "");
-      return clean.length > 0;
-    });
-}
 
 function deduplicateArticles(rawList: any[]): any[] {
   const seen = new Set<string>();
@@ -492,42 +431,19 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
 
   console.log(`[News Transcribe v7] Successfully inserted ${insertedArticles.length} clean articles with start_page into Supabase!`);
 
-  // 8. Build Canonical Chunks with v7 sentence shielding
-  const canonicalChunks: any[] = [];
-  let globalSentenceIdx = 0;
+  // 8. Build Canonical Chunks with 100% parity to news/page.tsx
+  const sortedArticles = [...insertedArticles].sort((a, b) => {
+    return Number(a.metadata?.order_index ?? 9999) - Number(b.metadata?.order_index ?? 9999);
+  });
 
-  for (const art of insertedArticles) {
-    const cleanTitle = cleanSummaryForSpeech(art.title);
-    if (cleanTitle) {
-      canonicalChunks.push({
-        sentenceIdx: globalSentenceIdx++,
-        text: cleanTitle,
-        elementId: `title-${art.id}`,
-        articleId: art.id,
-        pIdx: -1,
-        sIdx: 0,
-        page: Number(art.metadata?.start_page || 1)
-      });
-    }
-
-    const paragraphs: string[] = art.metadata?.paragraphs || [];
-    for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
-      const pText = cleanSummaryForSpeech(paragraphs[pIdx]);
-      const sentences = splitParagraphIntoSentences(pText);
-      for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
-        const sText = sentences[sIdx];
-        canonicalChunks.push({
-          sentenceIdx: globalSentenceIdx++,
-          text: sText,
-          elementId: `p-${art.id}-${pIdx}-${sIdx}`,
-          articleId: art.id,
-          pIdx,
-          sIdx,
-          page: Number(art.metadata?.start_page || 1)
-        });
-      }
-    }
-  }
+  const rawChunks = extractMagazineSentences(sortedArticles);
+  const canonicalChunks = rawChunks.map((chunk) => {
+    const art = sortedArticles.find(a => a.id === chunk.articleId);
+    return {
+      ...chunk,
+      page: Number(art?.metadata?.start_page || 1)
+    };
+  });
 
   console.log(`[News Transcribe v7] Prepared ${canonicalChunks.length} canonical sentence chunks for Aoede audio synthesis.`);
 
@@ -642,9 +558,22 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     audio_duration: Math.round(totalAudioDurationSec),
     sentence_timestamps: sentenceTimestamps,
     audios: {
-      en: {
+      ...(mainDoc.metadata?.audios || {}),
+      Aoede_en: {
+        audio_url: publicAudioUrl,
         url: publicAudioUrl,
         voice: "Aoede",
+        language: "en",
+        status: "ready",
+        duration: Math.round(totalAudioDurationSec),
+        sentence_timestamps: sentenceTimestamps
+      },
+      en: {
+        audio_url: publicAudioUrl,
+        url: publicAudioUrl,
+        voice: "Aoede",
+        language: "en",
+        status: "ready",
         duration: Math.round(totalAudioDurationSec),
         sentence_timestamps: sentenceTimestamps
       }
@@ -693,6 +622,77 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     totalSentences: sentenceTimestamps.length,
     message: "Magazine transcription, start_page mapping, and 18kbps audio successfully processed and saved."
   };
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7).trim() : null;
+    const cronSecret = searchParams.get("secret") || req.headers.get("x-cron-secret") || bearerToken;
+    const expectedSecret = process.env.CRON_SECRET;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+    const serviceKey = (process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)?.trim();
+
+    let isAuthorized = false;
+    if (expectedSecret && cronSecret === expectedSecret) isAuthorized = true;
+    if (anonKey && (cronSecret === anonKey || bearerToken === anonKey)) isAuthorized = true;
+    if (serviceKey && (cronSecret === serviceKey || bearerToken === serviceKey)) isAuthorized = true;
+
+    // Allow dashboard access fallback
+    if (!isAuthorized) {
+      const referer = req.headers.get("referer") || "";
+      const host = req.headers.get("host") || "";
+      if (referer.includes("/dashboard") || referer.includes(host) || process.env.NODE_ENV !== "production") {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    const issueSlug = searchParams.get("slug") || searchParams.get("issueSlug");
+    const force = searchParams.get("force") === "true";
+
+    if (issueSlug) {
+      const result = await processMagazineTranscribeAndSynthesis(issueSlug, force);
+      return NextResponse.json(result);
+    }
+
+    // Default: find latest magazine issue needing transcription/synthesis
+    const supabase = getSupabaseClient();
+    const { data: issues } = await supabase
+      .from("documents")
+      .select("id, title, metadata")
+      .eq("metadata->>is_magazine_issue", "true")
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (!issues || issues.length === 0) {
+      return NextResponse.json({ success: true, message: "No magazine issues found" });
+    }
+
+    const targetIssue = issues.find(it => {
+      const meta = it.metadata || {};
+      const isReady = meta.audio_url && meta.audio_status === "ready" && Array.isArray(meta.sentence_timestamps) && meta.sentence_timestamps.length > 50;
+      return !isReady;
+    }) || issues[0];
+
+    const slug = targetIssue.metadata?.slug;
+    if (!slug) {
+      return NextResponse.json({ success: false, error: "Latest issue has no slug in metadata" }, { status: 400 });
+    }
+
+    const result = await processMagazineTranscribeAndSynthesis(slug, force);
+    return NextResponse.json(result);
+  } catch (error: any) {
+    console.error("[News Transcribe GET API Error]:", error);
+    return NextResponse.json({
+      success: false,
+      error: error?.message || "Ocurrió un error al procesar la transcripción del magazine."
+    }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
