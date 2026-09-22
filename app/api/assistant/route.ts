@@ -9,6 +9,8 @@ import {
   formatGeminiMultiTurnPayload
 } from "@/lib/omnichannelMemory";
 
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization");

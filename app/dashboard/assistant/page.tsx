@@ -301,12 +301,6 @@ export default function AssistantPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const accessToken = session?.access_token || "";
 
-      // Fetch all local documents from Supabase client (fully populated on the client-side, excluding heavy unused transcriptions)
-      const { data: localDocs } = await supabase
-        .from("documents")
-        .select("*")
-        .neq("type", "knowledge_transcription");
-
       // Convert local message format to history required by API route
       const apiHistory = messages.map(m => ({
         role: m.role,
@@ -322,10 +316,21 @@ export default function AssistantPage() {
         body: JSON.stringify({
           message: queryText,
           history: apiHistory,
-          useInternet: useWebSearch,
-          localDocuments: localDocs || []
+          useInternet: useWebSearch
         })
       });
+
+      if (!response.ok) {
+        let errDesc = `Error ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson.error) errDesc = errJson.error;
+        } catch {
+          const errText = await response.text();
+          if (errText) errDesc = errText.slice(0, 150);
+        }
+        throw new Error(errDesc);
+      }
 
       const data = await response.json();
 

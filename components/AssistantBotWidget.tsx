@@ -13,6 +13,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  source?: "web" | "telegram";
   sources?: { title: string; url: string; type: "local" | "internet" }[];
   searchedInternet?: boolean;
 }
@@ -60,14 +61,14 @@ export function AssistantBotWidget() {
     }
   };
 
-  // Sync language selection dynamically
+  // Sync language selection and omnichannel chat history
   useEffect(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("hivex_selected_language") || "en";
       setSelectedLanguage(saved);
 
-      // Load chat history from sessionStorage to keep it persistent across page navigations
-      const savedChat = sessionStorage.getItem("hivex_bot_chat_history");
+      // 1. Initial quick load from local / session storage
+      const savedChat = localStorage.getItem("hivex_assistant_history") || sessionStorage.getItem("hivex_bot_chat_history");
       if (savedChat) {
         try {
           setMessages(JSON.parse(savedChat));
@@ -75,6 +76,38 @@ export function AssistantBotWidget() {
           console.error("Error parsing saved chat history:", e);
         }
       }
+
+      // 2. Fetch unified omnichannel conversation history from API
+      const syncOmnichannel = async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token || "";
+          if (!token) return;
+
+          const res = await fetch("/api/assistant", {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.history) && data.history.length > 0) {
+              const loadedMessages: ChatMessage[] = data.history.map((turn: any, idx: number) => ({
+                id: `omni_${turn.timestamp || Date.now()}_${idx}`,
+                role: turn.role === "user" ? "user" : "assistant",
+                content: turn.text,
+                source: turn.source,
+                timestamp: turn.timestamp 
+                  ? new Date(turn.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
+                  : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              }));
+              setMessages(loadedMessages);
+              localStorage.setItem("hivex_assistant_history", JSON.stringify(loadedMessages));
+            }
+          }
+        } catch (err) {
+          console.error("[Assistant Widget] Sync error:", err);
+        }
+      };
+      syncOmnichannel();
     }
 
     const handleLangChanged = (e: Event) => {
@@ -88,10 +121,11 @@ export function AssistantBotWidget() {
     return () => window.removeEventListener("languageChanged", handleLangChanged);
   }, []);
 
-  // Save chat history to sessionStorage when it changes
+  // Save chat history to storage when it changes
   useEffect(() => {
     if (messages.length > 0) {
       sessionStorage.setItem("hivex_bot_chat_history", JSON.stringify(messages));
+      localStorage.setItem("hivex_assistant_history", JSON.stringify(messages));
     }
   }, [messages]);
 
@@ -212,6 +246,7 @@ export function AssistantBotWidget() {
       id: Math.random().toString(36).substring(2, 9),
       role: "user",
       content: queryText,
+      source: "web",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     };
 
@@ -222,9 +257,6 @@ export function AssistantBotWidget() {
       // Fetch safe authorization session token
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || "";
-
-      // Fetch all local documents from Supabase client (fully populated on the client-side)
-      const { data: localDocs } = await supabase.from("documents").select("*");
 
       // Format conversation history for api route
       const apiHistory = messages.map(m => ({
@@ -238,30 +270,42 @@ export function AssistantBotWidget() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Authorization": token ? `Bearer ${token}` : ""
         },
         body: JSON.stringify({
           message: queryText,
           history: apiHistory,
-          useInternet: activeSearchMode,
-          localDocuments: localDocs || []
+          useInternet: activeSearchMode
         })
       });
 
+      if (!res.ok) {
+        let errDesc = `Error ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson.error) errDesc = errJson.error;
+        } catch {
+          const errText = await res.text();
+          if (errText) errDesc = errText.slice(0, 150);
+        }
+        throw new Error(errDesc);
+      }
+
       const data = await res.json();
 
-      if (res.ok && data.success) {
+      if (data.success) {
         const assistantMsg: ChatMessage = {
           id: Math.random().toString(36).substring(2, 9),
           role: "assistant",
           content: data.response,
+          source: "web",
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           sources: data.sources || [],
           searchedInternet: data.searchedInternet
         };
         setMessages(prev => [...prev, assistantMsg]);
       } else {
-        throw new Error(data.error || "Error in API response");
+        throw new Error(data.error || "Error en la respuesta del asistente");
       }
     } catch (err: any) {
       console.error("[Assistant Bot Widget] Error querying assistant:", err);
@@ -269,6 +313,7 @@ export function AssistantBotWidget() {
         id: Math.random().toString(36).substring(2, 9),
         role: "assistant",
         content: `${ui.errorMsg} (${err.message || String(err)})`,
+        source: "web",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -277,28 +322,127 @@ export function AssistantBotWidget() {
     }
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     setMessages([]);
+    localStorage.removeItem("hivex_assistant_history");
     sessionStorage.removeItem("hivex_bot_chat_history");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+      if (token) {
+        await fetch("/api/assistant", {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+    } catch (e) {
+      console.error("[Assistant Widget] Error clearing backend history:", e);
+    }
   };
 
-  // Helper to parse markdown-like bold and format beautiful lists cleanly in chat bubbles
+  // Helper to parse markdown-like bold, links, images, and lists cleanly in chat bubbles
   const renderMessageContent = (msg: ChatMessage) => {
     const text = msg.content;
     const isFallbackMessage = text.includes("actualmente, mi base de conocimiento no dispone de esa información");
 
-    const parts = text.split(/(\*\*.*?\*\*)/g);
-    
+    const lines = text.split("\n");
+
+    const parseInline = (str: string) => {
+      const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\)/g;
+      const parts: React.ReactNode[] = [];
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+
+      while ((match = linkRegex.exec(str)) !== null) {
+        if (match.index > lastIndex) {
+          parts.push(parseBold(str.substring(lastIndex, match.index)));
+        }
+        const label = match[1];
+        const url = match[2];
+        parts.push(
+          <a
+            key={`link-${match.index}`}
+            href={url}
+            target={url.startsWith("http") ? "_blank" : undefined}
+            rel="noopener noreferrer"
+            className="text-violet-400 hover:text-violet-300 font-semibold underline underline-offset-2 decoration-violet-500/40 transition-colors inline-flex items-center gap-1 mx-0.5"
+          >
+            <span>{label}</span>
+          </a>
+        );
+        lastIndex = match.index + match[0].length;
+      }
+
+      if (lastIndex < str.length) {
+        parts.push(parseBold(str.substring(lastIndex)));
+      }
+
+      return parts.length > 0 ? parts : parseBold(str);
+    };
+
+    const parseBold = (sub: string) => {
+      const boldParts = sub.split(/(\*\*.*?\*\*)/g);
+      return boldParts.map((part, idx) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={idx} className="font-bold text-violet-300">{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      });
+    };
+
     return (
-      <div className="space-y-3">
-        <p className="text-zinc-200 text-sm leading-relaxed whitespace-pre-wrap">
-          {parts.map((part, idx) => {
-            if (part.startsWith("**") && part.endsWith("**")) {
-              return <strong key={idx} className="font-bold text-violet-300">{part.slice(2, -2)}</strong>;
+      <div className="space-y-2">
+        <div className="text-zinc-200 text-xs md:text-sm leading-relaxed">
+          {lines.map((line, lineIdx) => {
+            const trimmed = line.trim();
+
+            // Image markdown: ![alt](url) (Golden Rule 3 chart snapshots & covers)
+            const imgMatch = trimmed.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\)$/);
+            if (imgMatch) {
+              const alt = imgMatch[1] || "Captura del gráfico";
+              const src = imgMatch[2];
+              return (
+                <div key={lineIdx} className="my-2 rounded-xl overflow-hidden border border-zinc-700/60 bg-zinc-950/90 shadow-lg max-w-full">
+                  <img
+                    src={src}
+                    alt={alt}
+                    className="w-full h-auto max-h-48 object-cover object-top hover:scale-[1.01] transition-transform duration-300"
+                    loading="lazy"
+                  />
+                  {alt && (
+                    <div className="px-2.5 py-1 bg-zinc-900 border-t border-zinc-800 text-[10px] text-zinc-300 font-medium flex items-center gap-1.5 truncate">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+                      <span className="truncate">{alt}</span>
+                    </div>
+                  )}
+                </div>
+              );
             }
-            return part;
+
+            if (trimmed.startsWith("### ")) {
+              return <h4 key={lineIdx} className="text-xs font-bold text-violet-300 mt-2 mb-1">{parseInline(trimmed.substring(4))}</h4>;
+            }
+            if (trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
+              return <h3 key={lineIdx} className="text-sm font-extrabold text-violet-400 mt-3 mb-1">{parseInline(trimmed.replace(/^#+\s*/, ""))}</h3>;
+            }
+            if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+              return (
+                <li key={lineIdx} className="ml-3 list-disc text-zinc-300 py-0.5 text-xs">
+                  {parseInline(trimmed.substring(2))}
+                </li>
+              );
+            }
+            if (trimmed === "") {
+              return <div key={lineIdx} className="h-1.5" />;
+            }
+
+            return (
+              <p key={lineIdx} className="mb-1">
+                {parseInline(line)}
+              </p>
+            );
           })}
-        </p>
+        </div>
 
         {/* Fallback Search Trigger Button inline */}
         {isFallbackMessage && (
@@ -538,8 +682,17 @@ export function AssistantBotWidget() {
                         </div>
                       )}
                       
-                      {/* Timestamp & Internet Indicator */}
-                      <div className={`flex items-center gap-2 px-1 text-[9px] text-zinc-500 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      {/* Timestamp, Source Badge & Internet Indicator */}
+                      <div className={`flex items-center gap-1.5 px-1 text-[9px] text-zinc-500 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                        {msg.source && (
+                          <span className={`text-[8px] px-1.5 py-0.2 rounded font-mono font-medium ${
+                            msg.source === "telegram" 
+                              ? "bg-sky-500/15 text-sky-400 border border-sky-500/25" 
+                              : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"
+                          }`}>
+                            {msg.source === "telegram" ? "Telegram" : "Web"}
+                          </span>
+                        )}
                         <span>{msg.timestamp}</span>
                         {msg.searchedInternet && (
                           <span className="text-cyan-400 font-bold flex items-center gap-0.5 scale-90">
