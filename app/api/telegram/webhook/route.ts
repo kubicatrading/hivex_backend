@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
 import { markdownToTelegramHtml, splitMarkdown, sendTelegramMessageWithPhotos, escapeHtml, setTelegramLanguage } from "@/lib/telegram";
+import {
+  resolveOmnichannelUser,
+  getOmnichannelConversation,
+  saveOmnichannelTurn,
+  formatGeminiMultiTurnPayload
+} from "@/lib/omnichannelMemory";
 
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during complex Gemini queries with Search grounding
 
@@ -288,39 +294,18 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
       });
     }
 
-    // Load user's persistent conversation history for multi-turn conversational memory
-    let userConversationDoc: any = null;
-    let conversationHistory: Array<{
-      role: "user" | "model";
-      text: string;
-      sender_id?: string;
-      sender_name?: string;
-      message_id?: number;
-      timestamp?: number;
-      reply_to_message_id?: number | null;
-    }> = [];
+    // Resolve user's omnichannel profile across profiles (linking Telegram and Web accounts)
+    const omnichannelProfile = await resolveOmnichannelUser(supabaseClient, {
+      telegramUserId: fromId,
+      telegramUsername: fromUsername
+    });
 
-    if (fromId) {
-      try {
-        const { data: convData, error: convErr } = await supabaseClient
-          .from("documents")
-          .select("id, metadata")
-          .eq("type", "knowledge_transcription")
-          .eq("metadata->>is_telegram_conversation", "true")
-          .eq("metadata->>telegram_user_id", fromId)
-          .maybeSingle();
-
-        if (!convErr && convData) {
-          userConversationDoc = convData;
-          if (Array.isArray(convData.metadata?.history)) {
-            conversationHistory = convData.metadata.history;
-          }
-          console.log(`[Telegram Webhook] Loaded ${conversationHistory.length} previous conversation turns for user ${fromId}.`);
-        }
-      } catch (convFetchErr) {
-        console.error("[Telegram Webhook] Failed to fetch conversation history:", convFetchErr);
-      }
-    }
+    // Load user's persistent omnichannel conversation history (incorporating Web + Telegram)
+    const { docId: userConversationDocId, history: conversationHistory } = await getOmnichannelConversation(
+      supabaseClient,
+      omnichannelProfile
+    );
+    console.log(`[Telegram Webhook] Loaded ${conversationHistory.length} previous conversation turns for user ${fromId}.`);
 
     // Determine sender identity and role dynamically or via hardcoded fallback rules
     const normalizedUsername = fromUsername.toLowerCase();
@@ -641,32 +626,7 @@ ${currentPromptText}
     }
 
     // Build multi-turn contents payload ensuring strictly alternating roles (user -> model -> user -> model)
-    const contentsPayload: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
-
-    // Take up to the last 10 turns (5 exchanges) from user's persistent memory
-    const recentTurns = conversationHistory.slice(-10);
-    let expectedRole: "user" | "model" = "user";
-
-    for (const turn of recentTurns) {
-      if (turn.role === expectedRole && turn.text) {
-        contentsPayload.push({
-          role: turn.role,
-          parts: [{ text: turn.text }]
-        });
-        expectedRole = expectedRole === "user" ? "model" : "user";
-      }
-    }
-
-    // Ensure the turn before our new message is 'model' (or array is empty)
-    if (contentsPayload.length > 0 && contentsPayload[contentsPayload.length - 1].role === "user") {
-      contentsPayload.pop();
-    }
-
-    // Append the current turn
-    contentsPayload.push({
-      role: "user",
-      parts: [{ text: currentPromptText }]
-    });
+    const contentsPayload = formatGeminiMultiTurnPayload(conversationHistory, currentPromptText, "telegram");
 
     console.log(`[Telegram Webhook] Successfully parsed payload. Chat ID: ${chatId}, User Text: "${userText}". Multi-turn count: ${contentsPayload.length}. Reply active: ${!!message.reply_to_message}.`);
     console.log(`[Telegram Webhook] Total videos in context: ${totalVideos}. DB docs count: ${allDocs.length}. Magazines count: ${magazineArticles.length}.`);
@@ -789,64 +749,28 @@ ${currentPromptText}
     console.log(`[Telegram Webhook] Sending Gemini response via sendTelegramMessageWithPhotos to chat ${chatId}...`);
     await sendTelegramMessageWithPhotos(geminiResponseText, chatId);
 
-    // 7. Persist interaction into user's conversation memory in Supabase
+    // 7. Persist interaction into user's omnichannel conversation memory in Supabase
     try {
-      if (fromId && geminiResponseText) {
-        const updatedHistory = [
-          ...conversationHistory,
-          {
-            role: "user" as const,
-            sender_id: fromId,
-            sender_name: fromFullName || fromUsername || "Usuario",
+      if ((fromId || omnichannelProfile.authUserId) && geminiResponseText) {
+        await saveOmnichannelTurn(supabaseClient, {
+          docId: userConversationDocId,
+          profile: omnichannelProfile,
+          existingHistory: conversationHistory,
+          userTurn: {
             text: userText,
+            source: "telegram",
+            sender_name: fromFullName || fromUsername || "Usuario",
             message_id: message.message_id,
-            timestamp: message.date || Math.floor(Date.now() / 1000),
-            reply_to_message_id: message.reply_to_message?.message_id || null
+            reply_to_message_id: message.reply_to_message?.message_id || null,
+            timestamp: message.date || Math.floor(Date.now() / 1000)
           },
-          {
-            role: "model" as const,
+          modelTurn: {
             text: geminiResponseText,
-            timestamp: Math.floor(Date.now() / 1000)
-          }
-        ];
-
-        // Retain rolling window of up to 30 turns
-        const cappedHistory = updatedHistory.slice(-30);
-
-        if (userConversationDoc?.id) {
-          await supabaseClient
-            .from("documents")
-            .update({
-              metadata: {
-                ...userConversationDoc.metadata,
-                telegram_user_id: fromId,
-                telegram_username: fromUsername,
-                telegram_chat_id: chatId,
-                last_updated: new Date().toISOString(),
-                history: cappedHistory
-              },
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", userConversationDoc.id);
-        } else {
-          await supabaseClient
-            .from("documents")
-            .insert({
-              user_id: "5c8d65c6-0798-4f8a-aae3-dd2cebebd868",
-              title: `[Telegram Context] - ${fromFullName || fromUsername || fromId} (${fromId})`,
-              type: "knowledge_transcription",
-              description: `Historial de conversación persistente en Telegram para ${fromFullName || fromUsername || fromId}`,
-              metadata: {
-                is_telegram_conversation: true,
-                telegram_user_id: fromId,
-                telegram_username: fromUsername,
-                telegram_chat_id: chatId,
-                last_updated: new Date().toISOString(),
-                history: cappedHistory
-              }
-            });
-        }
-        console.log(`[Telegram Webhook] Successfully persisted conversation memory for user ${fromId} (${cappedHistory.length} turns).`);
+            source: "telegram"
+          },
+          chatId
+        });
+        console.log(`[Telegram Webhook] Successfully persisted omnichannel conversation memory for user ${fromId}.`);
       }
     } catch (saveMemoryErr) {
       console.error("[Telegram Webhook] Failed to persist conversation memory:", saveMemoryErr);

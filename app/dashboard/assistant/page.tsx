@@ -16,6 +16,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  source?: "web" | "telegram";
   sources?: { title: string; url: string; type: "local" | "internet" }[];
   searchedInternet?: boolean;
 }
@@ -191,18 +192,57 @@ export default function AssistantPage() {
     fetchUser();
   }, []);
 
-  // Load chat history from localStorage on mount (for persistent experience)
+  // Load chat history: initial load from localStorage, then synchronize with persistent omnichannel history
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedHistory = localStorage.getItem("hivex_assistant_history");
-      if (savedHistory) {
-        try {
-          setMessages(JSON.parse(savedHistory));
-        } catch (e) {
-          console.error("Failed to parse chat history:", e);
+    const loadConversation = async () => {
+      // 1. Initial quick load from local storage
+      if (typeof window !== "undefined") {
+        const savedHistory = localStorage.getItem("hivex_assistant_history");
+        if (savedHistory) {
+          try {
+            setMessages(JSON.parse(savedHistory));
+          } catch (e) {
+            console.error("Failed to parse local chat history:", e);
+          }
         }
       }
-    }
+
+      // 2. Fetch unified omnichannel conversation history from API
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token || "";
+        if (!accessToken) return;
+
+        const res = await fetch("/api/assistant", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.history) && data.history.length > 0) {
+            const loadedMessages: ChatMessage[] = data.history.map((turn: any, idx: number) => ({
+              id: `omni_${turn.timestamp || Date.now()}_${idx}`,
+              role: turn.role === "user" ? "user" : "assistant",
+              content: turn.text,
+              source: turn.source,
+              timestamp: turn.timestamp 
+                ? new Date(turn.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
+                : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            }));
+            setMessages(loadedMessages);
+            if (typeof window !== "undefined") {
+              localStorage.setItem("hivex_assistant_history", JSON.stringify(loadedMessages));
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.error("Failed to sync omnichannel conversation:", syncErr);
+      }
+    };
+
+    loadConversation();
   }, []);
 
   // Save chat history to localStorage on update
@@ -217,9 +257,23 @@ export default function AssistantPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const clearHistory = () => {
+  const clearHistory = async () => {
     setMessages([]);
     localStorage.removeItem("hivex_assistant_history");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token || "";
+      if (accessToken) {
+        await fetch("/api/assistant", {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        });
+      }
+    } catch (e) {
+      console.error("Failed to clear backend conversation history:", e);
+    }
   };
 
   // Send message handler
@@ -232,6 +286,7 @@ export default function AssistantPage() {
       id: Math.random().toString(36).substring(2, 15),
       role: "user",
       content: queryText,
+      source: "web",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     };
 
@@ -279,6 +334,7 @@ export default function AssistantPage() {
           id: Math.random().toString(36).substring(2, 15),
           role: "assistant",
           content: data.response,
+          source: "web",
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           sources: data.sources || [],
           searchedInternet: data.searchedInternet
@@ -322,6 +378,29 @@ export default function AssistantPage() {
 
     return lines.map((line, lineIdx) => {
       let trimmed = line.trim();
+
+      // Check if line is an image markdown: ![alt](url)
+      const imageMatch = trimmed.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\)$/);
+      if (imageMatch) {
+        const alt = imageMatch[1] || "Captura del gráfico";
+        const src = imageMatch[2];
+        return (
+          <div key={lineIdx} className="my-2.5 rounded-xl overflow-hidden border border-zinc-700/60 bg-zinc-950/90 shadow-xl max-w-lg">
+            <img 
+              src={src} 
+              alt={alt} 
+              className="w-full h-auto max-h-72 object-cover object-top hover:scale-[1.01] transition-transform duration-300"
+              loading="lazy"
+            />
+            {alt && (
+              <div className="px-3 py-1.5 bg-zinc-900/95 border-t border-zinc-800 text-[11px] text-zinc-300 font-medium flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-violet-400 shrink-0" />
+                <span className="truncate">{alt}</span>
+              </div>
+            )}
+          </div>
+        );
+      }
 
       // Check if line is a heading
       if (trimmed.startsWith("### ")) {
@@ -593,9 +672,20 @@ export default function AssistantPage() {
                           <p className="text-xs md:text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                         )}
 
-                        <span className="text-[9px] text-zinc-600 absolute bottom-1.5 right-3 block">
-                          {msg.timestamp}
-                        </span>
+                        <div className="flex items-center gap-1.5 absolute bottom-1.5 right-3">
+                          {msg.source && (
+                            <span className={`text-[8px] px-1.5 py-0.5 rounded font-mono font-medium ${
+                              msg.source === "telegram" 
+                                ? "bg-sky-500/15 text-sky-400 border border-sky-500/25" 
+                                : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25"
+                            }`}>
+                              {msg.source === "telegram" ? "Telegram" : "Web"}
+                            </span>
+                          )}
+                          <span className="text-[9px] text-zinc-600 block">
+                            {msg.timestamp}
+                          </span>
+                        </div>
 
                         {/* Inline fallback action button */}
                         {isAI && containsFallback && (

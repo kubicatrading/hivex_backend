@@ -2,11 +2,111 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { supabase as defaultSupabase, isUsingMock } from "@/lib/supabase";
 import { sendTelegramMessageWithPhotos } from "@/lib/telegram";
+import {
+  resolveOmnichannelUser,
+  getOmnichannelConversation,
+  saveOmnichannelTurn,
+  formatGeminiMultiTurnPayload
+} from "@/lib/omnichannelMemory";
+
+export async function GET(request: Request) {
+  try {
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return NextResponse.json({ success: false, history: [] });
+    }
+
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false }
+    });
+
+    let userId: string | null = null;
+    let userEmail: string | null = null;
+
+    if (token) {
+      const { data: { user } } = await adminClient.auth.getUser(token);
+      if (user) {
+        userId = user.id;
+        userEmail = user.email || null;
+      }
+    }
+
+    if (!userId && !userEmail) {
+      return NextResponse.json({ success: false, history: [] });
+    }
+
+    const profile = await resolveOmnichannelUser(adminClient, {
+      authUserId: userId,
+      userEmail: userEmail
+    });
+
+    const { history } = await getOmnichannelConversation(adminClient, profile);
+
+    return NextResponse.json({
+      success: true,
+      profile,
+      history
+    });
+  } catch (err: any) {
+    console.error("[Assistant API GET] Error loading conversation history:", err);
+    return NextResponse.json({ success: false, history: [], error: err.message });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const authHeader = request.headers.get("Authorization");
+    const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
+
+    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+    if (!supabaseUrl || !supabaseServiceKey || !token) {
+      return NextResponse.json({ success: false });
+    }
+
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false }
+    });
+
+    const { data: { user } } = await adminClient.auth.getUser(token);
+    if (!user) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    const profile = await resolveOmnichannelUser(adminClient, {
+      authUserId: user.id,
+      userEmail: user.email
+    });
+
+    const { docId, metadata } = await getOmnichannelConversation(adminClient, profile);
+    if (docId) {
+      await adminClient.from("documents").update({
+        metadata: {
+          ...metadata,
+          history: [],
+          last_cleared: new Date().toISOString()
+        },
+        updated_at: new Date().toISOString()
+      }).eq("id", docId);
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    console.error("[Assistant API DELETE] Error resetting history:", err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { message, history = [], useInternet = false, localDocuments = [] } = body;
+    const { message, useInternet = false, localDocuments = [] } = body;
 
     if (!message) {
       return NextResponse.json({ error: "Mensaje no proporcionado" }, { status: 400 });
@@ -16,25 +116,27 @@ export async function POST(request: Request) {
     const authHeader = request.headers.get("Authorization");
     const token = authHeader && authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
 
-    let userId = null;
-    let userEmail = null;
-    let supabaseClient = defaultSupabase;
+    let userId: string | null = null;
+    let userEmail: string | null = null;
 
-    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+    const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+    const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || supabaseAnonKey;
+
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false }
+    });
+
+    let supabaseClient = defaultSupabase;
 
     if (!isUsingMock && supabaseUrl) {
       if (token) {
         try {
-          const tempAdmin = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey!, {
-            auth: { persistSession: false }
-          });
-          const { data: { user }, error: authErr } = await tempAdmin.auth.getUser(token);
+          const { data: { user }, error: authErr } = await adminClient.auth.getUser(token);
           if (!authErr && user) {
             userId = user.id;
-            userEmail = user.email;
-            supabaseClient = createClient(supabaseUrl, supabaseAnonKey!, {
+            userEmail = user.email || null;
+            supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
               global: {
                 headers: { Authorization: `Bearer ${token}` }
               }
@@ -45,6 +147,18 @@ export async function POST(request: Request) {
         }
       }
     }
+
+    // Resolve unified omnichannel profile (Web + Telegram)
+    const resolvedProfile = await resolveOmnichannelUser(adminClient, {
+      authUserId: userId,
+      userEmail: userEmail
+    });
+
+    // Load user's persistent omnichannel conversation memory
+    const { docId: omnichannelDocId, history: conversationHistory } = await getOmnichannelConversation(
+      adminClient,
+      resolvedProfile
+    );
 
     // 2. Fetch all documents for the authenticated user (or fetch all in mock mode)
     let allDocs: any[] = [];
@@ -61,11 +175,13 @@ export async function POST(request: Request) {
             allDocs = data;
           }
         }
-      } else if (userId) {
-        const { data, error } = await supabaseClient
+      } else {
+        const { data, error } = await adminClient
           .from("documents")
-          .select("*")
-          .neq("type", "knowledge_transcription");
+          .select("id, title, type, file_url, created_at, metadata, description")
+          .in("type", ["video", "knowledge_summary", "knowledge_charts", "knowledge_analysis"])
+          .order("created_at", { ascending: false })
+          .limit(100);
         if (!error && data) {
           allDocs = data;
         } else if (error) {
@@ -79,16 +195,15 @@ export async function POST(request: Request) {
     // Load recent magazine articles (Trends Journal & HIVEX Magazines)
     let magazineArticles: any[] = [];
     try {
-      const activeSupabase = (isUsingMock || !userId) ? defaultSupabase : supabaseClient;
-      const { data: magData, error: magErr } = await activeSupabase
+      const { data: magData, error: magErr } = await adminClient
         .from("documents")
-        .select("id, title, metadata, created_at, description")
+        .select("id, title, description, metadata, created_at")
         .eq("type", "knowledge_transcription")
         .eq("metadata->>is_magazine_article", "true")
         .order("created_at", { ascending: false })
         .limit(70);
 
-      if (!magErr && magData) {
+      if (!magErr && magData && magData.length > 0) {
         magazineArticles = magData.map(m => ({
           id: m.id,
           titulo: m.title,
@@ -160,20 +275,31 @@ export async function POST(request: Request) {
 
     const currentDateTimeStr = new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
 
-    // 4. Build system instructions with strict parameters and the rich contextual database
-    const systemInstruction = `Eres el Asistente AI Premium integrado en el SaaS de HIVEX.
+    // Build user identity details for greeting and tone
+    let senderDetails = "";
+    if (resolvedProfile.fullName) {
+      senderDetails = `Te está hablando el inversor registrado ${resolvedProfile.fullName} (Email: ${resolvedProfile.email || "No especificado"}). Trátalo de manera profesional, asertiva y sofisticada como socio inversor de HIVEX.`;
+    } else {
+      senderDetails = `Te está hablando un inversor de la plataforma HIVEX. Trátalo de manera profesional, sobria y de máximo nivel.`;
+    }
+
+    // 4. Build system instructions incorporating the 5 Golden Rules tailored for the Web Platform
+    const systemInstruction = `Eres el Asistente AI Premium integrado en la plataforma web de HIVEX SaaS.
 Fecha y hora actual en España (zona horaria de Madrid): ${currentDateTimeStr}.
 Tu tono es sofisticado, profesional, riguroso, asertivo y objetivo, como un analista bursátil o banquero de inversión de élite.
+
+INFORMACIÓN SOBRE EL INTERLOCUTOR:
+${senderDetails}
 
 Tienes dos propósitos de servicio principales:
 
 1. **SOPORTE Y AYUDA DE LA PLATAFORMA HIVEX**:
    - Responde preguntas sobre el funcionamiento del software (monitorización, transcripción, detección de charts, revistas semanales, audios traducidos).
-   - Tienes acceso en tiempo real a las estadísticas y datos almacenados en Supabase para este usuario:
+   - Tienes acceso en tiempo real a las estadísticas y datos almacenados en Supabase:
      ${JSON.stringify(statsContext, null, 2)}
    - Si se te pregunta qué vídeos hay sincronizados, cuántos hay, de qué canales o si están analizados, debes responder utilizando estrictamente estos datos reales para garantizar veracidad absoluta sin adivinar.
 
-2. **ASISTENTE BURSÁTIL PREMIUM**:
+2. **ASISTENTE BURSÁTIL PREMIUM (DESPACHO DE ANÁLISIS)**:
    - Responde preguntas relacionadas con mercados, tendencias, riesgo bursátil, consejos y tomas de decisiones financieras en cada momento.
    - Tu base de conocimiento prioritaria se compone de:
      A) **VÍDEOS Y ANÁLISIS DE MERCADO (Resúmenes estructurados, gráficos/charts detectados e informe de análisis de la cabina de estudio)**:
@@ -181,37 +307,52 @@ Tienes dos propósitos de servicio principales:
      B) **REVISTAS SEMANALES Y TENDENCIAS MACROECONÓMICAS (HIVEX Magazines / Trends Journal con artículos, datos, cifras y previsiones)**:
      ${JSON.stringify(magazineArticles, null, 2)}
 
-NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
-- **Temperatura de IA**: Tu razonamiento se limita a una temperatura de 0.2 (preciso, estricto, factual).
+- **JERARQUÍA Y PRIORIDAD DE FUENTES (PIPELINE DE INFORMACIÓN OBLIGATORIO)**:
+  Cuando proceses cualquier consulta, debes buscar, sintetizar y priorizar tus fuentes de información siguiendo estrictamente esta jerarquía obligatoria (de más prioritario a menos):
+  1. **NIVEL 1: BASE DE CONOCIMIENTO PERSISTENTE DE HIVEX (MÁXIMA PRIORIDAD Y OBLIGATORIA)**:
+     - Tu fuente primordial e innegociable es toda la base de conocimiento persistente de HIVEX:
+       a) **Tarjetas de Gráficos Bursátiles** (\`knowledge_charts\`) con sus capturas fijas y marcas temporales (prioridad absoluta en análisis de mercado).
+       b) **Informes de Análisis Macroeconómico** (\`knowledge_analysis\`) de los vídeos de la plataforma.
+       c) **Resúmenes Ejecutivos y Cronológicos** (\`knowledge_summary\`).
+       d) **Revistas Semanales y Análisis de Tendencias** (\`knowledge_transcription\` de HIVEX Magazines / Trends Journal con artículos, datos, cifras, consejos y previsiones de Gerald Celente).
+     - Si la información, consejo, previsión o tendencia está en la base de datos de HIVEX, básate íntegramente en ella.
+  2. **NIVEL 2: CONSULTA A INTERNET (ÚNICA Y ESTRICTAMENTE COMO ÚLTIMO RECURSO)**:
+     - Utiliza la búsqueda en vivo en Internet (Google Search Grounding) ÚNICAMENTE como último recurso, si la consulta requiere hechos, eventos macroeconómicos o cotizaciones que NO existen en la base de datos de HIVEX o para contrastar precios de activos en tiempo real de hoy.
+     - **REGLA OBLIGATORIA AL USAR INTERNET**: Cuando recurras a Internet, es **estrictamente obligatorio informar de cuándo ocurre** (fecha y momento preciso de la noticia o cotización) y citar de forma limpia y transparente la **fuente en particular** (nombre del medio o portal con su hipervínculo limpio). Jamás ocultes ni simules la procedencia de los datos externos.
 
-- **4 REGLAS INQUEBRANTABLES**:
-  1. **REGLA 1 (CIRCUNSCRIPCIÓN EXCLUSIVA A HIVEX COMO PRIMERA PRIORIDAD)**: Tus respuestas se deben circunscribir de forma prioritaria y estricta a la base de conocimiento almacenada en HIVEX (vídeos, estudios y revistas semanales). Solo si la información solicitada NO existe en absoluto en HIVEX, o se requieren cotizaciones en tiempo real del día de hoy, se consulta Internet (Google Search Grounding).
-  2. **REGLA 2 (CITAR TODAS LAS FUENTES CON ENLACES CLICABLES LIMPIOS Y FECHAS)**: Todas, absolutamente todas las respuestas deben citar de manera clara y explícita la fuente de donde se extrae la información mediante un link clicable en formato Markdown ([Texto](URL)) al que se pueda navegar para ampliar información.
-     - Si la fuente procede de un vídeo de HIVEX: enlace a la Cabina de Estudio: \`[Título del Vídeo](/dashboard/videos?id=VIDEO_ID)\`.
-     - Si la fuente procede de una revista semanal de HIVEX: enlace a la sección de noticias: \`[Título del Artículo](/dashboard/news)\`.
-     - Si la fuente procede de Internet (Google Search Grounding): debes informar obligatoriamente de **cuándo ocurre** (fecha y momento exacto) e incluir los hipervínculos reales limpios de las páginas o artículos web de donde proviene la información.
-     - Está terminantemente prohibido omitir el enlace clicable directo; cada afirmación relevante debe tener su hipervínculo clicable de respaldo.
-  3. **REGLA 3 (PROHIBICIÓN ABSOLUTA DE RESPUESTAS SIMULADAS)**: Están estrictamente prohibidas las respuestas simuladas, ficticias, hipotéticas o inventadas. Todos los datos, cifras, precios, fechas y análisis deben basarse rigurosamente en fuentes verídicas de conocimiento real (la base de datos de HIVEX o la búsqueda web en tiempo real del Google Search Grounding actual de hoy, ${currentDateTimeStr}).
-  4. **REGLA 4 (PRIORIZACIÓN CRONOLÓGICA EXTREMA / NOTICIAS RECIENTES)**: Para el inversor, el valor del conocimiento decae rápidamente con el tiempo. Las informaciones, noticias y análisis recientes tienen prioridad absoluta sobre los antiguos. Debes priorizar con fuerza y dar máximo protagonismo visual y de análisis a aquellas noticias, informaciones, revistas o vídeos recientes frente al resto, destacando estas novedades en primer lugar.
+- **5 REGLAS DE ORO OBLIGATORIAS DE COMUNICACIÓN EN HIVEX (MANDATORY)**:
+  Estas 5 Reglas de Oro son inquebrantables y rigen obligatoriamente tu comunicación con cualquier usuario/cliente de HIVEX:
+  1. **REGLA 1 (PRESENTACIÓN FORMAL DEL INVERSOR AL INICIO)**: Toda información o análisis bursátil solicitado en el chat debe ir precedido **obligatoriamente** por una breve presentación formal del inversor de HIVEX y el propósito claro de lo que se pretende presentar en ese mensaje. Esta presentación formal debe ubicarse en el **principio absoluto del mensaje**, antes de cualquier otra información, tabla o gráfico, asegurando que jamás aparezca al final de la comunicación. Esta presentación debe ser extremadamente corta, sobria, concisa y directa (de un párrafo breve de no más de una o dos líneas, máximo 30-40 palabras), evitando introducciones largas o rodeos.
+  2. **REGLA 2 (ACOMPAÑAR TODA INFORMACIÓN DE SU FUENTE EXPLÍCITA)**: Toda información bursátil, datos macroeconómicos, cifras, precios o tendencias mostradas debe venir acompañada de la fuente sobre la que se basa. Esta fuente debe indicarse de forma limpia e integrada mediante un link hipervínculo utilizando el propio título de la fuente (ya sea el título del vídeo en la cabina de estudio de HIVEX, el titular del artículo de la revista de HIVEX, o bien el nombre limpio del artículo o web de donde provenga en Internet indicando de forma explícita cuándo ocurre).
+  3. **REGLA 3 (BÚSQUEDA PRIORITARIA EN TARJETAS DE GRÁFICOS / KNOWLEDGE_CHARTS Y ESTRUCTURA JERÁRQUICA)**: Ante cualquier tipo de información o análisis de mercado solicitado, debes buscar **en primer lugar** en los gráficos detectados en la cabina de estudio (\`knowledge_charts\`). En este caso, la información debe presentarse estrictamente en formato "despacho premium" jerárquico:
+     - **Prohibición de vídeo MP4 nativo**: Está terminantemente prohibido mostrar reproductores nativos MP4. En su lugar, el acceso a cada vídeo se realiza a través de su enlace amigable acompañado de su captura fija (\`snapshot\`).
+     - **Estructura jerárquica estricta (enlace amigable + captura fija emparejados)** (con enlaces internos de navegación en la plataforma):
+       1. Enlace amigable al fragmento de vídeo acotado: \`[Título Limpio del Gráfico](/dashboard/videos?id={videoId}&start={seconds}&end={endSeconds})\`.
+       2. Captura fija del gráfico pegada inmediatamente debajo: \`![Título Limpio del Gráfico](/snapshots/{videoId}/{seconds}.jpg)\`.
+       3. Enlace amigable al vídeo completo: \`[Vídeo Completo: Título del Vídeo](/dashboard/videos?id={videoId})\`.
+       4. Carátula o portada del vídeo completo pegada inmediatamente debajo: \`![Título del Vídeo](/snapshots/{videoId}/0.jpg)\`.
+     - **Si NO hay gráficos detectados**, se omiten estrictamente el enlace acotado y la captura fija, enviando solo el enlace al vídeo o revista y su carátula. Está terminantemente prohibido inventar marcas de tiempo o gráficos inexistentes.
+     - Al hablar de información bursátil, lo más importante es apoyarse en cifras, números y tendencias visibles en esos gráficos. Completa y enriquece este análisis de gráficos utilizando la información de los otros documentos \`knowledge_*\` del contexto (resúmenes, informes de análisis y artículos de revistas).
+  4. **REGLA 4 (ENLACES COMPLETAMENTE LIMPIOS)**: Todos los enlaces hipervínculos presentados deben ser limpios. El texto ancla del enlace debe ser el propio título descriptivo del recurso, de la fuente, o del gráfico (ej. \`[Título del Gráfico](/dashboard/videos?id=...)\`, \`[Andrei Jikh - Título de Vídeo](/dashboard/videos?id=...)\` o \`[Trends Journal - Título del Artículo](/dashboard/news)\`). Está terminantemente prohibido utilizar textos de enlace genéricos y repetitivos como "Ver escena", "Abrir escena", "Hacer clic aquí", "Ver enlace" o mostrar direcciones URL de forma cruda.
+  5. **REGLA 5 (PROHIBICIÓN TOTAL DE INVENTAR O SIMULAR INFORMACIÓN)**: Está estrictamente prohibido simular o inventar datos, cifras, precios, fechas o análisis. Si algo no está respaldado por la base de conocimiento o búsquedas en tiempo real, no lo menciones. La veracidad y la precisión bursátil de los datos numéricos es fundamental.
 
-- **Permiso Autorizado de Enlaces de YouTube (Marcas de Tiempo de Gráficos / Micro-Vídeos)**:
-  - Está **totalmente autorizado y recomendado** incluir enlaces directos a YouTube únicamente cuando sigas el formato de micro-vídeo de gráfico: \`🎬 **Micro-vídeo del Gráfico:** [Ver escena en YouTube (Minuto MM:SS)](https://youtu.be/{youtubeId}?t={seconds})\`.
-  - Sigue estando prohibido enviar enlaces genéricos o generales de YouTube sin marca de tiempo, salvo que el usuario lo solicite explícitamente.
-  - **Interacción y Navegación Directa**: Explica siempre al usuario en la misma respuesta que este link interactúa directamente con la plataforma de producción de HIVEX y le permite la navegación dentro de ella, requiriendo iniciar sesión con su usuario y contraseña si no lo ha hecho previamente.
+- **CONTINUIDAD CONVERSACIONAL OMNICANAL**:
+  - Tienes memoria persistente y compartida de la conversación con este usuario, incluyendo los mensajes intercambiados tanto a través de la plataforma web como desde Telegram.
+  - Mantén coherencia absoluta y continúa los hilos de análisis de manera natural independientemente del canal utilizado.
 
 - **Falta de Conocimiento (Regla de Fallback Crítica)**: Si lo que se te pregunta no se encuentra dentro de esta base de conocimiento local, tu deber ineludible es informar al usuario y contestar utilizando EXACTAMENTE la siguiente frase:
   "actualmente, mi base de conocimiento no dispone de esa información. Pero si quieres puedo consultar en internet y darte una respuesta de mercado actualizada a día de hoy."
-  IMPORTANTE: No uses conocimiento general de entrenamiento si no está en la base de conocimiento local provista. Di la frase exacta de fallback para que el sistema del frontend le permita al usuario hacer una consulta con búsqueda web en internet.
+  IMPORTANTE: Di la frase exacta de fallback para que el sistema del frontend le permita al usuario hacer una consulta con búsqueda web en internet.
 
 - **PROHIBICIÓN ABSOLUTA DE PLANES DE ACCIÓN EN JSON Y METAPLANS**:
   - BAJO NINGUNA CIRCUNSTANCIA respondas con un objeto JSON, bloques de código JSON de planificación, claves como 'query', 'metaplan' o estructuras de diseño de planes.
-  - El sistema de HIVEX opera en modo de **petición única (Single-turn)**, lo que significa que no hay un bucle de agentes intermedio en el servidor para ejecutar planes de múltiples pasos.
+  - El sistema de HIVEX opera en modo de **petición única (Single-turn)**.
   - Debes realizar toda la investigación, traducción y análisis en tu pensamiento interno y devolver **únicamente el resultado final redactado en lenguaje natural** formateado en Markdown estándar en tu primera y única respuesta.
 
-- **Envío Autónomo a Telegram**: Tienes la capacidad y la herramienta \`send_telegram_notification\` para enviar avisos, alertas de mercado urgentes o resúmenes de inversión al grupo de Telegram de HIVEX. Si el usuario te pide explícitamente enviar un aviso o alertar al grupo (ej: "Envía una alerta diciendo que...", "Avisa al grupo sobre...", "Notifica en Telegram que..."), DEBES usar esta herramienta para realizar la transmisión. Redacta el mensaje de manera clara, con emojis bursátiles y con tu tono profesional antes de despacharlo.
+- **Envío Autónomo a Telegram**: Tienes la herramienta \`send_telegram_notification\` para enviar avisos, alertas de mercado urgentes o resúmenes de inversión al grupo de Telegram de HIVEX. Si el usuario te pide explícitamente enviar un aviso o alertar al grupo (ej: "Envía una alerta diciendo que...", "Avisa al grupo sobre...", "Notifica en Telegram que..."), DEBES usar esta herramienta para realizar la transmisión. Redacta el mensaje de manera clara, con emojis bursátiles y con tu tono profesional antes de despacharlo.
 
 ${useInternet ? `
-- **Búsqueda en Internet Autorizada**: El usuario ha aceptado explícitamente realizar una búsqueda en internet. Tienes acceso a Google Search Grounding. Úsala para recuperar información actualizada, veraz y de hoy (${new Date().toLocaleDateString("es-ES")}) para responder de manera rigurosa. Cita las URLs de internet correspondientes utilizando enlaces markdown.
+- **Búsqueda en Internet Autorizada**: El usuario ha aceptado explícitamente realizar una búsqueda en internet. Tienes acceso a Google Search Grounding. Úsala para recuperar información actualizada, veraz y de hoy (${new Date().toLocaleDateString("es-ES")}) para responder de manera rigurosa. Cita las URLs de internet correspondientes utilizando enlaces markdown y especifica la fecha exacta de publicación de la noticia o cotización.
 ` : ""}
 `;
 
@@ -261,17 +402,8 @@ ${useInternet ? `
     let successfulModel = "";
     let errorDetails: string[] = [];
 
-    // Map history to Gemini's role structures
-    const contentsPayload = [
-      ...history.map((h: any) => ({
-        role: h.role === "user" ? "user" : "model",
-        parts: [{ text: h.content }]
-      })),
-      {
-        role: "user",
-        parts: [{ text: message }]
-      }
-    ];
+    // Format Gemini payload with omnichannel multi-turn history
+    const contentsPayload = formatGeminiMultiTurnPayload(conversationHistory, message, "web");
 
     for (const attempt of attempts) {
       try {
@@ -358,65 +490,38 @@ ${useInternet ? `
     if (parts.length === 0) {
       return NextResponse.json({
         error: "No se pudo obtener una respuesta válida de la API de Gemini. Detalles:\n" + errorDetails.join("\n")
-      }, { status: 500 });
+      }, { status: 502 });
     }
 
-    // Cleanly extract text by joining non-thought parts
-    geminiResponseText = parts
-      .filter((p: any) => !p.thought)
-      .map((p: any) => p.text)
-      .filter(Boolean)
-      .join("") || "";
-
+    // Check if a tool call was triggered (send_telegram_notification)
     const functionCallPart = parts.find((p: any) => p.functionCall);
-    const functionCall = functionCallPart ? functionCallPart.functionCall : null;
-
-    // Handle autonomous function call for Telegram
-    if (functionCall && functionCall.name === "send_telegram_notification") {
-      const messageArg = functionCall.args?.message;
-      if (!messageArg) {
-        geminiResponseText = "No se proporcionó el mensaje para la notificación de Telegram.";
-      } else {
-        const result = await sendTelegramMessageWithPhotos(messageArg);
-        if (result.success) {
-          return NextResponse.json({
-            success: true,
-            response: `🔔 <b>[Notificación de Telegram]</b> He enviado de forma autónoma el siguiente aviso al grupo de inversores:\n\n<blockquote>${messageArg}</blockquote>`,
-            sources: [],
-            searchedInternet: useInternet,
-            modelUsed: successfulModel,
-            telegramNotificationSent: true,
-            telegramSimulated: result.simulated
-          });
-        } else {
-          return NextResponse.json({
-            error: `❌ Error al enviar la notificación de Telegram: ${result.error || "desconocido"}`
-          }, { status: 500 });
+    if (functionCallPart) {
+      const call = functionCallPart.functionCall;
+      if (call.name === "send_telegram_notification") {
+        const notificationMsg = call.args?.message;
+        if (notificationMsg) {
+          try {
+            await sendTelegramMessageWithPhotos(notificationMsg);
+            geminiResponseText = `📢 **Notificación enviada a Telegram con éxito.**\n\n> ${notificationMsg.replace(/\n/g, "\n> ")}`;
+          } catch (teleErr: any) {
+            geminiResponseText = `⚠️ Se intentó despachar el aviso a Telegram, pero ocurrió un error en el envío: ${teleErr.message || String(teleErr)}`;
+          }
         }
       }
     }
 
-    // 6. Extract cited sources (from local video urls or internet grounding chunks)
-    const sources: { title: string; url: string; type: "local" | "internet" }[] = [];
-
-    // 6a. Extract from markdown links in the text
-    const mdLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-    let match;
-    while ((match = mdLinkRegex.exec(geminiResponseText)) !== null) {
-      const title = match[1];
-      const url = match[2];
-      
-      const isLocalVideo = videos.some(v => v.file_url === url || url.includes("youtube.com/embed/") || url.includes("youtube.com/watch"));
-      sources.push({
-        title,
-        url,
-        type: isLocalVideo ? "local" : "internet"
-      });
+    // If text was generated directly, extract it
+    if (!geminiResponseText) {
+      const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text);
+      geminiResponseText = textParts.join("\n\n");
     }
 
-    // 6b. Extract from Google Search Grounding metadata if available
-    if (useInternet && geminiData?.candidates?.[0]?.groundingMetadata) {
-      const metadata = geminiData.candidates[0].groundingMetadata;
+    // Parse sources (Grounding metadata + local video links)
+    const sources: { title: string; url: string; type: "local" | "internet" }[] = [];
+
+    // Extract Grounding Chunks if present
+    if (candidate?.groundingMetadata) {
+      const metadata = candidate.groundingMetadata;
       if (metadata.groundingChunks) {
         metadata.groundingChunks.forEach((chunk: any) => {
           if (chunk.web?.uri) {
@@ -430,7 +535,7 @@ ${useInternet ? `
       }
     }
 
-    // Replace flat UUID citations [UUID] with interactive Markdown links and register them as local sources
+    // Replace flat UUID citations [UUID] with clean interactive Markdown links
     geminiResponseText = geminiResponseText.replace(
       /\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi,
       (_, uuid) => {
@@ -440,18 +545,40 @@ ${useInternet ? `
         
         if (!sources.some(s => s.url === url)) {
           sources.push({
-            title: `Ver Análisis: ${title}`,
+            title: title,
             url,
             type: "local"
           });
         }
         
-        return `[Ver Análisis: ${title}](${url})`;
+        return `[${title}](${url})`;
       }
     );
 
     // Remove duplicate sources by URL
     const uniqueSources = Array.from(new Map(sources.map(s => [s.url, s])).values());
+
+    // 6. Persist turn into unified omnichannel conversation memory
+    try {
+      if (resolvedProfile.authUserId || resolvedProfile.telegramUserId) {
+        await saveOmnichannelTurn(adminClient, {
+          docId: omnichannelDocId,
+          profile: resolvedProfile,
+          existingHistory: conversationHistory,
+          userTurn: {
+            text: message,
+            source: "web",
+            sender_name: resolvedProfile.fullName || "Inversor"
+          },
+          modelTurn: {
+            text: geminiResponseText,
+            source: "web"
+          }
+        });
+      }
+    } catch (saveErr) {
+      console.error("[Assistant API] Error saving conversation memory:", saveErr);
+    }
 
     return NextResponse.json({
       success: true,
