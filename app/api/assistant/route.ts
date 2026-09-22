@@ -76,6 +76,33 @@ export async function POST(request: Request) {
       console.error("[Assistant API] Database query failure:", dbErr);
     }
 
+    // Load recent magazine articles (Trends Journal & HIVEX Magazines)
+    let magazineArticles: any[] = [];
+    try {
+      const activeSupabase = (isUsingMock || !userId) ? defaultSupabase : supabaseClient;
+      const { data: magData, error: magErr } = await activeSupabase
+        .from("documents")
+        .select("id, title, metadata, created_at, description")
+        .eq("type", "knowledge_transcription")
+        .eq("metadata->>is_magazine_article", "true")
+        .order("created_at", { ascending: false })
+        .limit(70);
+
+      if (!magErr && magData) {
+        magazineArticles = magData.map(m => ({
+          id: m.id,
+          titulo: m.title,
+          categoria: m.metadata?.category || m.metadata?.main_category || "Macroeconomía y Tendencias",
+          subcategoria: m.metadata?.subcategory || "",
+          edicion: m.metadata?.issue_slug || "Revista Semanal",
+          pagina: m.metadata?.start_page || 1,
+          textoExtracto: Array.isArray(m.metadata?.paragraphs) ? m.metadata.paragraphs.slice(0, 3).join("\n") : (m.description || "")
+        }));
+      }
+    } catch (magErr) {
+      console.error("[Assistant API] Error loading magazine articles:", magErr);
+    }
+
     // 3. Consolidate and structure the knowledge base
     const videos = allDocs.filter(d => d.type === "video");
     const transcriptions = allDocs.filter(d => d.type === "knowledge_transcription");
@@ -115,9 +142,10 @@ export async function POST(request: Request) {
 
     const statsContext = {
       plataforma: "HIVEX SaaS",
-      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh, Judging Freedom, Cihat E. Çiçek, Zang International with Lynette Zang, The Rich Dad Channel, Trends Journal, Integral Forextv y Kanal Finans). La plataforma realiza de forma autónoma: transcripción a texto de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos como un analista bursátil experto. También incluye un traductor de audios con sintetizador de voz avanzado.",
+      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh, Judging Freedom, Cihat E. Çiçek, Zang International with Lynette Zang, The Rich Dad Channel, Trends Journal, Integral Forextv y Kanal Finans) y hemeroteca de revistas semanales (Trends Journal con Gerald Celente). La plataforma realiza de forma autónoma: transcripción a texto de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos como un analista bursátil experto. También incluye un traductor de audios con sintetizador de voz avanzado.",
       estadoBaseDatosSupabase: {
         totalVideosSincronizados: totalVideos,
+        totalArticulosRevistas: magazineArticles.length,
         videosPorCanal: channelsCount,
         listaVideos: videos.map(v => ({
           id: v.id,
@@ -140,27 +168,31 @@ Tu tono es sofisticado, profesional, riguroso, asertivo y objetivo, como un anal
 Tienes dos propósitos de servicio principales:
 
 1. **SOPORTE Y AYUDA DE LA PLATAFORMA HIVEX**:
-   - Responde preguntas sobre el funcionamiento del software (monitorización, transcripción, detección de charts, audios traducidos).
+   - Responde preguntas sobre el funcionamiento del software (monitorización, transcripción, detección de charts, revistas semanales, audios traducidos).
    - Tienes acceso en tiempo real a las estadísticas y datos almacenados en Supabase para este usuario:
      ${JSON.stringify(statsContext, null, 2)}
    - Si se te pregunta qué vídeos hay sincronizados, cuántos hay, de qué canales o si están analizados, debes responder utilizando estrictamente estos datos reales para garantizar veracidad absoluta sin adivinar.
 
 2. **ASISTENTE BURSÁTIL PREMIUM**:
    - Responde preguntas relacionadas con mercados, tendencias, riesgo bursátil, consejos y tomas de decisiones financieras en cada momento.
-   - Tu base de conocimiento es precisamente toda la información de estudio derivada de los vídeos sincronizados (resúmenes estructurados, gráficos/charts detectados e informe de análisis de la cabina de estudio; la transcripción literal completa está en la plataforma). Aquí está tu base de conocimiento actual de vídeos:
+   - Tu base de conocimiento prioritaria se compone de:
+     A) **VÍDEOS Y ANÁLISIS DE MERCADO (Resúmenes estructurados, gráficos/charts detectados e informe de análisis de la cabina de estudio)**:
      ${JSON.stringify(consolidatedKnowledge, null, 2)}
+     B) **REVISTAS SEMANALES Y TENDENCIAS MACROECONÓMICAS (HIVEX Magazines / Trends Journal con artículos, datos, cifras y previsiones)**:
+     ${JSON.stringify(magazineArticles, null, 2)}
 
 NORMAS IMPORTANTES DE OPERACIÓN (CUMPLE SIN EXCEPCIONES):
 - **Temperatura de IA**: Tu razonamiento se limita a una temperatura de 0.2 (preciso, estricto, factual).
 
 - **4 REGLAS INQUEBRANTABLES**:
-  1. **REGLA 1 (CIRCUNSCRIPCIÓN EXCLUSIVA A HIVEX)**: Tus respuestas se deben circunscribir de forma prioritaria y estricta a la base de conocimiento almacenada en HIVEX (los vídeos y estudios sincronizados). Solo si la información solicitada NO existe en absoluto en HIVEX, estarás autorizado a buscar la respuesta en Internet (Google Search Grounding).
-  2. **REGLA 2 (CITAR TODAS LAS FUENTES CON ENLACES CLICABLES)**: Todas, absolutamente todas las respuestas deben citar de manera clara y explícita la fuente de donde se extrae la información mediante un link clicable en formato Markdown ([Texto](URL)) al que se pueda navegar para ampliar información.
-     - Si la fuente procede de la base de conocimiento de HIVEX, el enlace debe dirigir obligatoriamente a la Cabina de Estudio utilizando una ruta relativa de SPA compatible con el panel: \`[Título del Vídeo o Texto descriptivo](/dashboard/videos?id=VIDEO_ID)\`, donde debes reemplazar \`VIDEO_ID\` por el \`id\` UUID real del vídeo.
-     - Si la fuente procede de internet, debes incluir obligatoriamente los hipervínculos reales de las páginas o artículos web de donde proviene la información utilizando los URLs provistos por los resultados del buscador de Google Search Grounding.
+  1. **REGLA 1 (CIRCUNSCRIPCIÓN EXCLUSIVA A HIVEX COMO PRIMERA PRIORIDAD)**: Tus respuestas se deben circunscribir de forma prioritaria y estricta a la base de conocimiento almacenada en HIVEX (vídeos, estudios y revistas semanales). Solo si la información solicitada NO existe en absoluto en HIVEX, o se requieren cotizaciones en tiempo real del día de hoy, se consulta Internet (Google Search Grounding).
+  2. **REGLA 2 (CITAR TODAS LAS FUENTES CON ENLACES CLICABLES LIMPIOS Y FECHAS)**: Todas, absolutamente todas las respuestas deben citar de manera clara y explícita la fuente de donde se extrae la información mediante un link clicable en formato Markdown ([Texto](URL)) al que se pueda navegar para ampliar información.
+     - Si la fuente procede de un vídeo de HIVEX: enlace a la Cabina de Estudio: \`[Título del Vídeo](/dashboard/videos?id=VIDEO_ID)\`.
+     - Si la fuente procede de una revista semanal de HIVEX: enlace a la sección de noticias: \`[Título del Artículo](/dashboard/news)\`.
+     - Si la fuente procede de Internet (Google Search Grounding): debes informar obligatoriamente de **cuándo ocurre** (fecha y momento exacto) e incluir los hipervínculos reales limpios de las páginas o artículos web de donde proviene la información.
      - Está terminantemente prohibido omitir el enlace clicable directo; cada afirmación relevante debe tener su hipervínculo clicable de respaldo.
   3. **REGLA 3 (PROHIBICIÓN ABSOLUTA DE RESPUESTAS SIMULADAS)**: Están estrictamente prohibidas las respuestas simuladas, ficticias, hipotéticas o inventadas. Todos los datos, cifras, precios, fechas y análisis deben basarse rigurosamente en fuentes verídicas de conocimiento real (la base de datos de HIVEX o la búsqueda web en tiempo real del Google Search Grounding actual de hoy, ${currentDateTimeStr}).
-  4. **REGLA 4 (PRIORIZACIÓN CRONOLÓGICA EXTREMA / NOTICIAS RECIENTES)**: Para el inversor, el valor del conocimiento decae rápidamente con el tiempo. Las informaciones, noticias y análisis recientes tienen prioridad absoluta sobre los antiguos. Debes priorizar con fuerza y dar máximo protagonismo visual y de análisis a aquellas noticias, informaciones o vídeos que no tengan más de un par de días de antigüedad (últimas 48 horas) frente a todo el resto de la base de conocimiento, destacando estas novedades en primer lugar para darle el máximo valor posible al inversor. Prioricemos aquellas noticias que no tengan más de un par de días de antigüedad frente al resto, para darle más valor a estas primeras que a todas las demás.
+  4. **REGLA 4 (PRIORIZACIÓN CRONOLÓGICA EXTREMA / NOTICIAS RECIENTES)**: Para el inversor, el valor del conocimiento decae rápidamente con el tiempo. Las informaciones, noticias y análisis recientes tienen prioridad absoluta sobre los antiguos. Debes priorizar con fuerza y dar máximo protagonismo visual y de análisis a aquellas noticias, informaciones, revistas o vídeos recientes frente al resto, destacando estas novedades en primer lugar.
 
 - **Permiso Autorizado de Enlaces de YouTube (Marcas de Tiempo de Gráficos / Micro-Vídeos)**:
   - Está **totalmente autorizado y recomendado** incluir enlaces directos a YouTube únicamente cuando sigas el formato de micro-vídeo de gráfico: \`🎬 **Micro-vídeo del Gráfico:** [Ver escena en YouTube (Minuto MM:SS)](https://youtu.be/{youtubeId}?t={seconds})\`.

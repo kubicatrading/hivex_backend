@@ -275,7 +275,7 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
       return NextResponse.json({ ok: true });
     }
 
-    // 2. Fetch all documents from Supabase to construct the prompt knowledge base
+    // 2. Fetch user conversation history and documents from Supabase
     let allDocs: any[] = [];
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_PRODUCTION_URL;
     const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
@@ -286,6 +286,40 @@ Estoy conectado de forma segura y en tiempo real a tu base de conocimiento de vi
       supabaseClient = createClient(supabaseUrl, supabaseServiceKey, {
         auth: { persistSession: false }
       });
+    }
+
+    // Load user's persistent conversation history for multi-turn conversational memory
+    let userConversationDoc: any = null;
+    let conversationHistory: Array<{
+      role: "user" | "model";
+      text: string;
+      sender_id?: string;
+      sender_name?: string;
+      message_id?: number;
+      timestamp?: number;
+      reply_to_message_id?: number | null;
+    }> = [];
+
+    if (fromId) {
+      try {
+        const { data: convData, error: convErr } = await supabaseClient
+          .from("documents")
+          .select("id, metadata")
+          .eq("type", "knowledge_transcription")
+          .eq("metadata->>is_telegram_conversation", "true")
+          .eq("metadata->>telegram_user_id", fromId)
+          .maybeSingle();
+
+        if (!convErr && convData) {
+          userConversationDoc = convData;
+          if (Array.isArray(convData.metadata?.history)) {
+            conversationHistory = convData.metadata.history;
+          }
+          console.log(`[Telegram Webhook] Loaded ${conversationHistory.length} previous conversation turns for user ${fromId}.`);
+        }
+      } catch (convFetchErr) {
+        console.error("[Telegram Webhook] Failed to fetch conversation history:", convFetchErr);
+      }
     }
 
     // Determine sender identity and role dynamically or via hardcoded fallback rules
@@ -398,11 +432,9 @@ ${senderDetails}
       return NextResponse.json({ ok: true });
     }
 
-
-
+    // 3. Fetch study base and magazine articles from Supabase
     try {
-      // Optimize query to avoid loading heavy columns (like full transcriptions)
-      // and limit context size to the last 100 entries to prevent Telegram webhook timeouts.
+      // Query recent videos and study assets
       const { data, error } = await supabaseClient
         .from("documents")
         .select("id, title, type, file_url, created_at, metadata, description")
@@ -418,7 +450,34 @@ ${senderDetails}
       console.error("[Telegram Webhook] DB query crash:", dbErr);
     }
 
-    // 3. Structure study base
+    // Load recent magazine articles (Trends Journal & HIVEX Magazines)
+    let magazineArticles: any[] = [];
+    try {
+      const { data: magData, error: magErr } = await supabaseClient
+        .from("documents")
+        .select("id, title, metadata, created_at, description")
+        .eq("type", "knowledge_transcription")
+        .eq("metadata->>is_magazine_article", "true")
+        .order("created_at", { ascending: false })
+        .limit(70);
+
+      if (!magErr && magData) {
+        magazineArticles = magData.map(m => ({
+          id: m.id,
+          titulo: m.title,
+          categoria: m.metadata?.category || m.metadata?.main_category || "Macroeconomía y Tendencias",
+          subcategoria: m.metadata?.subcategory || "",
+          edicion: m.metadata?.issue_slug || "Revista Semanal",
+          pagina: m.metadata?.start_page || 1,
+          textoExtracto: Array.isArray(m.metadata?.paragraphs) ? m.metadata.paragraphs.slice(0, 3).join("\n") : (m.description || "")
+        }));
+        console.log(`[Telegram Webhook] Loaded ${magazineArticles.length} magazine articles into context.`);
+      }
+    } catch (magErr) {
+      console.error("[Telegram Webhook] Error loading magazine articles:", magErr);
+    }
+
+    // Structure study base
     const videos = allDocs.filter(d => d.type === "video");
     const transcriptions = allDocs.filter(d => d.type === "knowledge_transcription");
     const summaries = allDocs.filter(d => d.type === "knowledge_summary");
@@ -455,9 +514,10 @@ ${senderDetails}
 
     const statsContext = {
       plataforma: "HIVEX SaaS",
-      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh, Judging Freedom, Cihat E. Çiçek, Zang International with Lynette Zang, The Rich Dad Channel, Trends Journal, Integral Forextv y Kanal Finans). La plataforma realiza de forma autónoma: transcripción de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos.",
+      detallesPlataforma: "HIVEX es una plataforma premium e integral de estudio para inversores bursátiles y traders. Permite la sincronización en tiempo real de feeds de vídeo de YouTube de canales analíticos (Andrei Jikh, Judging Freedom, Cihat E. Çiçek, Zang International with Lynette Zang, The Rich Dad Channel, Trends Journal, Integral Forextv y Kanal Finans) y hemeroteca de revistas semanales (Trends Journal con Gerald Celente). La plataforma realiza de forma autónoma: transcripción de alta fidelidad, generación de resúmenes detallados de contenido estructurados cronológicamente, detección de charts (gráficos) con títulos y leyendas, y redacción de informes financieros y macroeconómicos rigurosos.",
       estadoBaseDatosSupabase: {
         totalVideosSincronizados: totalVideos,
+        totalArticulosRevistas: magazineArticles.length,
         videosPorCanal: channelsCount,
         listaVideos: videos.map(v => ({
           id: v.id,
@@ -484,32 +544,35 @@ Cuando respondas en el chat de grupo, debes saber exactamente con quién estás 
 Tienes dos propósitos de servicio principales:
 
 1. **SOPORTE Y AYUDA DE LA PLATAFORMA HIVEX**:
-   - Responde preguntas sobre el funcionamiento de HIVEX (monitorización de vídeos, transcripciones, análisis, traducción).
-   - Tienes acceso en tiempo real a las estadísticas y datos de Supabase de los vídeos activos más recientes:
+   - Responde preguntas sobre el funcionamiento de HIVEX (monitorización de vídeos, revistas semanales, transcripciones, análisis, traducción).
+   - Tienes acceso en tiempo real a las estadísticas y datos de Supabase de los vídeos activos y revistas:
      ${JSON.stringify(statsContext, null, 2)}
-   - Si se te pregunta qué vídeos hay sincronizados o cuántos hay, debes responder utilizando estrictamente estos datos reales para garantizar veracidad absoluta sin adivinar.
+   - Si se te pregunta qué vídeos hay sincronizados, cuántos hay o qué publicaciones existen, debes responder utilizando estrictamente estos datos reales para garantizar veracidad absoluta sin adivinar.
 
 2. **ASISTENTE BURSÁTIL PREMIUM (ASESOR EN VIVO EN TELEGRAM)**:
    - Responde preguntas relacionadas con mercados, tendencias, riesgo bursátil, consejos y tomas de decisiones financieras en cada momento.
-   - Tu base de conocimiento prioritaria es la información de estudio de los vídeos sincronizados (resúmenes, gráficos/charts e informe de análisis):
+   - Tu base de conocimiento prioritaria e innegociable se compone de:
+     A) **VÍDEOS Y ANÁLISIS DE MERCADO (Resúmenes, gráficos/charts e informes de análisis)**:
      ${JSON.stringify(consolidatedKnowledge, null, 2)}
+     B) **REVISTAS SEMANALES Y TENDENCIAS MACROECONÓMICAS (HIVEX Magazines / Trends Journal)**:
+     ${JSON.stringify(magazineArticles, null, 2)}
 
-- **REGLAS CRÍTICAS DE CONTEXTO HISTÓRICO Y EVITACIÓN DE ALUCINACIONES**:
-  * **LA COBERTURA HISTÓRICA ES TOTAL Y COMPLETA**: Bajo ninguna circunstancia le digas al usuario que la plataforma solo tiene vídeos o análisis "a partir del 10 de julio de 2026" (o cualquier fecha que veas en la lista de vídeos recientes). El catálogo de HIVEX es histórico e ilimitado, con cientos de vídeos de meses y años anteriores. La lista de vídeos recientes que se te inyecta en el prompt es únicamente una **ventana temporal de caché optimizada** para priorizar las últimas 48h y garantizar respuestas inmediatas sin saturar el contexto.
-  * **PROHIBICIÓN DE INVENTAR LIMITACIONES DE SUSCRIPCIÓN**: Está terminantemente prohibido mentir diciendo que el usuario necesita "ampliar su plan de suscripción", "solicitar una orden de indexación retroactiva" o "acceder a la cabina de control SaaS para desbloquear datos previos al 10 de julio". Los usuarios Juanma y Ceren son los cofundadores de la plataforma y tienen acceso premium absoluto e ilimitado a todo el histórico.
-  * **ENRIQUECIMIENTO CON BÚSQUEDA EN TIEMPO REAL**: Si el usuario te pregunta por análisis históricos o comparativas de fechas anteriores a las que tienes en la lista de vídeos inyectada, utiliza tu herramienta de búsqueda en vivo (Google Search grounding) y tus amplios conocimientos de macroeconomía para complementar la información de manera premium y rigurosa, sin excusas de fechas de corte.
-
-- **JERARQUÍA Y PRIORIDAD DE CONSULTA (PIPELINE DE INFORMACIÓN)**:
-  Cuando proceses cualquier consulta bursátil o macroeconómica, debes buscar, sintetizar y priorizar tus fuentes de información siguiendo estrictamente esta jerarquía (de más prioritario a menos):
-  1. **NIVEL 1: CONSULTA RÁPIDA EN CACHÉ (ÚLTIMAS 48H)**: Tu máxima prioridad es revisar la información inyectada recientemente en el contexto de HIVEX (resúmenes, gráficos e informes de análisis). Prioriza siempre los datos, cifras, precios y tendencias de los vídeos sincronizados en las últimas 48 horas para dar respuestas de extrema actualidad y vigencia de mercado.
-  2. **NIVEL 2: CONSULTA HISTÓRICA COMPLETA DE HIVEX**: Si la consulta requiere datos que van más allá del búfer reciente (últimas 48h/búfer de caché), recurre conceptualmente a la base histórica de todos los vídeos sincronizados en HIVEX. Considera el catálogo histórico acumulado como la columna vertebral de tu conocimiento interno de los traders y canales de la plataforma.
-  3. **NIVEL 3: CONSULTA A INTERNET (GROUNDING / GOOGLE SEARCH)**: Utiliza la búsqueda en vivo en Internet únicamente para:
-     - Completar o enriquecer los datos de los Niveles 1 y 2 (por ejemplo, buscar cotizaciones de precios de acciones o activos en tiempo real para contrastar un gráfico reciente de la plataforma).
-     - Buscar respuestas, eventos macroeconómicos de última hora o análisis especializados que no se encuentren registrados dentro de los vídeos sincronizados de HIVEX.
+- **JERARQUÍA Y PRIORIDAD DE FUENTES (PIPELINE DE INFORMACIÓN OBLIGATORIO)**:
+  Cuando proceses cualquier consulta, debes buscar, sintetizar y priorizar tus fuentes de información siguiendo estrictamente esta jerarquía obligatoria (de más prioritario a menos):
+  1. **NIVEL 1: BASE DE CONOCIMIENTO PERSISTENTE DE HIVEX (MÁXIMA PRIORIDAD Y OBLIGATORIA)**:
+     - Tu fuente primordial e innegociable es toda la base de conocimiento persistente de HIVEX:
+       a) **Tarjetas de Gráficos Bursátiles** (\`knowledge_charts\`) con sus capturas fijas y marcas temporales (prioridad absoluta en análisis de mercado).
+       b) **Informes de Análisis Macroeconómico** (\`knowledge_analysis\`) de los vídeos de la plataforma.
+       c) **Resúmenes Ejecutivos y Cronológicos** (\`knowledge_summary\`).
+       d) **Revistas Semanales y Análisis de Tendencias** (\`knowledge_transcription\` de HIVEX Magazines / Trends Journal con artículos, datos, cifras, consejos y previsiones de Gerald Celente).
+     - Si la información, consejo, previsión o tendencia está en la base de datos de HIVEX, básate íntegramente en ella.
+  2. **NIVEL 2: CONSULTA A INTERNET (ÚNICA Y ESTRICTAMENTE COMO ÚLTIMO RECURSO)**:
+     - Utiliza la búsqueda en vivo en Internet (Google Search Grounding) ÚNICAMENTE como último recurso, si la consulta requiere hechos, eventos macroeconómicos o cotizaciones que NO existen en la base de datos de HIVEX o para contrastar precios de activos en tiempo real de hoy.
+     - **REGLA OBLIGATORIA AL USAR INTERNET**: Cuando recurras a Internet, es **estrictamente obligatorio informar de cuándo ocurre** (fecha y momento preciso de la noticia o cotización) y citar de forma limpia y transparente la **fuente en particular** (nombre del medio o portal con su hipervínculo limpio). Jamás ocultes ni simules la procedencia de los datos externos.
 
 - **REGLAS DE ORO OBLIGATORIAS DE COMUNICACIÓN EN TELEGRAM (5 NORMAS INQUEBRANTABLES)**:
   1. **REGLA 1 (PRESENTACIÓN FORMAL DEL INVERSOR AL INICIO)**: Toda información o análisis bursátil que se solicite en el chat debe ir precedida **obligatoriamente** por una breve presentación formal del inversor de HIVEX y qué se pretende presentar en ese mensaje. Esta presentación formal debe ubicarse en el **principio absoluto de tu respuesta**, antes de cualquier otra información, tabla o gráfico, asegurando que jamás aparezca al final de la comunicación. Esta presentación debe ser extremadamente corta, sobria, concisa y directa (de un párrafo breve de no más de una o dos líneas, máximo 30-40 palabras), evitando introducciones largas o rodeos.
-  2. **REGLA 2 (ACOMPAÑAR TODA INFORMACIÓN DE SU FUENTE EXPLÍCITA)**: Toda información bursátil, datos macroeconómicos, cifras, precios o tendencias que se muestren debe venir acompañada de la fuente sobre la que se basa. Esta fuente debe indicarse de forma limpia e integrada mediante un link hipervínculo utilizando el propio título de la fuente (ya sea el título del vídeo en la cabina de estudio de HIVEX, o bien el nombre limpio del artículo o web de donde provenga en Internet).
+  2. **REGLA 2 (ACOMPAÑAR TODA INFORMACIÓN DE SU FUENTE EXPLÍCITA)**: Toda información bursátil, datos macroeconómicos, cifras, precios o tendencias que se muestren debe venir acompañada de la fuente sobre la que se basa. Esta fuente debe indicarse de forma limpia e integrada mediante un link hipervínculo utilizando el propio título de la fuente (ya sea el título del vídeo en la cabina de estudio de HIVEX, el artículo de la revista de HIVEX, o bien el nombre limpio del artículo o web de donde provenga en Internet).
   3. **REGLA 3 (BÚSQUEDA PRIORITARIA EN TARJETAS DE GRÁFICOS / KNOWLEDGE_CHARTS Y ESTRUCTURA JERÁRQUICA)**: Ante cualquier tipo de información o análisis de mercado que se solicite, debes buscar **en primer lugar** en los gráficos detectados en la cabina de estudio (\`knowledge_charts\`). En este caso, la información debe presentarse estrictamente en formato "despacho premium" jerárquico:
      - **Prohibición de vídeo MP4 nativo**: Está terminantemente prohibido enviar archivos o reproductores nativos MP4 a Telegram. En su lugar, el acceso a cada vídeo se realiza a través de su enlace amigable acompañado de su captura fija (\`snapshot\`).
      - **Estructura jerárquica estricta (enlace + captura emparejados)**:
@@ -517,40 +580,96 @@ Tienes dos propósitos de servicio principales:
        2. Captura fija del gráfico pegada inmediatamente debajo: \`![Título Limpio del Gráfico](https://hivex-backend.vercel.app/snapshots/{videoId}/{seconds}.jpg)\`.
        3. Enlace amigable al vídeo completo: \`[Vídeo Completo: Título del Vídeo](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)\` (o en inglés: \`[Full Video: Video Title](https://hivex-backend.vercel.app/dashboard/videos?id={videoId}&from=telegram)\`).
        4. Carátula o portada del vídeo completo pegada inmediatamente debajo: \`![Título del Vídeo](https://hivex-backend.vercel.app/snapshots/{videoId}/0.jpg)\`.
-     - **Si NO hay gráficos detectados**, se omiten estrictamente el enlace acotado y la captura fija, enviando solo el enlace al vídeo completo y su carátula \`0.jpg\`. Está terminantemente prohibido inventar marcas de tiempo o gráficos inexistentes.
-     - Al hablar de información bursátil, lo más importante es apoyarse en cifras, números y tendencias visibles en esos gráficos. Completa y enriquece este análisis de gráficos utilizando la información de los otros documentos \`knowledge_*\` del contexto.
-  4. **REGLA 4 (ENLACES COMPLETAMENTE LIMPIOS)**: Todos los enlaces hipervínculos que presentes deben ser limpios. El texto ancla del enlace debe ser el propio título descriptivo del recurso, de la fuente, o del gráfico (ej. \`[Título del Gráfico](url)\` o \`[Andrei Jikh - Título de Vídeo](url)\`). Está terminantemente prohibido utilizar textos de enlace genéricos y repetitivos como "Ver escena", "Abrir escena", "Hacer clic aquí", "Ver enlace" o mostrar direcciones URL de forma cruda.
+     - **Si NO hay gráficos detectados**, se omiten estrictamente el enlace acotado y la captura fija, enviando solo el enlace al vídeo o revista y su carátula. Está terminantemente prohibido inventar marcas de tiempo o gráficos inexistentes.
+     - Al hablar de información bursátil, lo más importante es apoyarse en cifras, números y tendencias visibles en esos gráficos. Completa y enriquece este análisis de gráficos utilizando la información de los otros documentos \`knowledge_*\` del contexto (análisis, resúmenes y artículos de revistas).
+  4. **REGLA 4 (ENLACES COMPLETAMENTE LIMPIOS)**: Todos los enlaces hipervínculos que presentes deben ser limpios. El texto ancla del enlace debe ser el propio título descriptivo del recurso, de la fuente, o del gráfico (ej. \`[Título del Gráfico](url)\`, \`[Andrei Jikh - Título de Vídeo](url)\` o \`[Trends Journal - Título del Artículo](url)\`). Está terminantemente prohibido utilizar textos de enlace genéricos y repetitivos como "Ver escena", "Abrir escena", "Hacer clic aquí", "Ver enlace" o mostrar direcciones URL de forma cruda.
   5. **REGLA 5 (PROHIBICIÓN TOTAL DE INVENTAR O SIMULAR INFORMACIÓN)**: Está estrictamente prohibido simular o inventar datos, cifras, precios, fechas o análisis. Si algo no está respaldado por tu base de conocimiento o búsquedas en tiempo real, no lo menciones. La veracidad y la precisión bursátil de los datos numéricos es fundamental.
 
+- **CONTINUIDAD CONVERSACIONAL Y SOPORTE DE REPLY (CITAS)**:
+  - Tienes memoria activa de la conversación con este interlocutor. Mantén el hilo temático, las referencias previas y los acuerdos o advertencias dadas en turnos anteriores.
+  - Si el usuario cita o hace "Reply" a un mensaje anterior (del bot o de otro miembro del grupo), tu respuesta debe retomar la conversación con absoluta fluidez en ese punto exacto, contestando a la nueva pregunta a la luz de lo que se dijo en el mensaje citado.
+
 - **ADAPTACIÓN DE IDIOMA**:
-  - Responde siempre en el idioma en que el usuario te hable o te solicite (español, inglés u otro). Las 5 Reglas de Oro se aplican con el mismo rigor adaptando los textos de forma natural al idioma solicitado (por ejemplo en inglés: formal investor greeting, \`[Full Video: Video Title](...)\`, y títulos de gráficos en inglés).
+  - Responde siempre en el idioma en que el usuario te hable o te solicite (español, inglés u otro). Las 5 Reglas de Oro se aplican con el mismo rigor adaptando los textos de forma natural al idioma solicitado.
 
 - **PROHIBICIÓN ABSOLUTA DE PLANES DE ACCIÓN EN JSON Y METAPLANS**:
   - BAJO NINGUNA CIRCUNSTANCIA respondas con un objeto JSON, bloques de código JSON de planificación, claves como 'query', 'metaplan' o estructuras de diseño de planes.
-  - El sistema de HIVEX opera en modo de **petición única (Single-turn)**, lo que significa que no hay un bucle de agentes intermedio en el servidor para ejecutar planes de múltiples pasos.
+  - El sistema de HIVEX opera en modo de **petición única (Single-turn)** para la llamada a Telegram.
   - Debes realizar toda la investigación, traducción y análisis en tu pensamiento interno y devolver **únicamente el resultado final redactado en lenguaje natural** formateado en Markdown estándar en tu primera y única respuesta.
 
 - **Formateo de Respuesta (Markdown Estándar)**: 
   - IMPORTANTE: Tus respuestas se envían a un procesador intermedio. Debes redactar tus respuestas exclusivamente en **Markdown estándar**.
-  - **PROHIBIDO EL USO DE ETIQUETAS HTML**: Bajo ninguna circunstancia uses etiquetas HTML como <b>, <i>, <a>, <code>, <code>, <code>, <blockquote>, etc. El procesador intermedio se encarga de convertir tu Markdown a HTML para Telegram. Si escribes etiquetas HTML directamente, el usuario las verá literalmente en su pantalla de Telegram como texto no procesado.
-  - Estructura tu respuesta de forma estética usando los siguientes elementos Markdown:
-    - **texto en negrita** para resaltar términos, conceptos clave o títulos de secciones.
-    - *texto en cursiva* para énfasis o citas cortas.
-    - \`código en línea\` para datos numéricos específicos, porcentajes, o variables.
-    - > bloque de cita para fragmentos destacados de análisis o resúmenes de vídeos.
-    - [texto del enlace](url) para enlaces a la cabina de estudio de HIVEX u otros sitios.
-    - [título](url) para incluir enlaces a gráficos externos.
-  - Para listas, utiliza viñetas estándar de Markdown (por ejemplo, "- elemento") o listas numeradas ("1. elemento").
+  - **PROHIBIDO EL USO DE ETIQUETAS HTML**: Bajo ninguna circunstancia uses etiquetas HTML como <b>, <i>, <a>, <code>, <blockquote>, etc. El procesador intermedio se encarga de convertir tu Markdown a HTML para Telegram. Si escribes etiquetas HTML directamente, el usuario las verá literalmente en su pantalla de Telegram como texto no procesado.
+  - Estructura tu respuesta de forma estética usando Markdown estándar (**negrita**, *cursiva*, \`código en línea\`, > citas, [enlace limpio](url)).
 `;
 
-    // 5. Query Gemini with search grounding enabled
+    // 5. Query Gemini with multi-turn conversation memory and search grounding
     if (!apiKey) {
       console.warn("[Telegram Webhook] Missing GEMINI_API_KEY environment variable.");
       return NextResponse.json({ ok: true });
     }
 
-    console.log(`[Telegram Webhook] Successfully parsed payload. Chat ID: ${chatId}, User Text: "${userText}".`);
-    console.log(`[Telegram Webhook] Total videos in context: ${totalVideos}. DB docs count: ${allDocs.length}.`);
+    // Clean any bot username references (e.g. @HivexBot) from the query
+    let cleanedUserQuery = userText;
+    if (cleanedUserQuery.includes("@")) {
+      cleanedUserQuery = cleanedUserQuery.replace(/@\w+/g, "").trim();
+    }
+
+    // Format current turn incorporating Reply context if user quoted an earlier message
+    let currentPromptText = cleanedUserQuery || userText;
+
+    if (message.reply_to_message) {
+      const replyMsg = message.reply_to_message;
+      const replyFrom = replyMsg.from || {};
+      const replyAuthor = replyFrom.first_name ? `${replyFrom.first_name} ${replyFrom.last_name || ""}`.trim() : (replyFrom.username || "Usuario");
+      const replyDateStr = replyMsg.date ? new Date(replyMsg.date * 1000).toLocaleString("es-ES", { timeZone: "Europe/Madrid" }) : "Anterior";
+      const replyText = replyMsg.text || replyMsg.caption || "[Mensaje multimedia / sin texto]";
+
+      currentPromptText = `[CONTEXTO DE RESPUESTA A MENSAJE CITADO (REPLY)]:
+El usuario está respondiendo específicamente al siguiente mensaje anterior en el chat de Telegram:
+- Autor del mensaje citado: ${replyAuthor} (${replyFrom.is_bot ? "Bot HIVEX" : `@${replyFrom.username || "usuario"}`})
+- Fecha del mensaje citado: ${replyDateStr}
+- Mensaje citado:
+"""
+${replyText}
+"""
+
+[NUEVA PREGUNTA / MENSAJE DEL USUARIO]:
+${currentPromptText}
+
+(INSTRUCCIÓN OBLIGATORIA DE CONTINUIDAD: El usuario ha hecho un REPLY explícito para retomar o profundizar la conversación a partir de ese mensaje citado. Responde continuando la conversación exactamente desde ese punto, manteniendo coherencia total con lo que se dijo en el mensaje citado).`;
+    }
+
+    // Build multi-turn contents payload ensuring strictly alternating roles (user -> model -> user -> model)
+    const contentsPayload: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
+
+    // Take up to the last 10 turns (5 exchanges) from user's persistent memory
+    const recentTurns = conversationHistory.slice(-10);
+    let expectedRole: "user" | "model" = "user";
+
+    for (const turn of recentTurns) {
+      if (turn.role === expectedRole && turn.text) {
+        contentsPayload.push({
+          role: turn.role,
+          parts: [{ text: turn.text }]
+        });
+        expectedRole = expectedRole === "user" ? "model" : "user";
+      }
+    }
+
+    // Ensure the turn before our new message is 'model' (or array is empty)
+    if (contentsPayload.length > 0 && contentsPayload[contentsPayload.length - 1].role === "user") {
+      contentsPayload.pop();
+    }
+
+    // Append the current turn
+    contentsPayload.push({
+      role: "user",
+      parts: [{ text: currentPromptText }]
+    });
+
+    console.log(`[Telegram Webhook] Successfully parsed payload. Chat ID: ${chatId}, User Text: "${userText}". Multi-turn count: ${contentsPayload.length}. Reply active: ${!!message.reply_to_message}.`);
+    console.log(`[Telegram Webhook] Total videos in context: ${totalVideos}. DB docs count: ${allDocs.length}. Magazines count: ${magazineArticles.length}.`);
 
     const attempts = [
       {
@@ -589,19 +708,6 @@ Tienes dos propósitos de servicio principales:
 
     let geminiResponseText = "";
     let successfulModel = "";
-
-    // Clean any bot username references (e.g. @HivexBot) from the query so Gemini gets a clean question
-    let cleanedUserQuery = userText;
-    if (cleanedUserQuery.includes("@")) {
-      cleanedUserQuery = cleanedUserQuery.replace(/@\w+/g, "").trim();
-    }
-
-    const contentsPayload = [
-      {
-        role: "user",
-        parts: [{ text: cleanedUserQuery || userText }]
-      }
-    ];
 
     for (const attempt of attempts) {
       try {
@@ -682,6 +788,69 @@ Tienes dos propósitos de servicio principales:
     // 6. Send response via sendTelegramMessageWithPhotos to support interactive image sending
     console.log(`[Telegram Webhook] Sending Gemini response via sendTelegramMessageWithPhotos to chat ${chatId}...`);
     await sendTelegramMessageWithPhotos(geminiResponseText, chatId);
+
+    // 7. Persist interaction into user's conversation memory in Supabase
+    try {
+      if (fromId && geminiResponseText) {
+        const updatedHistory = [
+          ...conversationHistory,
+          {
+            role: "user" as const,
+            sender_id: fromId,
+            sender_name: fromFullName || fromUsername || "Usuario",
+            text: userText,
+            message_id: message.message_id,
+            timestamp: message.date || Math.floor(Date.now() / 1000),
+            reply_to_message_id: message.reply_to_message?.message_id || null
+          },
+          {
+            role: "model" as const,
+            text: geminiResponseText,
+            timestamp: Math.floor(Date.now() / 1000)
+          }
+        ];
+
+        // Retain rolling window of up to 30 turns
+        const cappedHistory = updatedHistory.slice(-30);
+
+        if (userConversationDoc?.id) {
+          await supabaseClient
+            .from("documents")
+            .update({
+              metadata: {
+                ...userConversationDoc.metadata,
+                telegram_user_id: fromId,
+                telegram_username: fromUsername,
+                telegram_chat_id: chatId,
+                last_updated: new Date().toISOString(),
+                history: cappedHistory
+              },
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", userConversationDoc.id);
+        } else {
+          await supabaseClient
+            .from("documents")
+            .insert({
+              user_id: "5c8d65c6-0798-4f8a-aae3-dd2cebebd868",
+              title: `[Telegram Context] - ${fromFullName || fromUsername || fromId} (${fromId})`,
+              type: "knowledge_transcription",
+              description: `Historial de conversación persistente en Telegram para ${fromFullName || fromUsername || fromId}`,
+              metadata: {
+                is_telegram_conversation: true,
+                telegram_user_id: fromId,
+                telegram_username: fromUsername,
+                telegram_chat_id: chatId,
+                last_updated: new Date().toISOString(),
+                history: cappedHistory
+              }
+            });
+        }
+        console.log(`[Telegram Webhook] Successfully persisted conversation memory for user ${fromId} (${cappedHistory.length} turns).`);
+      }
+    } catch (saveMemoryErr) {
+      console.error("[Telegram Webhook] Failed to persist conversation memory:", saveMemoryErr);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error: any) {
