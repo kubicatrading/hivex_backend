@@ -297,7 +297,7 @@ export async function sendMagazineNotification(payload: MagazineNotificationPayl
   return await sendTelegramMessage(formattedHtml);
 }
 
-function getSupabaseAdmin() {
+export function getSupabaseAdmin() {
   const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   if (!supabaseUrl || !serviceRoleKey) {
@@ -363,25 +363,23 @@ export async function setTelegramLanguage(lang: string): Promise<boolean> {
       .eq("file_url", "https://telegram.org/settings")
       .maybeSingle();
 
-    if (findError) {
-      console.error("[Telegram Service] Error checking existing settings:", findError);
+    if (findError && findError.code !== "PGRST116") {
+      console.error("[Telegram Service] Error checking existing settings document:", findError);
       return false;
     }
 
-    const metadata = { language: lang === "es" ? "es" : "en" };
-
-    if (existing?.id) {
+    if (existing) {
       // Update
       const { error: updateError } = await supabaseAdmin
         .from("documents")
         .update({
-          metadata,
-          updated_at: new Date().toISOString()
+          metadata: { language: lang },
+          updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id);
 
       if (updateError) {
-        console.error("[Telegram Service] Error updating settings:", updateError);
+        console.error("[Telegram Service] Error updating settings document:", updateError);
         return false;
       }
     } else {
@@ -391,20 +389,22 @@ export async function setTelegramLanguage(lang: string): Promise<boolean> {
         .insert({
           user_id: userId,
           title: "telegram_language",
-          file_url: "https://telegram.org/settings",
           type: "knowledge_analysis",
-          metadata
+          description: "Telegram Bot UI Language Setting",
+          file_url: "https://telegram.org/settings",
+          metadata: { language: lang },
         });
 
       if (insertError) {
-        console.error("[Telegram Service] Error inserting settings:", insertError);
+        console.error("[Telegram Service] Error inserting settings document:", insertError);
         return false;
       }
     }
 
+    console.log(`[Telegram Service] Language preference persisted successfully: ${lang}`);
     return true;
   } catch (err) {
-    console.error("[Telegram Service] Failed to set Telegram language in DB:", err);
+    console.error("[Telegram Service] Exception while updating language in DB:", err);
     return false;
   }
 }
@@ -436,6 +436,21 @@ export async function sendTelegramMessage(
     return { success: true, simulated: true };
   }
 
+  // Auto-chunk if text exceeds 3900 characters to prevent Telegram's 4096 character limit error
+  if (text.length > 3900) {
+    const chunks = splitMarkdown(text, 3800);
+    let lastResult = { success: true, simulated: false };
+    for (const chunk of chunks) {
+      const chunkToSend = chunk.startsWith("<") || chunk.includes("<b>") ? chunk : markdownToTelegramHtml(chunk);
+      const res = await sendTelegramMessage(chunkToSend, customChatId, disableWebPagePreview);
+      if (!res.success) {
+        return res;
+      }
+      lastResult = res;
+    }
+    return lastResult;
+  }
+
   try {
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
@@ -453,6 +468,25 @@ export async function sendTelegramMessage(
     const data = await response.json();
 
     if (!response.ok || !data.ok) {
+      // If Telegram failed due to HTML parsing errors, retry with plain text (stripping HTML tags)
+      if (data.description && (data.description.includes("can't parse entities") || data.description.includes("parse entities"))) {
+        console.warn("[Telegram Service] Entity parsing error, retrying without HTML parse_mode:", data.description);
+        const plainText = text.replace(/<[^>]+>/g, "");
+        const fallbackRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: plainText,
+            disable_web_page_preview: disableWebPagePreview,
+          }),
+        });
+        const fallbackData = await fallbackRes.json();
+        if (fallbackRes.ok && fallbackData.ok) {
+          return { success: true, simulated: false };
+        }
+      }
+
       const errorMsg = data.description || `HTTP status ${response.status}`;
       console.error("[Telegram Service] Failed to send message:", errorMsg);
       return { success: false, simulated: false, error: errorMsg };
@@ -586,6 +620,11 @@ export async function sendTelegramPhoto(
   }
 
   try {
+    let safeCaption = caption;
+    if (safeCaption && safeCaption.length > 1024) {
+      safeCaption = safeCaption.slice(0, 1020) + "...";
+    }
+
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: "POST",
       headers: {
@@ -594,7 +633,7 @@ export async function sendTelegramPhoto(
       body: JSON.stringify({
         chat_id: chatId,
         photo: photoUrl,
-        caption: caption,
+        caption: safeCaption,
         parse_mode: "HTML",
         show_caption_above_media: showCaptionAboveMedia
       }),
@@ -1030,6 +1069,10 @@ export async function sendTelegramMessageWithPhotos(
       const cleanAlt = matches[i].alt.replace(/\*\*/g, "").trim();
       captionHtml = cleanAlt ? `<b>${escapeHtml(cleanAlt)}</b>` : "";
       textBefore = block.trim();
+    }
+
+    if (captionHtml.length > 1000) {
+      captionHtml = captionHtml.slice(0, 995) + "...";
     }
 
     photoCaptions.push(captionHtml);

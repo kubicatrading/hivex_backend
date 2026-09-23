@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { 
   sendTelegramMessage, 
+  sendTelegramMessageWithPhotos,
   sendVideoNotification, 
   sendMagazineNotification,
   markdownToTelegramHtml, 
-  getTelegramLanguage 
+  getTelegramLanguage,
+  getSupabaseAdmin
 } from "@/lib/telegram";
+
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
@@ -95,7 +99,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Manual broadcast or general message
+    // Manual broadcast or general assistant message from web platform
     if (!message) {
       return NextResponse.json(
         { success: false, error: "Message body is empty" },
@@ -103,9 +107,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert basic markdown formatting into Telegram HTML
-    const textToSend = markdownToTelegramHtml(message);
-    const result = await sendTelegramMessage(textToSend);
+    // Resolve target chatId: from body, or look up authenticated user profile's linked telegram_chat_id
+    let targetChatId = body.chatId;
+    if (!targetChatId) {
+      const authHeader = request.headers.get("Authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        try {
+          const supabaseAdmin = getSupabaseAdmin();
+          if (supabaseAdmin) {
+            const token = authHeader.substring(7);
+            const { data: { user } } = await supabaseAdmin.auth.getUser(token);
+            if (user) {
+              const { data: profile } = await supabaseAdmin
+                .from("profiles")
+                .select("id, telegram_user_id, metadata")
+                .eq("id", user.id)
+                .maybeSingle();
+
+              const userChatId = profile?.metadata?.telegram_chat_id || profile?.telegram_user_id;
+              if (userChatId) {
+                targetChatId = String(userChatId);
+              }
+            }
+          }
+        } catch (authErr) {
+          console.warn("[Telegram Notify] Could not resolve user telegram chat ID:", authErr);
+        }
+      }
+    }
+
+    // Dispatch message with full photos, chart captures, clean link captions, and safe auto-chunking (Golden Rule 3)
+    const result = await sendTelegramMessageWithPhotos(message, targetChatId);
 
     if (!result.success) {
       return NextResponse.json(
