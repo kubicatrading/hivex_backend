@@ -58,6 +58,8 @@ async function handleHealthCheck(request: NextRequest) {
     let readyMagazinesCount = 0;
     let pendingMagazinesCount = 0;
     let pendingMagazinesList: any[] = [];
+    let latestMagazineDate: Date | null = null;
+    let latestMagazineSlug = "";
 
     try {
       const dbStart = Date.now();
@@ -132,9 +134,6 @@ async function handleHealthCheck(request: NextRequest) {
       });
 
       totalMagazines = magazineIssues.length;
-
-      let latestMagazineDate: Date | null = null;
-      let latestMagazineSlug = "";
       const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
       for (const mag of magazineIssues) {
