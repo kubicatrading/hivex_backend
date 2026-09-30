@@ -133,8 +133,26 @@ async function handleHealthCheck(request: NextRequest) {
 
       totalMagazines = magazineIssues.length;
 
+      let latestMagazineDate: Date | null = null;
+      let latestMagazineSlug = "";
+      const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
       for (const mag of magazineIssues) {
-        const slug = mag.metadata?.slug;
+        const slug = mag.metadata?.slug || "";
+        const clean = slug.toLowerCase().replace("category-", "");
+        let match = /(\d+)-([a-z]+)-(\d{4})/.exec(clean);
+        if (match) {
+          const d = parseInt(match[1]);
+          const m = months.indexOf(match[2]);
+          const y = parseInt(match[3]);
+          if (m !== -1) {
+            const dt = new Date(Date.UTC(y, m, d));
+            if (!latestMagazineDate || dt > latestMagazineDate) {
+              latestMagazineDate = dt;
+              latestMagazineSlug = slug;
+            }
+          }
+        }
         const arts = slug ? articlesBySlug[slug] || [] : [];
         const artCount = arts.length;
         const hasValidPages = artCount > 0 && arts.some(a => a.start_page !== null && a.start_page !== undefined);
@@ -224,7 +242,19 @@ async function handleHealthCheck(request: NextRequest) {
     reportMd += `<b>📰 ESTADO DE REVISTAS / NEWS (CABINA EDITORIAL)</b>\n`;
     reportMd += `• <b>Ediciones registradas:</b> ${totalMagazines}\n`;
     reportMd += `• <b>Ediciones completas (Texto v7, Audio 18k, Timestamps):</b> ${readyMagazinesCount} ✅\n`;
-    reportMd += `• <b>Ediciones pendientes o encalladas:</b> ${pendingMagazinesCount} ${pendingMagazinesCount > 0 ? "⏳" : "🟢"}\n\n`;
+    reportMd += `• <b>Ediciones pendientes o encalladas:</b> ${pendingMagazinesCount} ${pendingMagazinesCount > 0 ? "⏳" : "🟢"}\n`;
+    if (latestMagazineDate) {
+      const now = new Date();
+      const diffMs = now.getTime() - latestMagazineDate.getTime();
+      const daysSinceLatest = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      if (daysSinceLatest > 7) {
+        reportMd += `• <b>Frescura Editorial:</b> ⚠️ <b>DESACTUALIZADA</b> (Última: hace ${daysSinceLatest} días - <code>${latestMagazineSlug}</code>)\n\n`;
+      } else {
+        reportMd += `• <b>Última edición disponible:</b> <code>${latestMagazineSlug}</code> (al día 🟢)\n\n`;
+      }
+    } else {
+      reportMd += `\n`;
+    }
 
     if (pendingMagazinesCount > 0 && dbReachable) {
       reportMd += `<b>⚠️ EDICIONES PENDIENTES DE PROCESAMIENTO EDITORIAL</b>\n`;
