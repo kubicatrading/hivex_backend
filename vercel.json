@@ -50,10 +50,6 @@
       "schedule": "0 7 * * *"
     },
     {
-      "path": "/api/videos/backfill-snapshots",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/api/videos/health-check",
       "schedule": "0 8 * * *"
     },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessageWithPhotos, sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
+import { recordCronExecution } from "@/lib/cron-logger";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleInvestors(request: NextRequest) {
+  const startTime = Date.now();
   try {
     // Validate Secret Auth Token to prevent unauthorized invocation
     const { searchParams } = new URL(request.url);
@@ -231,6 +233,18 @@ async function handleInvestors(request: NextRequest) {
       console.log("[Investors Route] Dry-run enabled. Skipping Telegram delivery.");
     }
 
+    await recordCronExecution({
+      path: "/api/videos/investors-24h",
+      cronName: "Alertas Inversores 24h (HIVEX Investors)",
+      statusCode: 200,
+      status: "success",
+      durationMs: Date.now() - startTime,
+      details: {
+        count: priorityVideos.length,
+        dryRun
+      }
+    });
+
     return NextResponse.json({
       success: true,
       count: priorityVideos.length,
@@ -242,6 +256,16 @@ async function handleInvestors(request: NextRequest) {
     });
   } catch (error: any) {
     console.error("[Investors Route] Critical failure:", error);
+
+    await recordCronExecution({
+      path: "/api/videos/investors-24h",
+      cronName: "Alertas Inversores 24h (HIVEX Investors)",
+      statusCode: 500,
+      status: "error",
+      error: error,
+      durationMs: Date.now() - startTime
+    });
+
     return NextResponse.json(
       { success: false, error: error?.message || "Unexpected failure in investors route." },
       { status: 500 }

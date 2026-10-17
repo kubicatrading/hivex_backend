@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { exec } from "child_process";
+import { recordCronExecution } from "@/lib/cron-logger";
 
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during stream extraction
 
@@ -102,6 +103,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleBackfill(request: NextRequest) {
+  const startTime = Date.now();
   try {
     const { searchParams } = new URL(request.url);
 
@@ -297,6 +299,18 @@ async function handleBackfill(request: NextRequest) {
       } catch {}
     }
 
+    await recordCronExecution({
+      path: "/api/videos/backfill-snapshots",
+      cronName: "Recuperación de Gráficos (Backfill Snapshots)",
+      statusCode: 200,
+      status: "success",
+      durationMs: Date.now() - startTime,
+      details: {
+        processedVideos: processedVideosLog.length,
+        backfilledVideosCount: backfilledCount
+      }
+    });
+
     return NextResponse.json({
       success: true,
       processedVideos: processedVideosLog,
@@ -305,6 +319,16 @@ async function handleBackfill(request: NextRequest) {
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
     console.error("[Backfill API Error]", errorMsg);
+
+    await recordCronExecution({
+      path: "/api/videos/backfill-snapshots",
+      cronName: "Recuperación de Gráficos (Backfill Snapshots)",
+      statusCode: 500,
+      status: "error",
+      error: error,
+      durationMs: Date.now() - startTime
+    });
+
     return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

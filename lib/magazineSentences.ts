@@ -87,6 +87,7 @@ export interface MagazineSentenceChunk {
   articleId: string;
   pIdx?: number;
   sIdx?: number;
+  page?: number;
 }
 
 /**
@@ -102,15 +103,21 @@ export function extractMagazineSentences(articles: any[]): MagazineSentenceChunk
       ? `${subcat}: ${art.title}.`
       : `${art.title}.`;
 
+    const titlePage = Number(art.metadata?.start_page || 1);
+
     result.push({
       sentenceIdx: globalIdx++,
       text: titleText,
       elementId: `article-title-${art.id}`,
-      articleId: art.id
+      articleId: art.id,
+      page: titlePage
     });
 
     const paragraphs = art.metadata?.paragraphs || [art.description || ""];
+    const paragraphPages = art.metadata?.paragraph_pages || [];
+
     paragraphs.forEach((para: string, pIdx: number) => {
+      const paraPage = paragraphPages[pIdx] ? Number(paragraphPages[pIdx]) : titlePage;
       const sentences = splitParagraphIntoSentences(para);
       if (sentences.length > 0) {
         sentences.forEach((s: string, sIdx: number) => {
@@ -122,7 +129,8 @@ export function extractMagazineSentences(articles: any[]): MagazineSentenceChunk
               elementId: `sentence-${art.id}-${pIdx}-${sIdx}`,
               articleId: art.id,
               pIdx,
-              sIdx
+              sIdx,
+              page: paraPage
             });
           }
         });
@@ -135,7 +143,8 @@ export function extractMagazineSentences(articles: any[]): MagazineSentenceChunk
             elementId: `sentence-${art.id}-${pIdx}-0`,
             articleId: art.id,
             pIdx,
-            sIdx: 0
+            sIdx: 0,
+            page: paraPage
           });
         }
       }

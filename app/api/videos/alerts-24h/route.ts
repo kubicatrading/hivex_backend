@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessageWithPhotos, sendTelegramMessage, markdownToTelegramHtml, splitMarkdown, getTelegramLanguage } from "@/lib/telegram";
+import { recordCronExecution } from "@/lib/cron-logger";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during synthesis
@@ -14,6 +15,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleAlerts(request: NextRequest) {
+  const startTime = Date.now();
   try {
     // Validate Secret Auth Token to prevent unauthorized invocation
     const { searchParams } = new URL(request.url);
@@ -247,6 +249,18 @@ async function handleAlerts(request: NextRequest) {
       console.log("[Alerts Route] Dry-run enabled. Skipping Telegram delivery and database update.");
     }
 
+    await recordCronExecution({
+      path: "/api/videos/alerts-24h",
+      cronName: "Alertas de Vídeos 24h (Alerts 24h)",
+      statusCode: 200,
+      status: "success",
+      durationMs: Date.now() - startTime,
+      details: {
+        unalertedVideosCount: unalertedVideos.length,
+        dryRun
+      }
+    });
+
     return NextResponse.json({
       success: true,
       count: unalertedVideos.length,
@@ -258,6 +272,16 @@ async function handleAlerts(request: NextRequest) {
     });
   } catch (error: any) {
     console.error("[Alerts Route] Critical failure:", error);
+
+    await recordCronExecution({
+      path: "/api/videos/alerts-24h",
+      cronName: "Alertas de Vídeos 24h (Alerts 24h)",
+      statusCode: 500,
+      status: "error",
+      error: error,
+      durationMs: Date.now() - startTime
+    });
+
     return NextResponse.json(
       { success: false, error: error?.message || "Unexpected failure in alerts route." },
       { status: 500 }

@@ -190,22 +190,32 @@ function getValidCoverUrl(coverUrl?: string, slug?: string, title?: string): str
   let s = slug;
   if (!s || s === "undefined") {
     const t = (title || "").toLowerCase();
-    if (t.includes("15") || t.includes("september") || t.includes("septiembre")) s = "15-september-2026";
-    else if (t.includes("25")) s = "25-august-2026";
-    else if (t.includes("18")) s = "18-august-2026";
-    else if (t.includes("11")) s = "11-august-2026";
-    else s = "4-august-2026";
+    const match = t.match(/(\d{1,2})\s*(?:de)?\s*([a-z]+)\s*(?:de)?\s*(\d{4})/i);
+    if (match) {
+      const day = match[1];
+      const monthEs = match[2];
+      const year = match[3];
+      const monthMap: Record<string, string> = {
+        enero: "january", febrero: "february", marzo: "march", abril: "april",
+        mayo: "may", junio: "june", julio: "july", agosto: "august",
+        septiembre: "september", octubre: "october", noviembre: "november", diciembre: "december",
+        sep: "september", ago: "august", jul: "july"
+      };
+      const enMonth = monthMap[monthEs] || monthEs;
+      s = `${day}-${enMonth}-${year}`;
+    } else {
+      s = "29-september-2026";
+    }
   }
-  if (!s) s = "4-august-2026";
 
   if (coverUrl && coverUrl.startsWith("http")) {
     if (coverUrl.includes("documents/covers/")) {
-      return coverUrl.includes("?v=") ? coverUrl : `${coverUrl}?v=hivex4`;
+      return coverUrl.includes("?v=") ? coverUrl : `${coverUrl}?v=hivex5`;
     }
     return coverUrl;
   }
 
-  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex4`;
+  return `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex5`;
 }
 
 const getLocalizedTitle = (title: string, lang: string) => {
@@ -647,6 +657,7 @@ export default function NewsPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [issues, setIssues] = useState<MagazineIssue[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
@@ -1176,17 +1187,47 @@ export default function NewsPage() {
   const playFirstArticleForPage = (pageNumber: number) => {
     if (!cabinArticles || cabinArticles.length === 0) return;
 
-    let targetArticle = cabinArticles.find(
+    // 1. If an article starts exactly on this page, play that article from its title
+    const startingArticle = cabinArticles.find(
       (art) => Number(art.metadata?.start_page) === pageNumber
     );
 
-    if (!targetArticle) {
-      targetArticle = cabinArticles.find((art) => {
-        const start = Number(art.metadata?.start_page || 0);
-        const end = Number(art.metadata?.end_page || start);
-        return start > 0 && pageNumber >= start && pageNumber <= end;
-      });
+    if (startingArticle) {
+      const headerTargetId = `article-title-${startingArticle.id}`;
+      let chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+      if (chunkIdx < 0) {
+        chunkIdx = sentenceTimestamps.findIndex((ts: any) => ts.elementId === headerTargetId);
+      }
+      if (chunkIdx < 0) {
+        chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${startingArticle.id}-0-0`);
+      }
+      if (chunkIdx < 0) {
+        chunkIdx = chunkTargetElementIdsRef.current.findIndex((id) => id.startsWith(`sentence-${startingArticle.id}-`));
+      }
+      if (chunkIdx >= 0) {
+        handleSentenceClick(chunkIdx);
+        return;
+      }
     }
+
+    // 2. If no article starts on this page (e.g. continuing an article across pages),
+    // jump directly to the first sentence physically located on this page from sentenceTimestamps!
+    if (sentenceTimestamps && sentenceTimestamps.length > 0) {
+      const sentenceOnPageIdx = sentenceTimestamps.findIndex(
+        (ts: any) => Number(ts.page) === pageNumber
+      );
+      if (sentenceOnPageIdx >= 0) {
+        handleSentenceClick(sentenceOnPageIdx);
+        return;
+      }
+    }
+
+    // 3. Fallback: Find article encompassing this page
+    let targetArticle = cabinArticles.find((art) => {
+      const start = Number(art.metadata?.start_page || 0);
+      const end = Number(art.metadata?.end_page || start);
+      return start > 0 && pageNumber >= start && pageNumber <= end;
+    });
 
     if (!targetArticle) {
       targetArticle = cabinArticles.find(
@@ -1201,6 +1242,9 @@ export default function NewsPage() {
     if (targetArticle) {
       const headerTargetId = `article-title-${targetArticle.id}`;
       let chunkIdx = chunkTargetElementIdsRef.current.indexOf(headerTargetId);
+      if (chunkIdx < 0) {
+        chunkIdx = sentenceTimestamps.findIndex((ts: any) => ts.elementId === headerTargetId);
+      }
       if (chunkIdx < 0) {
         chunkIdx = chunkTargetElementIdsRef.current.indexOf(`sentence-${targetArticle.id}-0-0`);
       }
@@ -1521,16 +1565,63 @@ export default function NewsPage() {
   const fetchContent = async () => {
     try {
       setLoading(true);
-      const { data: issuesData, error: issuesErr } = await supabase
-        .from("documents")
-        .select("id, title, description, type, file_url, user_id, created_at, metadata")
-        .eq("metadata->>is_magazine_issue", "true");
+      setCatalogError(null);
 
-      const rawItems = (issuesData || []) as MagazineIssue[];
-      const items = rawItems
+      let items: MagazineIssue[] = [];
+
+      // A. Primary attempt: Fast server API route (cached, pruned of heavy sentence_timestamps)
+      try {
+        const res = await fetch("/api/news/issues");
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.issues) && json.issues.length > 0) {
+            items = json.issues as MagazineIssue[];
+          }
+        }
+      } catch (apiErr) {
+        console.warn("[NewsPage] /api/news/issues route error, falling back to direct supabase:", apiErr);
+      }
+
+      // B. Fallback attempt: Direct supabase query with indexed title filter
+      if (items.length === 0) {
+        const { data: issuesData, error: issuesErr } = await supabase
+          .from("documents")
+          .select("id, title, description, type, file_url, user_id, created_at, metadata")
+          .eq("type", "knowledge_transcription")
+          .ilike("title", "Revista Semanal%")
+          .order("created_at", { ascending: false });
+
+        if (issuesErr) {
+          console.error("Direct supabase query error:", issuesErr);
+          setCatalogError(
+            selectedLanguage === "es"
+              ? "No se pudo conectar con el servidor de base de datos de Supabase. Si el proyecto se encuentra pausado por inactividad en Supabase, por favor reactívalo desde el panel de control de Supabase para visualizar el catálogo."
+              : "Could not connect to Supabase database. If the project is paused due to inactivity, please reactivate it from the Supabase Dashboard to load the catalog."
+          );
+        } else if (issuesData) {
+          const rawItems = (issuesData || []) as MagazineIssue[];
+          const sortedRaw = [...rawItems].sort((a, b) => {
+            const aHasAudio = a.metadata?.audio_url ? 1 : 0;
+            const bHasAudio = b.metadata?.audio_url ? 1 : 0;
+            return bHasAudio - aHasAudio;
+          });
+          const seenSlugs = new Set<string>();
+          const uniqueItems: MagazineIssue[] = [];
+          for (const item of sortedRaw) {
+            const slug = item.metadata?.slug || item.id;
+            if (!seenSlugs.has(slug)) {
+              seenSlugs.add(slug);
+              uniqueItems.push(item);
+            }
+          }
+          items = uniqueItems;
+        }
+      }
+
+      const finalItems = items
         .filter(item => !item.title.startsWith("["))
         .sort((a, b) => getIssuePublicationTimestamp(b) - getIssuePublicationTimestamp(a));
-      setIssues(items);
+      setIssues(finalItems);
       
       // Auto-select and auto-open study cabin if deep-linked via ?id= or ?slug= (e.g. from Telegram)
       let deepLinkedIssue: MagazineIssue | null = null;
@@ -1539,20 +1630,25 @@ export default function NewsPage() {
         const targetId = urlParams.get("id");
         const targetSlug = urlParams.get("slug");
         if (targetId) {
-          deepLinkedIssue = items.find(it => it.id === targetId || it.metadata?.slug === targetId) || null;
+          deepLinkedIssue = finalItems.find(it => it.id === targetId || it.metadata?.slug === targetId) || null;
         } else if (targetSlug) {
-          deepLinkedIssue = items.find(it => it.metadata?.slug === targetSlug) || null;
+          deepLinkedIssue = finalItems.find(it => it.metadata?.slug === targetSlug) || null;
         }
       }
 
       if (deepLinkedIssue) {
         setSelectedIssue(deepLinkedIssue);
         setActiveCabinIssue(deepLinkedIssue);
-      } else if (items.length > 0 && !selectedIssue) {
-        setSelectedIssue(items[0]);
+      } else if (finalItems.length > 0 && !selectedIssue) {
+        setSelectedIssue(finalItems[0]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load News content:", err);
+      setCatalogError(
+        selectedLanguage === "es"
+          ? "Error de conexión con la base de datos de Supabase. Revisa el estado del proyecto en el panel de Supabase."
+          : "Database connection error. Please verify project status in Supabase dashboard."
+      );
     } finally {
       setLoading(false);
     }
@@ -2817,13 +2913,7 @@ export default function NewsPage() {
                     referrerPolicy="no-referrer"
                     onError={(e) => {
                       const target = e.currentTarget;
-                      const s = selectedIssue?.metadata?.slug || (
-                        selectedIssue?.title?.includes("15") ? "15-september-2026" :
-                        selectedIssue?.title?.includes("25") ? "25-august-2026" :
-                        selectedIssue?.title?.includes("18") ? "18-august-2026" :
-                        selectedIssue?.title?.includes("11") ? "11-august-2026" : "4-august-2026"
-                      );
-                      target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex4`;
+                      target.src = getValidCoverUrl("", selectedIssue?.metadata?.slug, selectedIssue?.title);
                     }}
                   />
                 </div>
@@ -2934,6 +3024,22 @@ export default function NewsPage() {
               </div>
             </div>
 
+            {/* CATALOG ERROR ALERT BANNER */}
+            {catalogError && (
+              <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/50 text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                  <span className="leading-relaxed">{catalogError}</span>
+                </div>
+                <button
+                  onClick={() => fetchContent()}
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all shrink-0 cursor-pointer"
+                >
+                  {selectedLanguage === "es" ? "Reintentar conexión" : "Retry connection"}
+                </button>
+              </div>
+            )}
+
             {/* GRID OF MINICARDS */}
             {loading ? (
               <div className="grid sm:grid-cols-2 gap-4">
@@ -2972,13 +3078,7 @@ export default function NewsPage() {
                           referrerPolicy="no-referrer"
                           onError={(e) => {
                             const target = e.currentTarget;
-                            const s = issue.metadata?.slug || (
-                              issue.title?.includes("15") ? "15-september-2026" :
-                              issue.title?.includes("25") ? "25-august-2026" :
-                              issue.title?.includes("18") ? "18-august-2026" :
-                              issue.title?.includes("11") ? "11-august-2026" : "4-august-2026"
-                            );
-                            target.src = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${s}.jpg?v=hivex4`;
+                            target.src = getValidCoverUrl("", issue.metadata?.slug, issue.title);
                           }}
                         />
 

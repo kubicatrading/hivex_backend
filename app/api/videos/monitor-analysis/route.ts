@@ -4,6 +4,7 @@ import { transcribeVideoCore } from "../transcribe/route";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
 import { sendTelegramMessage, sendVideoNotification, formatVideoNotification, getTelegramLanguage } from "@/lib/telegram";
 import { fetchAllDocumentFileUrls } from "@/lib/supabase";
+import { recordCronExecution } from "@/lib/cron-logger";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during long transcripts
@@ -302,6 +303,7 @@ async function saveVideoKnowledgeBaseServer(
 }
 
 export async function GET(request: NextRequest) {
+  const startTime = Date.now();
   try {
     // 1. Validate Secret Auth Token to prevent unauthorized invocation
     const { searchParams } = new URL(request.url);
@@ -333,21 +335,31 @@ export async function GET(request: NextRequest) {
       auth: { persistSession: false },
     });
 
-    // 3. Query recent videos (analyzing pending from newest to oldest)
+    // 3. Query recent videos with targeted columns and reasonable limit
     const { data: videos, error: videosError } = await supabaseAdmin
       .from("documents")
-      .select("*")
+      .select("id, title, type, file_url, created_at, description, metadata")
       .eq("type", "video")
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(60);
 
     if (videosError) throw videosError;
     if (!videos || videos.length === 0) {
       return NextResponse.json({ success: true, processed: [], message: "No videos found in the system." });
     }
 
-    // 4. Query existing knowledge_analysis documents using pagination to overcome PostgREST 1000-row limit
-    const analyzedUrls = await fetchAllDocumentFileUrls(supabaseAdmin, "knowledge_analysis");
+    // 4. Query existing knowledge_analysis documents ONLY for the fetched video URLs (fast indexed check)
+    const videoUrls = videos.map((v: any) => v.file_url).filter(Boolean);
+    const { data: existingAnalysis, error: aErr } = await supabaseAdmin
+      .from("documents")
+      .select("file_url")
+      .eq("type", "knowledge_analysis")
+      .in("file_url", videoUrls);
+
+    if (aErr) {
+      console.warn("[Monitor Cron] Error checking existing knowledge_analysis docs:", aErr);
+    }
+    const analyzedUrls = new Set((existingAnalysis || []).map((a: any) => a.file_url));
 
     // 5. Filter videos that are pending financial analysis
     const pendingVideos = videos.filter((video: any) => {
@@ -482,6 +494,18 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    await recordCronExecution({
+      path: "/api/videos/monitor-analysis",
+      cronName: "Monitor de Análisis de Vídeos (Monitor Analysis)",
+      statusCode: 200,
+      status: "success",
+      durationMs: Date.now() - startTime,
+      details: {
+        processedCount: results.length,
+        remainingPending: Math.max(0, pendingVideos.length - batch.length)
+      }
+    });
+
     return NextResponse.json({
       success: true,
       processed: results,
@@ -490,6 +514,16 @@ export async function GET(request: NextRequest) {
 
   } catch (error: any) {
     console.error("[Monitor Cron Route] Internal Error:", error);
+
+    await recordCronExecution({
+      path: "/api/videos/monitor-analysis",
+      cronName: "Monitor de Análisis de Vídeos (Monitor Analysis)",
+      statusCode: 500,
+      status: "error",
+      error: error,
+      durationMs: Date.now() - startTime
+    });
+
     return NextResponse.json({ success: false, error: error?.message || "Internal Server Error" }, { status: 500 });
   }
 }

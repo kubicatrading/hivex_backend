@@ -590,7 +590,7 @@ export async function sendTelegramPhoto(
   caption?: string,
   customChatId?: string,
   fallbackText?: string,
-  showCaptionAboveMedia: boolean = true
+  showCaptionAboveMedia: boolean = false
 ): Promise<{
   success: boolean;
   simulated: boolean;
@@ -619,95 +619,139 @@ export async function sendTelegramPhoto(
     return { success: true, simulated: true, photoSent: true };
   }
 
-  try {
-    let safeCaption = caption;
-    if (safeCaption && safeCaption.length > 1024) {
-      safeCaption = safeCaption.slice(0, 1020) + "...";
+  let safeCaption = caption;
+  if (safeCaption && safeCaption.length > 1024) {
+    safeCaption = safeCaption.slice(0, 1020) + "...";
+  }
+
+  const isSupabaseUrl = photoUrl.includes("supabase.co");
+
+  // Helper for direct binary multipart upload
+  const sendViaMultipart = async (): Promise<{ success: boolean; simulated: boolean; photoSent: boolean; error?: string } | null> => {
+    try {
+      const imgRes = await fetch(photoUrl, { signal: AbortSignal.timeout(15000) });
+      if (imgRes.ok) {
+        const arrayBuf = await imgRes.arrayBuffer();
+        const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+        const blob = new Blob([arrayBuf], { type: contentType });
+        const formData = new FormData();
+        formData.append("chat_id", chatId);
+        formData.append("photo", blob, "photo.jpg");
+        if (safeCaption) {
+          formData.append("caption", safeCaption);
+          formData.append("parse_mode", "HTML");
+        }
+        formData.append("show_caption_above_media", String(showCaptionAboveMedia));
+
+        const multipartRes = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: "POST",
+          body: formData,
+        });
+
+        const multipartData = await multipartRes.json();
+        if (multipartRes.ok && multipartData.ok) {
+          console.log("[Telegram Service] Photo dispatched successfully via multipart upload to chat:", chatId);
+          return { success: true, simulated: false, photoSent: true };
+        }
+        console.warn("[Telegram Service] Multipart photo upload failed:", multipartData.description);
+      }
+    } catch (multipartErr: any) {
+      console.warn("[Telegram Service] Multipart upload exception:", multipartErr?.message);
     }
+    return null;
+  };
 
-    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: chatId,
-        photo: photoUrl,
-        caption: safeCaption,
-        parse_mode: "HTML",
-        show_caption_above_media: showCaptionAboveMedia
-      }),
-    });
+  // Helper for sending via URL
+  const sendViaUrl = async (): Promise<{ success: boolean; simulated: boolean; photoSent: boolean; error?: string } | null> => {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          photo: photoUrl,
+          caption: safeCaption,
+          parse_mode: "HTML",
+          show_caption_above_media: showCaptionAboveMedia
+        }),
+      });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (!response.ok || !data.ok) {
-      const errorMsg = data.description || `HTTP status ${response.status}`;
-      console.warn("[Telegram Service] Failed to send photo, falling back to message text. Error:", errorMsg);
-      
-      // Determine what text to send as fallback
-      let finalFallbackText = "";
-      const isChartOrSnapshot = photoUrl.includes("/snapshots/") || photoUrl.includes("/clips/");
-      const noteSuffix = isChartOrSnapshot ? `\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}` : "";
-
-      if (fallbackText) {
-        // Safe truncation of markdown before HTML conversion to avoid broken HTML tags
-        let truncatedMarkdown = fallbackText;
-        if (truncatedMarkdown.length > 3500) {
-          truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
-        }
-        const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
-        finalFallbackText = `${fallbackHtml}${noteSuffix}`;
-      } else if (caption) {
-        finalFallbackText = `${caption}${noteSuffix}`;
-        if (finalFallbackText.length > 4000) {
-          finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
-        }
-      } else {
-        finalFallbackText = `<i>[Nota: No se pudo cargar el archivo adjunto: ${photoUrl}]</i>${cabinLink}`;
+      if (response.ok && data.ok) {
+        console.log("[Telegram Service] Photo dispatched successfully via URL to chat:", chatId);
+        return { success: true, simulated: false, photoSent: true };
       }
 
-      console.log("[Telegram Fallback Debug] finalFallbackText constructed (API fail):", finalFallbackText);
-      
-      const msgResult = await sendTelegramMessage(finalFallbackText, chatId);
-      return { 
-        success: msgResult.success, 
-        simulated: msgResult.simulated, 
-        photoSent: false,
-        error: `Photo failed (${errorMsg}), fallback success: ${msgResult.success}` 
-      };
+      const errorMsg = data.description || `HTTP status ${response.status}`;
+      console.warn("[Telegram Service] Failed to send photo by URL:", errorMsg);
+    } catch (urlErr: any) {
+      console.warn("[Telegram Service] Photo fetch by URL network error:", urlErr?.message);
     }
+    return null;
+  };
 
-    console.log("[Telegram Service] Photo dispatched successfully to chat:", chatId);
-    return { success: true, simulated: false, photoSent: true };
-  } catch (error: any) {
-    console.error("[Telegram Service] Photo fetch error:", error);
+  // 1. If the image is hosted on Supabase Storage, always use direct multipart first
+  // (Cloudflare WAF frequently blocks Telegram scraper IPs with 403 / challenge)
+  if (isSupabaseUrl) {
+    const multipartResult = await sendViaMultipart();
+    if (multipartResult?.success) {
+      return multipartResult;
+    }
+    // Fallback to URL in case multipart had local stream issue
+    const urlResult = await sendViaUrl();
+    if (urlResult?.success) {
+      return urlResult;
+    }
+  } else {
+    // For external public URLs (YouTube thumbnails, etc.), try URL first then multipart
+    const urlResult = await sendViaUrl();
+    if (urlResult?.success) {
+      return urlResult;
+    }
+    const multipartResult = await sendViaMultipart();
+    if (multipartResult?.success) {
+      return multipartResult;
+    }
+  }
+
+  // 3. Fallback to text message if photo completely failed
+  try {
     let finalFallbackText = "";
     const isChartOrSnapshot = photoUrl.includes("/snapshots/") || photoUrl.includes("/clips/");
-    const noteSuffix = isChartOrSnapshot ? `\n\n<i>[Nota: Error de red al cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}` : "";
+    const noteSuffix = isChartOrSnapshot ? `\n\n<i>[Nota: No se pudo cargar el gráfico adjunto: ${photoUrl}]</i>${cabinLink}` : "";
 
-    if (fallbackText) {
-      let truncatedMarkdown = fallbackText;
-      if (truncatedMarkdown.length > 3500) {
-        truncatedMarkdown = truncatedMarkdown.slice(0, 3500) + "\n\n... *[Análisis truncado por longitud]*";
+    const rawText = fallbackText || caption;
+    if (rawText) {
+      let truncated = rawText;
+      if (truncated.length > 3500) {
+        truncated = truncated.slice(0, 3500) + "\n\n... <i>[Mensaje truncado]</i>";
       }
-      const fallbackHtml = markdownToTelegramHtml(truncatedMarkdown);
+      // Check if text is ALREADY formatted HTML (contains <b>, <a>, <i>, <code>, etc.)
+      const isAlreadyHtml = /<[a-z][\s\S]*>/i.test(truncated);
+      const fallbackHtml = isAlreadyHtml ? truncated : markdownToTelegramHtml(truncated);
       finalFallbackText = `${fallbackHtml}${noteSuffix}`;
-    } else if (caption) {
-      finalFallbackText = `${caption}${noteSuffix}`;
-      if (finalFallbackText.length > 4000) {
-        finalFallbackText = finalFallbackText.slice(0, 4000) + "... <i>[Mensaje truncado]</i>";
-      }
     } else {
-      finalFallbackText = `<i>[Nota: Error de red al cargar el archivo adjunto: ${photoUrl}]</i>${cabinLink}`;
+      finalFallbackText = `<i>[Nota: No se pudo cargar la imagen adjunta: ${photoUrl}]</i>${cabinLink}`;
     }
-    
+
+    console.log("[Telegram Fallback Debug] finalFallbackText constructed:", finalFallbackText);
     const msgResult = await sendTelegramMessage(finalFallbackText, chatId);
-    return { 
-      success: msgResult.success, 
-      simulated: msgResult.simulated, 
+    return {
+      success: msgResult.success,
+      simulated: msgResult.simulated,
       photoSent: false,
-      error: `Photo crashed (${error?.message}), fallback success: ${msgResult.success}` 
+      error: `Photo failed, fallback text sent: ${msgResult.success}`
+    };
+  } catch (fallbackError: any) {
+    console.error("[Telegram Service] Text fallback failed:", fallbackError);
+    return {
+      success: false,
+      simulated: false,
+      photoSent: false,
+      error: fallbackError?.message || "All photo and fallback options failed"
     };
   }
 }

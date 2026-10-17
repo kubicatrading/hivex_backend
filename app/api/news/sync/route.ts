@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { recordCronExecution } from "@/lib/cron-logger";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend to maximum Vercel limit to ensure async scraping runs smoothly without timing out
@@ -284,6 +285,7 @@ export async function POST(request: Request) {
 }
 
 async function handleSync(request: Request) {
+  const startTime = Date.now();
   try {
     // 1. Validate Secret Auth Token (for cron/scripts) or Supabase user session (for dashboard manual sync)
     const { searchParams } = new URL(request.url);
@@ -607,6 +609,41 @@ async function handleSync(request: Request) {
       console.warn("[Sync Scraper] RSS feed discovery skipped:", rssErr.message);
     }
 
+    // Discover authentic official covers directly from homepage figures & TJ-Cover patterns
+    const discoveredCovers: Record<string, string> = {};
+
+    const figRegex = /<figure[^>]*class="[^"]*cmsmasters_img_rollover_wrap[^"]*"[^>]*>([\s\S]*?)<\/figure>/gi;
+    let fMatch;
+    while ((fMatch = figRegex.exec(homeRes.data)) !== null) {
+      const figContent = fMatch[1];
+      const aMatch = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/i.exec(figContent);
+      if (!aMatch) continue;
+      const s = normalizeIssueSlug(aMatch[1]);
+      const imgMatch = /data-src="([^"]+)"/i.exec(figContent) || /src="([^"]+)"/i.exec(figContent);
+      if (imgMatch && imgMatch[1].startsWith("http") && imgMatch[1].includes("wp-content/uploads/")) {
+        discoveredCovers[s] = imgMatch[1];
+      }
+    }
+
+    const tjCoverRegex = /https:\/\/trendsjournal\.com\/wp-content\/uploads\/\d{4}\/\d{2}\/TJ-Cover-([a-z0-9-]+)\.jpg/gi;
+    let tjMatch;
+    while ((tjMatch = tjCoverRegex.exec(homeRes.data)) !== null) {
+      const fullUrl = tjMatch[0];
+      const datePart = tjMatch[1];
+      const dMatch = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/.exec(datePart);
+      if (dMatch) {
+        const monthNum = parseInt(dMatch[1], 10) - 1;
+        const day = parseInt(dMatch[2], 10);
+        let year = parseInt(dMatch[3], 10);
+        if (year < 100) year += 2000;
+        const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+        const slug = `${day}-${months[monthNum]}-${year}`;
+        if (!discoveredCovers[slug]) {
+          discoveredCovers[slug] = fullUrl;
+        }
+      }
+    }
+
     const issuesList = Object.keys(issuesMap);
     console.log(`[Sync Scraper] Found ${issuesList.length} valid weekly issues to sync:`, issuesList);
 
@@ -618,22 +655,36 @@ async function handleSync(request: Request) {
       const issueData = issuesMap[issueSlug];
       console.log(`\n[Sync Scraper] Processing Weekly Issue: ${issueSlug} (${issueData.articles.length} articles detected)`);
 
-      // Resolve cover URL from first available high-res image
-      const firstWithImage = issueData.articles.find(a => a.imgUrl && a.imgUrl.includes("/wp-content/uploads/"));
-      const coverUrl = firstWithImage ? firstWithImage.imgUrl : "";
+      // 1. Resolve authentic official cover: NEVER use an article thumbnail as a cover!
+      const officialCoverUrl = discoveredCovers[issueSlug] || "";
 
-      // Check if this Weekly Issue document already exists
-      const { data: existingIssues } = await supabase
+      // 2. Check if this Weekly Issue document already exists using fast indexed title search
+      const { data: allWeeklyDocs, error: issueFetchError } = await supabase
         .from("documents")
-        .select("*")
+        .select("id, title, file_url, metadata, created_at")
         .eq("type", "knowledge_transcription")
-        .eq("metadata->>is_magazine_issue", "true")
-        .eq("metadata->>slug", issueSlug)
-        .order("created_at", { ascending: true })
-        .limit(1);
+        .ilike("title", "Revista Semanal%")
+        .order("created_at", { ascending: true });
+
+      if (issueFetchError) {
+        console.error(`[Sync Scraper] Warning: Issue fetch error for ${issueSlug}:`, issueFetchError);
+      }
+
+      const existingIssues = (allWeeklyDocs || []).filter((doc: any) => {
+        return doc.metadata?.slug === issueSlug || (doc.title && doc.title.toLowerCase().includes(issueSlug.toLowerCase()));
+      });
 
       const existingIssue = existingIssues && existingIssues.length > 0 ? existingIssues[0] : null;
       let issueDocId = existingIssue?.id;
+
+      // Auto-cleanup: if multiple documents exist for this slug, prune duplicates immediately
+      if (existingIssues && existingIssues.length > 1) {
+        const excessDuplicates = existingIssues.slice(1);
+        console.log(`[Sync Scraper] Cleaning up ${excessDuplicates.length} duplicate rows for issue slug ${issueSlug}...`);
+        for (const dup of excessDuplicates) {
+          await supabase.from("documents").delete().eq("id", dup.id);
+        }
+      }
       let existingSummaryText = existingIssue?.metadata?.summary || "";
       let resolvedPdfUrl = existingIssue?.file_url || "";
       let pdfUpdated = false;
@@ -774,7 +825,7 @@ async function handleSync(request: Request) {
           issue_slug: issueSlug,
           slug: articleSlug,
           category: art.category,
-          image_url: art.imgUrl || coverUrl,
+          image_url: art.imgUrl || officialCoverUrl || "",
           published_at: issueData.date.toISOString(),
           paragraphs
         };
@@ -821,46 +872,47 @@ async function handleSync(request: Request) {
         }
 
         const existingMeta = existingIssue?.metadata || {};
-        const defaultStorageCover = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${issueSlug}.jpg?v=hivex4`;
+        const defaultStorageCover = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${issueSlug}.jpg?v=hivex5`;
         let finalCoverUrl = existingMeta.cover_url;
 
-        // Only attempt fallback image upload if there is genuinely no cover configured
+        // If we found an authentic official Trends Journal cover, download and save to Supabase Storage
+        if (officialCoverUrl && officialCoverUrl.startsWith("http")) {
+          try {
+            const coverUrlObj = new URL(officialCoverUrl);
+            const coverBuffer = await downloadBinaryFile({
+              hostname: coverUrlObj.hostname,
+              path: coverUrlObj.pathname + coverUrlObj.search,
+              method: "GET",
+              headers: {
+                "Cookie": cookieHeader,
+                "Referer": "https://trendsjournal.com/"
+              }
+            });
+
+            if (coverBuffer && coverBuffer.length > 5000) {
+              const coverStoragePath = `covers/${issueSlug}.jpg`;
+              const { error: coverUploadError } = await supabase.storage
+                .from("documents")
+                .upload(coverStoragePath, coverBuffer, {
+                  contentType: "image/jpeg",
+                  upsert: true // Real official cover, safe to update
+                });
+
+              if (!coverUploadError) {
+                const { data: { publicUrl } } = supabase.storage
+                  .from("documents")
+                  .getPublicUrl(coverStoragePath);
+                finalCoverUrl = `${publicUrl}?v=hivex5`;
+                console.log(`[Sync Scraper] Uploaded authentic official cover for ${issueSlug}: ${finalCoverUrl}`);
+              }
+            }
+          } catch (covErr: any) {
+            console.warn(`[Sync Scraper] Official cover upload failed for ${issueSlug}:`, covErr.message);
+          }
+        }
+
         if (!finalCoverUrl || !finalCoverUrl.startsWith("http")) {
           finalCoverUrl = defaultStorageCover;
-          if (coverUrl && coverUrl.startsWith("http")) {
-            try {
-              const coverUrlObj = new URL(coverUrl);
-              const coverBuffer = await downloadBinaryFile({
-                hostname: coverUrlObj.hostname,
-                path: coverUrlObj.pathname + coverUrlObj.search,
-                method: "GET",
-                headers: {
-                  "Cookie": cookieHeader,
-                  "Referer": "https://trendsjournal.com/"
-                }
-              });
-
-              if (coverBuffer && coverBuffer.length > 5000) {
-                const coverStoragePath = `covers/${issueSlug}.jpg`;
-                const { error: coverUploadError } = await supabase.storage
-                  .from("documents")
-                  .upload(coverStoragePath, coverBuffer, {
-                    contentType: "image/jpeg",
-                    upsert: false // Do not overwrite an existing official cover
-                  });
-
-                if (!coverUploadError) {
-                  const { data: { publicUrl } } = supabase.storage
-                    .from("documents")
-                    .getPublicUrl(coverStoragePath);
-                  finalCoverUrl = `${publicUrl}?v=hivex4`;
-                  console.log(`[Sync Scraper] Uploaded initial cover image to Supabase Storage: ${finalCoverUrl}`);
-                }
-              }
-            } catch (err: any) {
-              console.warn(`[Sync Scraper] Cover image upload skipped for ${issueSlug}:`, err.message);
-            }
-          }
         }
 
         const mergedMetadata = {
@@ -888,26 +940,50 @@ async function handleSync(request: Request) {
             })
             .eq("id", issueDocId);
           console.log(`[Sync Scraper] Updated summary and PDF of issue ${issueSlug} with merged metadata.`);
-        } else {
-          // Insert new weekly issue document
-          const { data: newIssueDoc, error: issueInsertError } = await supabase
+        } else if (!issueFetchError) {
+          // Double check to prevent race condition duplicate insertion
+          const expectedTitle = formatSpanishIssueTitle(issueSlug);
+          const { data: raceCheck, error: raceCheckErr } = await supabase
             .from("documents")
-            .insert({
-              user_id: GLOBAL_ADMIN_USER_ID,
-              title: formatSpanishIssueTitle(issueSlug),
-              description: `Revista Semanal del ${issueSlug.replace(/-/g, " ").toUpperCase()}`,
-              type: "knowledge_transcription",
-              file_url: resolvedPdfUrl || `https://trendsjournal.com/issue/${issueSlug}`,
-              metadata: mergedMetadata
-            })
-            .select()
-            .single();
+            .select("id")
+            .eq("type", "knowledge_transcription")
+            .ilike("title", expectedTitle)
+            .limit(1);
 
-          if (issueInsertError) {
-            console.error(`[Error Ingesting Issue]:`, issueInsertError);
+          if (raceCheckErr) {
+            console.error(`[Sync Scraper] Race check error for ${issueSlug}:`, raceCheckErr);
+          } else if (raceCheck && raceCheck.length > 0) {
+            issueDocId = raceCheck[0].id;
+            await supabase
+              .from("documents")
+              .update({
+                file_url: resolvedPdfUrl || `https://trendsjournal.com/issue/${issueSlug}`,
+                metadata: mergedMetadata,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", issueDocId);
+            console.log(`[Sync Scraper] Race condition avoided. Updated existing issue ${issueSlug}.`);
           } else {
-            issueDocId = newIssueDoc.id;
-            console.log(`[Sync Scraper] Ingested new Weekly Issue ${issueSlug} globally with PDF URL: ${resolvedPdfUrl}.`);
+            // Insert new weekly issue document
+            const { data: newIssueDoc, error: issueInsertError } = await supabase
+              .from("documents")
+              .insert({
+                user_id: GLOBAL_ADMIN_USER_ID,
+                title: formatSpanishIssueTitle(issueSlug),
+                description: `Revista Semanal del ${issueSlug.replace(/-/g, " ").toUpperCase()}`,
+                type: "knowledge_transcription",
+                file_url: resolvedPdfUrl || `https://trendsjournal.com/issue/${issueSlug}`,
+                metadata: mergedMetadata
+              })
+              .select("id")
+              .single();
+
+            if (issueInsertError) {
+              console.error(`[Error Ingesting Issue]:`, issueInsertError);
+            } else {
+              issueDocId = newIssueDoc?.id;
+              console.log(`[Sync Scraper] Ingested new Weekly Issue ${issueSlug} globally with PDF URL: ${resolvedPdfUrl}.`);
+            }
           }
         }
       }
@@ -938,6 +1014,20 @@ async function handleSync(request: Request) {
 
     console.log(`[Sync Scraper] Complete. Synced ${totalArticlesSynced} articles across ${syncedIssuesDetails.length} issues.`);
 
+    // Record execution log in database
+    await recordCronExecution({
+      path: "/api/news/sync",
+      cronName: "Sincronización de Revistas (News Sync)",
+      statusCode: 200,
+      status: "success",
+      durationMs: Date.now() - startTime,
+      details: {
+        totalIssuesProcessed: syncedIssuesDetails.length,
+        totalArticlesSynced,
+        issues: syncedIssuesDetails
+      }
+    });
+
     return NextResponse.json({
       success: true,
       stats: {
@@ -950,6 +1040,17 @@ async function handleSync(request: Request) {
   } catch (error: any) {
     const errMsg = error?.message || "Ocurrió un error inesperado al sincronizar la revista.";
     console.error("[News Sync Route Error]:", error);
+
+    // Record error execution log in database with Spanish translation
+    await recordCronExecution({
+      path: "/api/news/sync",
+      cronName: "Sincronización de Revistas (News Sync)",
+      statusCode: 500,
+      status: "error",
+      error: error,
+      durationMs: Date.now() - startTime
+    });
+
     return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
   }
 }

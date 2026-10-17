@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchAllDocumentFileUrls } from "@/lib/supabase";
+import { recordCronExecution } from "@/lib/cron-logger";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during sync operations
@@ -65,6 +66,7 @@ export async function POST(request: Request) {
 }
 
 async function handleSync(request: Request) {
+  const startTime = Date.now();
   try {
     // 1. Validate Secret Auth Token (for cron/scripts) or Supabase user session (for dashboard manual sync)
     const { searchParams } = new URL(request.url);
@@ -368,6 +370,18 @@ async function handleSync(request: Request) {
       console.log("[Daemon] Sincronización server-side omitida (claves de servicio no configuradas).");
     }
 
+    await recordCronExecution({
+      path: "/api/videos/sync",
+      cronName: "Sincronización de Vídeos (YouTube Sync)",
+      statusCode: 200,
+      status: "success",
+      durationMs: Date.now() - startTime,
+      details: {
+        newlyInserted,
+        count: syncedVideos.length
+      }
+    });
+
     return NextResponse.json({
       success: true,
       count: syncedVideos.length,
@@ -379,6 +393,16 @@ async function handleSync(request: Request) {
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Unexpected synchronization error.";
     console.error("YouTube sync route failure:", error);
+
+    await recordCronExecution({
+      path: "/api/videos/sync",
+      cronName: "Sincronización de Vídeos (YouTube Sync)",
+      statusCode: 500,
+      status: "error",
+      error: error,
+      durationMs: Date.now() - startTime
+    });
+
     return NextResponse.json(
       { success: false, error: errMsg },
       { status: 500 }

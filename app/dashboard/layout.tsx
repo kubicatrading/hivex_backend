@@ -125,8 +125,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     };
     
     fetchChannels();
-    const interval = setInterval(fetchChannels, 10000);
-    return () => clearInterval(interval);
+    window.addEventListener("focus", fetchChannels);
+    return () => window.removeEventListener("focus", fetchChannels);
   }, []);
 
   // Load last visited dates from DB on startup, merging with local storage
