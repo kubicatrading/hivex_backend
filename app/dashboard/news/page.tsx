@@ -1582,14 +1582,13 @@ export default function NewsPage() {
         console.warn("[NewsPage] /api/news/issues route error, falling back to direct supabase:", apiErr);
       }
 
-      // B. Fallback attempt: Direct supabase query with indexed title filter
+      // B. Fallback attempt: Direct supabase query with lightweight projected fields
       if (items.length === 0) {
         const { data: issuesData, error: issuesErr } = await supabase
           .from("documents")
-          .select("id, title, description, type, file_url, user_id, created_at, metadata")
+          .select("id, title, description, type, file_url, user_id, created_at, metadata->slug, metadata->cover_url, metadata->published_at, metadata->page_count, metadata->author, metadata->audio_status, metadata->audio_progress_percent, metadata->audio_url, metadata->is_favorite, metadata->summary")
           .eq("type", "knowledge_transcription")
-          .ilike("title", "Revista Semanal%")
-          .order("created_at", { ascending: false });
+          .like("title", "Revista Semanal%");
 
         if (issuesErr) {
           console.error("Direct supabase query error:", issuesErr);
@@ -1599,7 +1598,27 @@ export default function NewsPage() {
               : "Could not connect to Supabase database. If the project is paused due to inactivity, please reactivate it from the Supabase Dashboard to load the catalog."
           );
         } else if (issuesData) {
-          const rawItems = (issuesData || []) as MagazineIssue[];
+          const rawItems: MagazineIssue[] = (issuesData || []).map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            description: item.description,
+            type: item.type,
+            file_url: item.file_url,
+            created_at: item.created_at,
+            metadata: {
+              is_magazine_issue: true,
+              slug: item.slug,
+              cover_url: item.cover_url,
+              published_at: item.published_at,
+              page_count: item.page_count,
+              author: item.author,
+              audio_status: item.audio_status,
+              audio_progress_percent: item.audio_progress_percent,
+              audio_url: item.audio_url,
+              is_favorite: item.is_favorite,
+              summary: item.summary
+            }
+          }));
           const sortedRaw = [...rawItems].sort((a, b) => {
             const aHasAudio = a.metadata?.audio_url ? 1 : 0;
             const bHasAudio = b.metadata?.audio_url ? 1 : 0;
