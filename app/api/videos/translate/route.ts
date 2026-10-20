@@ -68,6 +68,11 @@ async function translateSingleChunk(
 
   const attempts = [
     {
+      name: "Google AI Studio Gemini 4.0 Argon (v1beta)",
+      type: "google-ai",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent`
+    },
+    {
       name: "Google AI Studio Gemini 3.8 Flash (v1beta)",
       type: "google-ai",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`

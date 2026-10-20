@@ -5,6 +5,10 @@ const SYSTEM_INSTRUCTION = `Eres un traductor profesional de élite especializad
 
 const ATTEMPTS = [
   {
+    name: "Google AI Studio Gemini 4.0 Argon",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent"
+  },
+  {
     name: "Google AI Studio Gemini 3.8 Flash",
     url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
   },
@@ -27,6 +31,14 @@ const ATTEMPTS = [
   {
     name: "Google AI Studio Gemini 2.5 Flash",
     url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+  },
+  {
+    name: "Google AI Studio Gemini 2.0 Flash",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+  },
+  {
+    name: "Google AI Studio Gemini 1.5 Flash",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
   }
 ];
 

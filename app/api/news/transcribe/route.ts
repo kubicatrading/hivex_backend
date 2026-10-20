@@ -176,22 +176,46 @@ RULES:
 Table of Contents Text:
 ${tocText}`;
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json" }
-    })
-  });
+  const modelsToTry = [
+    "gemini-4.0-argon",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.0-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
+  ];
 
-  if (!res.ok) {
-    throw new Error(`Gemini API returned status ${res.status}`);
+  let lastStatus = 0;
+  for (const modelName of modelsToTry) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        })
+      });
+
+      if (!res.ok) {
+        lastStatus = res.status;
+        continue;
+      }
+
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        return JSON.parse(text) as { mainCategory: string; subcategory: string; title: string; startPage: number }[];
+      }
+    } catch {
+      continue;
+    }
   }
 
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  return JSON.parse(text) as { mainCategory: string; subcategory: string; title: string; startPage: number }[];
+  throw new Error(`Gemini API returned status ${lastStatus}`);
 }
 
 async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): Promise<Buffer> {

@@ -114,8 +114,18 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
     const fileBuffer = fs.readFileSync(filePath);
     const base64Data = fileBuffer.toString("base64");
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
-    
+    const modelsToTry = [
+      "gemini-4.0-argon",
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.0-flash",
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash"
+    ];
+
     const payload = {
       contents: [
         {
@@ -142,20 +152,31 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
       }
     };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
+    let json: any = null;
+    for (const modelName of modelsToTry) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          json = await response.json();
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
 
-    if (!response.ok) {
-      console.warn(`[AI Snapshot Guard] Gemini API request failed with status ${response.status}. Keeping snapshot by default.`);
+    if (!json) {
+      console.warn(`[AI Snapshot Guard] All Gemini API models failed. Keeping snapshot by default.`);
       return true;
     }
 
-    const json = await response.json();
     const parts = json.candidates?.[0]?.content?.parts || [];
     const textPart = parts
       .filter((p: any) => !p.thought)

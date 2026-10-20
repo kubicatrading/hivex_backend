@@ -436,6 +436,10 @@ ${JSON.stringify(videoContexts, null, 2)}
 
   const attempts = [
     {
+      name: "Google AI Studio Gemini 4.0 Argon (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent?key=${apiKey}`,
+    },
+    {
       name: "Google AI Studio Gemini 3.8 Flash (v1beta)",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
     },
@@ -452,8 +456,20 @@ ${JSON.stringify(videoContexts, null, 2)}
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
     },
     {
+      name: "Google AI Studio Gemini 3.0 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent?key=${apiKey}`,
+    },
+    {
       name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    },
+    {
+      name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    },
+    {
+      name: "Google AI Studio Gemini 1.5 Flash (v1beta)",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     },
     {
       name: "Google AI Studio Gemini 2.5 Pro (v1beta)",

@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
         const transcriptionInstruction = "Por favor, transcribe exactamente lo que dice este mensaje de voz en español, palabra por palabra. Tu respuesta debe ser ÚNICAMENTE la transcripción literal sin comentarios, explicaciones, saludos ni notas.";
 
         const attemptTranscriptionUrls = [
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
           "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
@@ -632,6 +633,10 @@ ${currentPromptText}
     console.log(`[Telegram Webhook] Total videos in context: ${totalVideos}. DB docs count: ${allDocs.length}. Magazines count: ${magazineArticles.length}.`);
 
     const attempts = [
+      {
+        name: "Gemini 4.0 Argon",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent"
+      },
       {
         name: "Gemini 3.8 Flash",
         url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"

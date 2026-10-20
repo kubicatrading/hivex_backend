@@ -51,8 +51,9 @@ export async function POST(req: Request) {
       textToSummarize = `Revista Semanal ${title || issueSlug}`;
     }
 
-    // Gemini Flash models priority list in strict descending release order
+    // Gemini models priority list: Gemini 4.0 Argon followed by Flash family in descending release order
     const modelsToTry = [
+      "gemini-4.0-argon",
       "gemini-3.8-flash",
       "gemini-3.7-flash",
       "gemini-3.6-flash",

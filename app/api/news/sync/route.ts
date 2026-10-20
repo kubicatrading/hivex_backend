@@ -252,25 +252,40 @@ async function generateAIEditorialSummary(articles: { title: string; category: s
   3. No utilices subtítulos rígidos, listas, viñetas, guiones ni encabezados de sección. Solo párrafos de texto continuo.
   4. Redáctalo enteramente en español. Evita comentarios de IA o notas iniciales. Ve directo al grano.`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: promptText }] }],
-        system_instruction: {
-          parts: [{ text: "You are an elite financial news editor. Replicate a clean, highly narrative-driven macroeconomic summary of the week." }]
-        },
-        generationConfig: { temperature: 0.25, maxOutputTokens: 2048 }
-      })
-    });
+  const modelsToTry = [
+    "gemini-4.0-argon",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.0-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
+  ];
 
-    const resData = await response.json();
-    const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text) return text.trim();
-  } catch (error) {
-    console.error("[Sync Scraper]: Failed to synthesize summary with Gemini:", error);
+  for (const modelName of modelsToTry) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: promptText }] }],
+          system_instruction: {
+            parts: [{ text: "You are an elite financial news editor. Replicate a clean, highly narrative-driven macroeconomic summary of the week." }]
+          },
+          generationConfig: { temperature: 0.25, maxOutputTokens: 2048 }
+        })
+      });
+
+      if (!response.ok) continue;
+      const resData = await response.json();
+      const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) return text.trim();
+    } catch (error) {
+      console.error(`[Sync Scraper]: Failed to synthesize summary with ${modelName}:`, error);
+    }
   }
 
   return "Sintetizando las tendencias mundiales sobre inflación, geopolítica, tensiones en el Medio Oriente y el desarrollo tecnológico para mantener la excelencia bursátil de HIVEX.";

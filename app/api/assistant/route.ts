@@ -366,6 +366,10 @@ ${useInternet ? `
 
     const attempts = [
       {
+        name: "Gemini 4.0 Argon",
+        url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent"
+      },
+      {
         name: "Gemini 3.8 Flash",
         url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
       },
