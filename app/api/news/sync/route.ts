@@ -665,6 +665,28 @@ async function handleSync(request: Request) {
     let totalArticlesSynced = 0;
     const syncedIssuesDetails = [];
 
+    // Preload existing weekly issues and article slugs once using lightweight JSONB projection (avoids 57014 TOAST timeout)
+    const { data: allWeeklyDocsLight, error: issueFetchError } = await supabase
+      .from("documents")
+      .select("id, title, file_url, created_at, slug:metadata->>slug, summary:metadata->>summary, cover_url:metadata->>cover_url, published_at:metadata->>published_at, page_count:metadata->page_count, is_favorite:metadata->is_favorite, author:metadata->>author")
+      .eq("type", "knowledge_transcription")
+      .like("title", "Revista Semanal%");
+
+    if (issueFetchError) {
+      console.error(`[Sync Scraper] Warning: Issue fetch error:`, issueFetchError);
+    }
+
+    const { data: allExistingArtsLight } = await supabase
+      .from("documents")
+      .select("id, slug:metadata->>slug, issue_slug:metadata->>issue_slug")
+      .eq("type", "knowledge_transcription")
+      .not("title", "like", "Revista Semanal%")
+      .limit(1500);
+
+    const existingArticleSlugs = new Set<string>(
+      (allExistingArtsLight || []).map((a: any) => a.slug).filter(Boolean)
+    );
+
     // 6. Ingest issues and detailed articles sequentially
     for (const issueSlug of issuesList) {
       const issueData = issuesMap[issueSlug];
@@ -673,21 +695,11 @@ async function handleSync(request: Request) {
       // 1. Resolve authentic official cover: NEVER use an article thumbnail as a cover!
       const officialCoverUrl = discoveredCovers[issueSlug] || "";
 
-      // 2. Check if this Weekly Issue document already exists using fast indexed title search
-      const { data: allWeeklyDocs, error: issueFetchError } = await supabase
-        .from("documents")
-        .select("id, title, file_url, metadata, created_at")
-        .eq("type", "knowledge_transcription")
-        .ilike("title", "Revista Semanal%")
-        .order("created_at", { ascending: true });
-
-      if (issueFetchError) {
-        console.error(`[Sync Scraper] Warning: Issue fetch error for ${issueSlug}:`, issueFetchError);
-      }
-
-      const existingIssues = (allWeeklyDocs || []).filter((doc: any) => {
-        return doc.metadata?.slug === issueSlug || (doc.title && doc.title.toLowerCase().includes(issueSlug.toLowerCase()));
-      });
+      const existingIssues = (allWeeklyDocsLight || [])
+        .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+        .filter((doc: any) => {
+          return doc.slug === issueSlug || (doc.title && doc.title.toLowerCase().includes(issueSlug.toLowerCase()));
+        });
 
       const existingIssue = existingIssues && existingIssues.length > 0 ? existingIssues[0] : null;
       let issueDocId = existingIssue?.id;
@@ -700,7 +712,7 @@ async function handleSync(request: Request) {
           await supabase.from("documents").delete().eq("id", dup.id);
         }
       }
-      let existingSummaryText = existingIssue?.metadata?.summary || "";
+      let existingSummaryText = existingIssue?.summary || "";
       let resolvedPdfUrl = existingIssue?.file_url || "";
       let pdfUpdated = false;
       let detectedPageCount = 0;
@@ -787,15 +799,8 @@ async function handleSync(request: Request) {
         const altSlug = `${issueSlug}-${art.id}`;
         const articleSlug = rawSlug;
 
-        // Check if article is already ingested (check both slug formats)
-        const { data: existingArt } = await supabase
-          .from("documents")
-          .select("id")
-          .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_analysis"])
-          .or(`metadata->>slug.eq.${rawSlug},metadata->>slug.eq.${altSlug}`)
-          .maybeSingle();
-
-        if (existingArt) {
+        // Check if article is already ingested using preloaded Set (instant, 0 DB roundtrips)
+        if (existingArticleSlugs.has(rawSlug) || existingArticleSlugs.has(altSlug)) {
           console.log(`   -> Article [${art.title}] already synced. Skipping detail download.`);
           continue;
         }
@@ -886,9 +891,17 @@ async function handleSync(request: Request) {
           existingSummaryText = newSummary;
         }
 
-        const existingMeta = existingIssue?.metadata || {};
+        let existingMeta: any = {};
+        if (issueDocId) {
+          const { data: fullIssueRow } = await supabase
+            .from("documents")
+            .select("metadata")
+            .eq("id", issueDocId)
+            .maybeSingle();
+          existingMeta = fullIssueRow?.metadata || {};
+        }
         const defaultStorageCover = `https://lhtlrztsmkllcqiziftn.supabase.co/storage/v1/object/public/documents/covers/${issueSlug}.jpg?v=hivex5`;
-        let finalCoverUrl = existingMeta.cover_url;
+        let finalCoverUrl = existingMeta.cover_url || existingIssue?.cover_url;
 
         // If we found an authentic official Trends Journal cover, download and save to Supabase Storage
         if (officialCoverUrl && officialCoverUrl.startsWith("http")) {

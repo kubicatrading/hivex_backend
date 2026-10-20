@@ -293,37 +293,25 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
 
   const supabase = getSupabaseClient();
 
-  // 1. Fetch parent issue document via lightweight projection + Primary Key lookup (avoids 57014 TOAST timeout)
+  // 1. Fetch parent issue document dynamically via lightweight projection + Primary Key lookup (avoids 57014 TOAST timeout)
   let issueDocs: any[] | null = null;
   let issueErr: any = null;
+  let targetParentId: string | null = null;
 
-  const KNOWN_PARENT_IDS: Record<string, string> = {
-    "22-september-2026": "ab10064b-4482-47ed-9f19-373440a250c8",
-    "29-september-2026": "8db47ebe-9a89-4871-8d71-8787b1027504",
-    "6-october-2026": "c7bc7d3e-16ea-45b9-8f7a-0eb72c693d64",
-    "13-october-2026": "ea8d125f-1497-4ce0-bb2b-bdd69dd6e530"
-  };
+  const { data: lightParents, error: lpErr } = await supabase
+    .from("documents")
+    .select("id, title, created_at, slug:metadata->>slug")
+    .eq("type", "knowledge_transcription")
+    .like("title", "Revista Semanal%");
 
-  let targetParentId: string | null = KNOWN_PARENT_IDS[issueSlug] || null;
-
-  if (!targetParentId) {
-    const { data: lightParents, error: lpErr } = await supabase
-      .from("documents")
-      .select("id, title, created_at, slug:metadata->>slug")
-      .eq("type", "knowledge_transcription")
-      .like("title", "Revista Semanal%");
-
-    if (lpErr) {
-      issueErr = lpErr;
-    } else if (lightParents && lightParents.length > 0) {
-      const dayMatch = issueSlug.match(/^(\d{1,2})/);
-      const day = dayMatch ? dayMatch[1] : "";
-      const matched = lightParents
-        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-        .find((p: any) => p.slug === issueSlug || (day && p.title?.includes(` ${day} de `)));
-      if (matched) {
-        targetParentId = matched.id;
-      }
+  if (lpErr) {
+    issueErr = lpErr;
+  } else if (lightParents && lightParents.length > 0) {
+    const matched = lightParents
+      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+      .find((p: any) => p.slug === issueSlug);
+    if (matched) {
+      targetParentId = matched.id;
     }
   }
 
@@ -650,11 +638,7 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     await Promise.all(
       batchIndices.map(async (bIdx) => {
         const chunkKey = `magazines/audio_chunks/${mainDoc.id}/block_${bIdx}.bin`;
-        const is22Recent = issueSlug === "22-september-2026";
-        const candidateKeys = [
-          is22Recent ? `magazines/audio_chunks/8ab6a6bf-d93f-4599-a3d1-58f05ccb27b1/block_${bIdx}.bin` : "",
-          !force ? chunkKey : ""
-        ].filter(Boolean);
+        const candidateKeys = [!force ? chunkKey : ""].filter(Boolean);
 
         for (const k of candidateKeys) {
           try {
