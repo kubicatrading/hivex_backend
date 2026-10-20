@@ -29,17 +29,29 @@ export async function POST(req: Request) {
 
     let textToSummarize = transcriptionText || "";
 
-    // If textToSummarize was not provided, fetch articles from Supabase
+    // If textToSummarize was not provided, fetch articles from Supabase via lightweight projection + PK fetch
     if (!textToSummarize) {
-      const { data: articles } = await supabase
+      const { data: lightRows } = await supabase
         .from("documents")
-        .select("*")
-        .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_analysis"])
-        .eq("metadata->>is_magazine_article", "true")
-        .eq("metadata->>issue_slug", issueSlug)
-        .order("created_at", { ascending: true });
+        .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
+        .eq("type", "knowledge_transcription")
+        .not("title", "like", "Revista Semanal%")
+        .limit(1200);
 
-      if (articles && articles.length > 0) {
+      const matchingIds = (lightRows || [])
+        .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === issueSlug)
+        .map((r: any) => r.id);
+
+      const articles: any[] = [];
+      for (let i = 0; i < matchingIds.length; i += 40) {
+        const { data: batch } = await supabase
+          .from("documents")
+          .select("id, title, description, metadata")
+          .in("id", matchingIds.slice(i, i + 40));
+        if (batch) articles.push(...batch);
+      }
+
+      if (articles.length > 0) {
         textToSummarize = articles.map(art => {
           const paras = art.metadata?.paragraphs ? art.metadata.paragraphs.join("\n\n") : (art.description || "");
           return `### ${art.title}\nCategoría: ${art.metadata?.category || "TENDENCIAS"}\n\n${paras}`;
@@ -125,22 +137,35 @@ ${textToSummarize}`;
     // Persist summary in Supabase document metadata if docId or issueSlug provided
     if (docId || issueSlug) {
       try {
-        let query = supabase.from("documents").select("*");
-        if (docId) query = query.eq("id", docId);
-        else query = query.in("type", ["knowledge_transcription", "knowledge_summary"]).eq("metadata->>slug", issueSlug);
-
-        const { data: matchedDocs } = await query.limit(1);
-        if (matchedDocs && matchedDocs.length > 0) {
-          const doc = matchedDocs[0];
-          const updatedMeta = {
-            ...(doc.metadata || {}),
-            summary: generatedMarkdown
-          };
-          await supabase
+        let targetId = docId;
+        if (!targetId && issueSlug) {
+          const { data: lightParents } = await supabase
             .from("documents")
-            .update({ metadata: updatedMeta, updated_at: new Date().toISOString() })
-            .eq("id", doc.id);
-          console.log(`[News Summarize API] Updated summary metadata in Supabase for document ${doc.id}`);
+            .select("id, slug:metadata->>slug")
+            .eq("type", "knowledge_transcription")
+            .like("title", "Revista Semanal%");
+          const found = (lightParents || []).find((p: any) => p.slug === issueSlug);
+          if (found) targetId = found.id;
+        }
+
+        if (targetId) {
+          const { data: matchedDocs } = await supabase
+            .from("documents")
+            .select("id, metadata")
+            .eq("id", targetId)
+            .limit(1);
+          if (matchedDocs && matchedDocs.length > 0) {
+            const doc = matchedDocs[0];
+            const updatedMeta = {
+              ...(doc.metadata || {}),
+              summary: generatedMarkdown
+            };
+            await supabase
+              .from("documents")
+              .update({ metadata: updatedMeta, updated_at: new Date().toISOString() })
+              .eq("id", doc.id);
+            console.log(`[News Summarize API] Updated summary metadata in Supabase for document ${doc.id}`);
+          }
         }
       } catch (dbErr) {
         console.warn(`[News Summarize API] Could not update document metadata in Supabase:`, dbErr);

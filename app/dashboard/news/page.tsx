@@ -778,14 +778,30 @@ export default function NewsPage() {
         setLoadingArticles(true);
         setCabinArticles([]);
         try {
-          const { data, error } = await supabase
+          const targetSlug = activeCabinIssue.metadata?.slug || "";
+          const { data: lightRows, error: lightErr } = await supabase
             .from("documents")
-            .select("*")
-            .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
-            .eq("metadata->>is_magazine_article", "true")
-            .eq("metadata->>issue_slug", activeCabinIssue.metadata?.slug || "");
-          if (error) throw error;
-          if (data) {
+            .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
+            .eq("type", "knowledge_transcription")
+            .not("title", "like", "Revista Semanal%")
+            .limit(1200);
+          if (lightErr) throw lightErr;
+
+          const matchingIds = (lightRows || [])
+            .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === targetSlug)
+            .map((r: any) => r.id);
+
+          const data: any[] = [];
+          for (let i = 0; i < matchingIds.length; i += 40) {
+            const { data: batch, error: batchErr } = await supabase
+              .from("documents")
+              .select("*")
+              .in("id", matchingIds.slice(i, i + 40));
+            if (batchErr) throw batchErr;
+            if (batch) data.push(...batch);
+          }
+
+          if (data.length > 0) {
             // Sort by order_index to preserve exact magazine reading flow (or category/title fallback)
             const sorted = [...data].sort((a, b) => {
               const orderA = Number(a.metadata?.order_index ?? 9999);
@@ -1319,14 +1335,25 @@ export default function NewsPage() {
         } else {
           setPdfTranscriptionModel("Google AI Studio Gemini Flash");
         }
-        // Re-fetch cabin articles from Supabase
-        const { data: articles } = await supabase
+        // Re-fetch cabin articles from Supabase via lightweight projection + PK fetch
+        const { data: lightRows } = await supabase
           .from("documents")
-          .select("*")
-          .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
-          .eq("metadata->>is_magazine_article", "true")
-          .eq("metadata->>issue_slug", issueSlug);
-        if (articles && articles.length > 0) {
+          .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
+          .eq("type", "knowledge_transcription")
+          .not("title", "like", "Revista Semanal%")
+          .limit(1200);
+        const matchingIds = (lightRows || [])
+          .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === issueSlug)
+          .map((r: any) => r.id);
+        const articles: any[] = [];
+        for (let i = 0; i < matchingIds.length; i += 40) {
+          const { data: batch } = await supabase
+            .from("documents")
+            .select("*")
+            .in("id", matchingIds.slice(i, i + 40));
+          if (batch) articles.push(...batch);
+        }
+        if (articles.length > 0) {
           setCabinArticles(articles);
         }
       } else {
@@ -1382,21 +1409,32 @@ export default function NewsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           issueSlug,
+          docId: issue.id,
           title: issue.title
         })
       });
       const summaryData = await summaryRes.json();
 
-      // 3. Re-fetch articles from Supabase
-      const { data: articles } = await supabase
+      // 3. Re-fetch articles from Supabase via lightweight projection + PK fetch
+      const { data: lightRows } = await supabase
         .from("documents")
-        .select("*")
-        .in("type", ["knowledge_transcription", "knowledge_article_transcription", "knowledge_article_analysis", "knowledge_analysis"])
-        .eq("metadata->>is_magazine_article", "true")
-        .eq("metadata->>issue_slug", issueSlug)
-        .order("created_at", { ascending: true });
+        .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
+        .eq("type", "knowledge_transcription")
+        .not("title", "like", "Revista Semanal%")
+        .limit(1200);
+      const matchingIds = (lightRows || [])
+        .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === issueSlug)
+        .map((r: any) => r.id);
+      const articles: any[] = [];
+      for (let i = 0; i < matchingIds.length; i += 40) {
+        const { data: batch } = await supabase
+          .from("documents")
+          .select("*")
+          .in("id", matchingIds.slice(i, i + 40));
+        if (batch) articles.push(...batch);
+      }
 
-      if (articles && articles.length > 0) {
+      if (articles.length > 0) {
         setCabinArticles(articles);
       }
 

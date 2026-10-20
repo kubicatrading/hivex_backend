@@ -293,25 +293,50 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
 
   const supabase = getSupabaseClient();
 
-  // 1. Fetch parent issue document
+  // 1. Fetch parent issue document via lightweight projection + Primary Key lookup (avoids 57014 TOAST timeout)
   let issueDocs: any[] | null = null;
   let issueErr: any = null;
 
   const KNOWN_PARENT_IDS: Record<string, string> = {
     "22-september-2026": "ab10064b-4482-47ed-9f19-373440a250c8",
-    "29-september-2026": "8db47ebe-9a89-4871-8d71-8787b1027504"
+    "29-september-2026": "8db47ebe-9a89-4871-8d71-8787b1027504",
+    "6-october-2026": "c7bc7d3e-16ea-45b9-8f7a-0eb72c693d64",
+    "13-october-2026": "ea8d125f-1497-4ce0-bb2b-bdd69dd6e530"
   };
 
-  if (KNOWN_PARENT_IDS[issueSlug]) {
+  let targetParentId: string | null = KNOWN_PARENT_IDS[issueSlug] || null;
+
+  if (!targetParentId) {
+    const { data: lightParents, error: lpErr } = await supabase
+      .from("documents")
+      .select("id, title, created_at, slug:metadata->>slug")
+      .eq("type", "knowledge_transcription")
+      .like("title", "Revista Semanal%");
+
+    if (lpErr) {
+      issueErr = lpErr;
+    } else if (lightParents && lightParents.length > 0) {
+      const dayMatch = issueSlug.match(/^(\d{1,2})/);
+      const day = dayMatch ? dayMatch[1] : "";
+      const matched = lightParents
+        .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+        .find((p: any) => p.slug === issueSlug || (day && p.title?.includes(` ${day} de `)));
+      if (matched) {
+        targetParentId = matched.id;
+      }
+    }
+  }
+
+  if (targetParentId) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const { data: byKnownId } = await supabase
+      const { data: byId, error: idErr } = await supabase
         .from("documents")
-        .select("id, user_id, title, file_url, created_at, slug:metadata->slug, summary:metadata->summary, cover_url:metadata->cover_url, published_at:metadata->published_at, page_count:metadata->page_count, author:metadata->author, is_magazine_issue:metadata->is_magazine_issue, audio_url:metadata->audio_url, audio_status:metadata->audio_status")
-        .eq("id", KNOWN_PARENT_IDS[issueSlug])
+        .select("id, user_id, title, file_url, created_at, slug:metadata->slug, summary:metadata->summary, cover_url:metadata->cover_url, published_at:metadata->published_at, page_count:metadata->page_count, author:metadata->author, is_magazine_issue:metadata->is_magazine_issue, audio_url:metadata->audio_url, audio_status:metadata->audio_status, telegram_notified:metadata->telegram_notified, sentence_timestamps:metadata->sentence_timestamps, audios:metadata->audios")
+        .eq("id", targetParentId)
         .limit(1);
 
-      if (byKnownId && byKnownId.length > 0) {
-        const d: any = byKnownId[0];
+      if (byId && byId.length > 0) {
+        const d: any = byId[0];
         issueDocs = [{
           id: d.id,
           user_id: d.user_id,
@@ -319,51 +344,24 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
           file_url: d.file_url,
           created_at: d.created_at,
           metadata: {
-            slug: d.slug,
+            slug: d.slug || issueSlug,
             summary: d.summary,
             cover_url: d.cover_url,
             published_at: d.published_at,
             page_count: d.page_count,
             author: d.author,
-            is_magazine_issue: d.is_magazine_issue,
+            is_magazine_issue: d.is_magazine_issue ?? true,
             audio_url: d.audio_url,
-            audio_status: d.audio_status
+            audio_status: d.audio_status,
+            telegram_notified: d.telegram_notified,
+            sentence_timestamps: d.sentence_timestamps,
+            audios: d.audios
           }
         }];
         break;
       }
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  }
-
-  if (!issueDocs || issueDocs.length === 0) {
-    const dayMatch = issueSlug.match(/^(\d{1,2})/);
-    const day = dayMatch ? dayMatch[1] : "";
-
-    const { data: byTitle, error: errTitle } = await supabase
-      .from("documents")
-      .select("id, user_id, title, file_url, metadata, created_at")
-      .eq("type", "knowledge_transcription")
-      .ilike("title", `%Revista Semanal%${day}%`)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (byTitle && byTitle.length > 0) {
-      issueDocs = byTitle;
-    } else {
-      const { data: bySlug, error: errSlug } = await supabase
-        .from("documents")
-        .select("id, user_id, title, file_url, metadata, created_at")
-        .eq("type", "knowledge_transcription")
-        .eq("metadata->>slug", issueSlug)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (bySlug && bySlug.length > 0) {
-        issueDocs = bySlug;
-      } else {
-        issueErr = errTitle || errSlug;
-      }
+      issueErr = idErr;
+      await new Promise(r => setTimeout(r, 1500));
     }
   }
 
@@ -374,26 +372,46 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
   const mainDoc = issueDocs[0];
   const targetUserId = mainDoc.user_id || "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
 
+  // Helper to fetch existing articles for this issueSlug without hitting 57014 TOAST timeout
+  const fetchExistingIssueArticles = async () => {
+    const { data: lightArts } = await supabase
+      .from("documents")
+      .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article, parser_version:metadata->>parser_version, start_page:metadata->start_page")
+      .eq("type", "knowledge_transcription")
+      .not("title", "like", "Revista Semanal%")
+      .limit(1200);
+
+    const matchingLight = (lightArts || []).filter(
+      (a: any) => String(a.is_magazine_article) === "true" && a.issue_slug === issueSlug
+    );
+
+    if (matchingLight.length === 0) return [];
+
+    const matchingIds = matchingLight.map((a: any) => a.id);
+    const fullArticles: any[] = [];
+    for (let i = 0; i < matchingIds.length; i += 40) {
+      const { data: batch } = await supabase
+        .from("documents")
+        .select("id, user_id, title, metadata")
+        .in("id", matchingIds.slice(i, i + 40));
+      if (batch) fullArticles.push(...batch);
+    }
+    return fullArticles;
+  };
+
+  const issueArts = await fetchExistingIssueArticles();
+
   // 2. Strict Immutability & Idempotency Check
   if (!force) {
     const isAudioReady = mainDoc.metadata?.audio_url && mainDoc.metadata?.audio_status === "ready";
     const hasTimestamps = Array.isArray(mainDoc.metadata?.sentence_timestamps) && mainDoc.metadata.sentence_timestamps.length > 100;
-
-    const { data: existingArts } = await supabase
-      .from("documents")
-      .select("id, metadata")
-      .eq("type", "knowledge_transcription")
-      .eq("metadata->>is_magazine_article", "true")
-      .eq("metadata->>issue_slug", issueSlug)
-      .limit(10);
-
-    const hasValidArticles = existingArts && existingArts.length > 0 && existingArts.every(a => a.metadata?.start_page !== undefined);
+    const hasValidArticles = issueArts.length >= 40 && issueArts.every(a => a.metadata?.start_page !== undefined);
 
     if (isAudioReady && hasTimestamps && hasValidArticles) {
-      console.log(`[News Transcribe v7] Magazine issue ${issueSlug} is already fully transcribed, page-mapped, and synthesized. Skipping.`);
+      console.log(`[News Transcribe v8] Magazine issue ${issueSlug} is already fully transcribed, page-mapped, and synthesized. Skipping.`);
       return {
         success: true,
-        articleCount: existingArts.length,
+        articleCount: issueArts.length,
         audioUrl: mainDoc.metadata?.audio_url,
         cached: true,
         message: "Magazine transcription, start_page mapping, and 18kbps audio are already complete and protected."
@@ -401,19 +419,7 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     }
   }
 
-  console.log(`[News Transcribe v7] Starting full v7 pipeline for ${issueSlug} (force: ${!!force})...`);
-
-  // Check if clean articles with start_page already exist in Supabase
-  const { data: dbExistingArts } = await supabase
-    .from("documents")
-    .select("id, user_id, title, metadata")
-    .eq("type", "knowledge_transcription")
-    .order("created_at", { ascending: false })
-    .limit(300);
-
-  const issueArts = (dbExistingArts || []).filter(
-    a => a.metadata?.is_magazine_article === "true" && a.metadata?.issue_slug === issueSlug
-  );
+  console.log(`[News Transcribe v8] Starting full v8 pipeline for ${issueSlug} (force: ${!!force})...`);
 
   const validExistingArts = issueArts.filter(
     a => a.metadata?.start_page !== undefined && a.metadata?.parser_version === "toc_page_sliced_v8_partition"
@@ -549,23 +555,9 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
 
     // 7. Atomic cleanup and insertion into Supabase
     console.log(`[News Transcribe v8] Replacing old articles in database for ${issueSlug}...`);
-    for (let delPass = 0; delPass < 8; delPass++) {
-      const { data: oldRows } = await supabase
-        .from("documents")
-        .select("id, metadata")
-        .eq("type", "knowledge_transcription")
-        .order("created_at", { ascending: false })
-        .limit(400);
-
-      const toDeleteIds = (oldRows || [])
-        .filter(r => r.metadata?.is_magazine_article === "true" && r.metadata?.issue_slug === issueSlug)
-        .map(r => r.id);
-
-      if (toDeleteIds.length === 0) break;
-
-      for (let c = 0; c < toDeleteIds.length; c += 50) {
-        await supabase.from("documents").delete().in("id", toDeleteIds.slice(c, c + 50));
-      }
+    const toDeleteIds = issueArts.map(r => r.id);
+    for (let c = 0; c < toDeleteIds.length; c += 50) {
+      await supabase.from("documents").delete().in("id", toDeleteIds.slice(c, c + 50));
     }
 
     const chunkSize = 15;
@@ -881,26 +873,28 @@ export async function GET(req: Request) {
       return NextResponse.json(result);
     }
 
-    // Default: find latest magazine issue needing transcription/synthesis
+    // Default: find latest magazine issue needing transcription/synthesis (lightweight query avoids 57014 timeout)
     const supabase = getSupabaseClient();
-    const { data: issues } = await supabase
+    const { data: rawIssues } = await supabase
       .from("documents")
-      .select("id, title, metadata")
-      .eq("metadata->>is_magazine_issue", "true")
-      .order("created_at", { ascending: false })
-      .limit(5);
+      .select("id, title, created_at, slug:metadata->>slug, audio_url:metadata->>audio_url, audio_status:metadata->>audio_status")
+      .eq("type", "knowledge_transcription")
+      .like("title", "Revista Semanal%");
 
-    if (!issues || issues.length === 0) {
+    if (!rawIssues || rawIssues.length === 0) {
       return NextResponse.json({ success: true, message: "No magazine issues found" });
     }
 
-    const targetIssue = issues.find(it => {
-      const meta = it.metadata || {};
-      const isReady = meta.audio_url && meta.audio_status === "ready" && Array.isArray(meta.sentence_timestamps) && meta.sentence_timestamps.length > 50;
-      return !isReady;
-    }) || issues[0];
+    const sortedIssues = [...rawIssues].sort(
+      (a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    );
 
-    const slug = targetIssue.metadata?.slug;
+    const targetIssue: any = sortedIssues.find((it: any) => {
+      const isReady = it.audio_url && it.audio_status === "ready";
+      return !isReady;
+    }) || sortedIssues[0];
+
+    const slug = targetIssue.slug;
     if (!slug) {
       return NextResponse.json({ success: false, error: "Latest issue has no slug in metadata" }, { status: 400 });
     }
