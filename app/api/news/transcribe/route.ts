@@ -285,7 +285,12 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
  * 5. Full issue upload to Supabase Storage and sentence_timestamps mapping.
  * 6. Telegram notification dispatch.
  */
-export async function processMagazineTranscribeAndSynthesis(issueSlug: string, force = false) {
+export async function processMagazineTranscribeAndSynthesis(
+  issueSlug: string,
+  force = false,
+  options?: { maxRuntimeMs?: number }
+) {
+  const pipelineStartMs = Date.now();
   const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!geminiApiKey) {
     throw new Error("Missing GEMINI_API_KEY environment variable");
@@ -319,7 +324,7 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data: byId, error: idErr } = await supabase
         .from("documents")
-        .select("id, user_id, title, file_url, created_at, slug:metadata->slug, summary:metadata->summary, cover_url:metadata->cover_url, published_at:metadata->published_at, page_count:metadata->page_count, author:metadata->author, is_magazine_issue:metadata->is_magazine_issue, audio_url:metadata->audio_url, audio_status:metadata->audio_status, telegram_notified:metadata->telegram_notified, sentence_timestamps:metadata->sentence_timestamps, audios:metadata->audios")
+        .select("id, user_id, title, file_url, created_at, slug:metadata->slug, summary:metadata->summary, cover_url:metadata->cover_url, published_at:metadata->published_at, page_count:metadata->page_count, author:metadata->author, is_magazine_issue:metadata->is_magazine_issue, audio_url:metadata->audio_url, audio_status:metadata->audio_status, audio_progress_percent:metadata->audio_progress_percent, article_ids:metadata->article_ids, article_count:metadata->article_count, parser_version:metadata->parser_version, telegram_notified:metadata->telegram_notified, sentence_timestamps:metadata->sentence_timestamps, audios:metadata->audios")
         .eq("id", targetParentId)
         .limit(1);
 
@@ -341,6 +346,10 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
             is_magazine_issue: d.is_magazine_issue ?? true,
             audio_url: d.audio_url,
             audio_status: d.audio_status,
+            audio_progress_percent: d.audio_progress_percent,
+            article_ids: d.article_ids,
+            article_count: d.article_count,
+            parser_version: d.parser_version,
             telegram_notified: d.telegram_notified,
             sentence_timestamps: d.sentence_timestamps,
             audios: d.audios
@@ -360,13 +369,32 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
   const mainDoc = issueDocs[0];
   const targetUserId = mainDoc.user_id || "5c8d65c6-0798-4f8a-aae3-dd2cebebd868";
 
-  // Helper to fetch existing articles for this issueSlug without hitting 57014 TOAST timeout
+  // Helper to fetch existing v8 articles for this issueSlug without hitting 57014 TOAST timeout or legacy web duplicates
   const fetchExistingIssueArticles = async () => {
+    const knownIds: string[] = Array.isArray(mainDoc.metadata?.article_ids)
+      ? mainDoc.metadata.article_ids.filter(Boolean)
+      : [];
+
+    if (knownIds.length >= 40) {
+      const fullByKnownIds: any[] = [];
+      for (let i = 0; i < knownIds.length; i += 40) {
+        const { data: batch } = await supabase
+          .from("documents")
+          .select("id, user_id, title, metadata")
+          .in("id", knownIds.slice(i, i + 40));
+        if (batch) fullByKnownIds.push(...batch);
+      }
+      if (fullByKnownIds.length >= 40) {
+        return fullByKnownIds;
+      }
+    }
+
     const { data: lightArts } = await supabase
       .from("documents")
       .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article, parser_version:metadata->>parser_version, start_page:metadata->start_page")
       .eq("type", "knowledge_transcription")
       .not("title", "like", "Revista Semanal%")
+      .eq("metadata->>parser_version", "toc_page_sliced_v8_partition")
       .limit(1200);
 
     const matchingLight = (lightArts || []).filter(
@@ -589,6 +617,22 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     console.log(`[News Transcribe v8] Successfully inserted ${insertedArticles.length} clean articles with start_page into Supabase!`);
   }
 
+  // Persist article_ids and parser_version on parent issue immediately so subsequent cycles and UI never scan the table
+  const currentArticleIds = insertedArticles.map(a => a.id).filter(Boolean);
+  if (currentArticleIds.length > 0 && (!Array.isArray(mainDoc.metadata?.article_ids) || mainDoc.metadata.article_ids.length !== currentArticleIds.length)) {
+    mainDoc.metadata = {
+      ...(mainDoc.metadata || {}),
+      article_ids: currentArticleIds,
+      article_count: currentArticleIds.length,
+      parser_version: "toc_page_sliced_v8_partition",
+      audio_status: mainDoc.metadata?.audio_status === "ready" ? "ready" : "processing"
+    };
+    await supabase
+      .from("documents")
+      .update({ metadata: mainDoc.metadata })
+      .eq("id", mainDoc.id);
+  }
+
   // 8. Build Canonical Chunks with 100% parity to news/page.tsx
   const sortedArticles = [...insertedArticles].sort((a, b) => {
     return Number(a.metadata?.order_index ?? 9999) - Number(b.metadata?.order_index ?? 9999);
@@ -671,6 +715,33 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
     const doneCount = Math.min(blocks.length, i + batchIndices.length);
     const pct = Math.min(100, Math.round((doneCount / blocks.length) * 100));
     console.log(`[News Transcribe v8] Audio progress: ${pct}% (${doneCount}/${blocks.length} blocks)...`);
+
+    // Check time budget so Vercel 300s timeout never aborts mid-execution
+    if (options?.maxRuntimeMs && doneCount < blocks.length && (Date.now() - pipelineStartMs) >= options.maxRuntimeMs) {
+      console.log(`[News Transcribe v8] Reached time budget (${Date.now() - pipelineStartMs}ms >= ${options.maxRuntimeMs}ms) at ${pct}% (${doneCount}/${blocks.length} blocks). Checkpointing progress...`);
+      mainDoc.metadata = {
+        ...(mainDoc.metadata || {}),
+        article_ids: currentArticleIds,
+        article_count: currentArticleIds.length,
+        parser_version: "toc_page_sliced_v8_partition",
+        audio_status: "processing",
+        audio_progress_percent: pct
+      };
+      await supabase
+        .from("documents")
+        .update({ metadata: mainDoc.metadata })
+        .eq("id", mainDoc.id);
+
+      return {
+        success: true,
+        partial: true,
+        articleCount: insertedArticles.length,
+        audioProgressPercent: pct,
+        completedBlocks: doneCount,
+        totalBlocks: blocks.length,
+        message: `Checkpointed at ${pct}% (${doneCount}/${blocks.length} audio blocks cached). Will automatically resume on next cycle.`
+      };
+    }
   }
 
   const fullPcmBuffer = Buffer.concat(blockPcmBuffers.filter(Boolean));
@@ -749,8 +820,12 @@ export async function processMagazineTranscribeAndSynthesis(issueSlug: string, f
   console.log(`[News Transcribe v7] Updating master issue document ${mainDoc.id} with audio and timestamps...`);
   const updatedMetadata = {
     ...(mainDoc.metadata || {}),
+    article_ids: currentArticleIds,
+    article_count: currentArticleIds.length,
+    parser_version: "toc_page_sliced_v8_partition",
     audio_url: publicAudioUrl,
     audio_status: "ready",
+    audio_progress_percent: 100,
     voice: "Aoede",
     audio_duration: Math.round(totalAudioDurationSec),
     sentence_timestamps: sentenceTimestamps,
@@ -851,9 +926,10 @@ export async function GET(req: Request) {
 
     const issueSlug = searchParams.get("slug") || searchParams.get("issueSlug");
     const force = searchParams.get("force") === "true";
+    const defaultBudget = process.env.VERCEL ? { maxRuntimeMs: 240000 } : undefined;
 
     if (issueSlug) {
-      const result = await processMagazineTranscribeAndSynthesis(issueSlug, force);
+      const result = await processMagazineTranscribeAndSynthesis(issueSlug, force, defaultBudget);
       return NextResponse.json(result);
     }
 
@@ -883,7 +959,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ success: false, error: "Latest issue has no slug in metadata" }, { status: 400 });
     }
 
-    const result = await processMagazineTranscribeAndSynthesis(slug, force);
+    const result = await processMagazineTranscribeAndSynthesis(slug, force, defaultBudget);
     return NextResponse.json(result);
   } catch (error: any) {
     console.error("[News Transcribe GET API Error]:", error);
@@ -902,7 +978,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Missing issueSlug parameter" }, { status: 400 });
     }
 
-    const result = await processMagazineTranscribeAndSynthesis(issueSlug, !!force);
+    const defaultBudget = process.env.VERCEL ? { maxRuntimeMs: 240000 } : undefined;
+    const result = await processMagazineTranscribeAndSynthesis(issueSlug, !!force, defaultBudget);
     return NextResponse.json(result);
   } catch (error: any) {
     console.error("[News Transcribe API Error]:", error);

@@ -19,7 +19,7 @@ export async function GET() {
     // We avoid ordering by created_at in PostgreSQL because it causes an expensive backwards index scan over 25k records
     const { data, error } = await supabase
       .from("documents")
-      .select("id, title, description, type, file_url, user_id, created_at, metadata->slug, metadata->cover_url, metadata->published_at, metadata->page_count, metadata->author, metadata->audio_status, metadata->audio_progress_percent, metadata->audio_url, metadata->is_favorite, metadata->summary")
+      .select("id, title, description, type, file_url, user_id, created_at, metadata->slug, metadata->cover_url, metadata->published_at, metadata->page_count, metadata->author, metadata->audio_status, metadata->audio_progress_percent, metadata->audio_url, metadata->is_favorite, metadata->summary, metadata->article_ids, metadata->article_count")
       .eq("type", "knowledge_transcription")
       .like("title", "Revista Semanal%");
 
@@ -48,7 +48,9 @@ export async function GET() {
           audio_progress_percent: item.audio_progress_percent,
           audio_url: item.audio_url,
           is_favorite: item.is_favorite,
-          summary: item.summary
+          summary: item.summary,
+          article_ids: item.article_ids,
+          article_count: item.article_count
         }
       };
     });

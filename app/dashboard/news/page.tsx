@@ -779,17 +779,38 @@ export default function NewsPage() {
         setCabinArticles([]);
         try {
           const targetSlug = activeCabinIssue.metadata?.slug || "";
-          const { data: lightRows, error: lightErr } = await supabase
-            .from("documents")
-            .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
-            .eq("type", "knowledge_transcription")
-            .not("title", "like", "Revista Semanal%")
-            .limit(1200);
-          if (lightErr) throw lightErr;
+          let matchingIds: string[] = Array.isArray((activeCabinIssue.metadata as any)?.article_ids)
+            ? (activeCabinIssue.metadata as any).article_ids.filter(Boolean)
+            : [];
 
-          const matchingIds = (lightRows || [])
-            .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === targetSlug)
-            .map((r: any) => r.id);
+          if (matchingIds.length === 0) {
+            const { data: v8Rows, error: v8Err } = await supabase
+              .from("documents")
+              .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
+              .eq("type", "knowledge_transcription")
+              .not("title", "like", "Revista Semanal%")
+              .eq("metadata->>parser_version", "toc_page_sliced_v8_partition")
+              .limit(1200);
+            if (!v8Err && v8Rows) {
+              matchingIds = v8Rows
+                .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === targetSlug)
+                .map((r: any) => r.id);
+            }
+          }
+
+          if (matchingIds.length === 0) {
+            const { data: lightRows, error: lightErr } = await supabase
+              .from("documents")
+              .select("id, issue_slug:metadata->>issue_slug, is_magazine_article:metadata->>is_magazine_article")
+              .eq("type", "knowledge_transcription")
+              .not("title", "like", "Revista Semanal%")
+              .limit(1200);
+            if (lightErr) throw lightErr;
+
+            matchingIds = (lightRows || [])
+              .filter((r: any) => String(r.is_magazine_article) === "true" && r.issue_slug === targetSlug)
+              .map((r: any) => r.id);
+          }
 
           const data: any[] = [];
           for (let i = 0; i < matchingIds.length; i += 40) {

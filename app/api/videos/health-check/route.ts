@@ -121,13 +121,16 @@ async function handleHealthCheck(request: NextRequest) {
         return !title.startsWith("[Resumen]") && !title.startsWith("[Análisis]") && !title.startsWith("[Gráficos]");
       });
 
-      // Query articles to cross-reference with issues with fallback to magazine metadata
+      // Query v8 TOC-partitioned articles to cross-reference with issues with fallback to magazine metadata
       let articlesBySlug: Record<string, any[]> = {};
       try {
         const { data: allArticles, error: artErr } = await supabaseAdmin
           .from("documents")
-          .select("id, metadata->>issue_slug, metadata->>start_page")
-          .eq("metadata->>is_magazine_article", "true");
+          .select("id, issue_slug:metadata->>issue_slug, start_page:metadata->>start_page")
+          .eq("type", "knowledge_transcription")
+          .not("title", "like", "Revista Semanal%")
+          .eq("metadata->>parser_version", "toc_page_sliced_v8_partition")
+          .limit(1200);
 
         if (!artErr && allArticles) {
           allArticles.forEach((a: any) => {
@@ -165,12 +168,14 @@ async function handleHealthCheck(request: NextRequest) {
         let artCount = arts.length;
         let hasValidPages = artCount > 0 && arts.some(a => a.start_page !== null && a.start_page !== undefined);
 
-        // Fallback: Check if issue document already contains indexed articles or known page count in metadata
-        if (artCount === 0 && Array.isArray(mag.metadata?.articles) && mag.metadata.articles.length > 0) {
+        // Fallback: Check if issue document explicitly records v8 article_ids / article_count in metadata
+        if (artCount === 0 && Array.isArray(mag.metadata?.article_ids) && mag.metadata.article_ids.length > 0) {
+          artCount = mag.metadata.article_ids.length;
+          hasValidPages = true;
+        } else if (artCount === 0 && Array.isArray(mag.metadata?.articles) && mag.metadata.articles.length > 0) {
           artCount = mag.metadata.articles.length;
           hasValidPages = mag.metadata.articles.some((a: any) => a.start_page !== null && a.start_page !== undefined);
-        } else if (artCount === 0 && (mag.metadata?.page_count || 0) > 0 && slug !== "6-october-2026") {
-          // If issue has audio and timestamps ready and page_count > 0, it has full mapping
+        } else if (artCount === 0 && mag.metadata?.audio_status === "ready" && (mag.metadata?.page_count || 0) > 0) {
           artCount = mag.metadata?.article_count || 45;
           hasValidPages = true;
         }

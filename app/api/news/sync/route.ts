@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { recordCronExecution } from "@/lib/cron-logger";
+import { processMagazineTranscribeAndSynthesis } from "../transcribe/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend to maximum Vercel limit to ensure async scraping runs smoothly without timing out
@@ -665,10 +666,10 @@ async function handleSync(request: Request) {
     let totalArticlesSynced = 0;
     const syncedIssuesDetails = [];
 
-    // Preload existing weekly issues and article slugs once using lightweight JSONB projection (avoids 57014 TOAST timeout)
+    // Preload existing weekly issues once using lightweight JSONB projection (avoids 57014 TOAST timeout)
     const { data: allWeeklyDocsLight, error: issueFetchError } = await supabase
       .from("documents")
-      .select("id, title, file_url, created_at, slug:metadata->>slug, summary:metadata->>summary, cover_url:metadata->>cover_url, published_at:metadata->>published_at, page_count:metadata->page_count, is_favorite:metadata->is_favorite, author:metadata->>author")
+      .select("id, title, file_url, created_at, slug:metadata->>slug, summary:metadata->>summary, cover_url:metadata->>cover_url, published_at:metadata->>published_at, page_count:metadata->page_count, is_favorite:metadata->is_favorite, author:metadata->>author, audio_status:metadata->>audio_status, audio_url:metadata->>audio_url, parser_version:metadata->>parser_version")
       .eq("type", "knowledge_transcription")
       .like("title", "Revista Semanal%");
 
@@ -676,21 +677,12 @@ async function handleSync(request: Request) {
       console.error(`[Sync Scraper] Warning: Issue fetch error:`, issueFetchError);
     }
 
-    const { data: allExistingArtsLight } = await supabase
-      .from("documents")
-      .select("id, slug:metadata->>slug, issue_slug:metadata->>issue_slug")
-      .eq("type", "knowledge_transcription")
-      .not("title", "like", "Revista Semanal%")
-      .limit(1500);
+    const pendingTranscribeSlugs: string[] = [];
 
-    const existingArticleSlugs = new Set<string>(
-      (allExistingArtsLight || []).map((a: any) => a.slug).filter(Boolean)
-    );
-
-    // 6. Ingest issues and detailed articles sequentially
+    // 6. Ingest issues sequentially (articles are extracted cleanly from the PDF in Step 7 via v8 TOC Partition)
     for (const issueSlug of issuesList) {
       const issueData = issuesMap[issueSlug];
-      console.log(`\n[Sync Scraper] Processing Weekly Issue: ${issueSlug} (${issueData.articles.length} articles detected)`);
+      console.log(`\n[Sync Scraper] Processing Weekly Issue: ${issueSlug} (${issueData.articles.length} web headlines detected)`);
 
       // 1. Resolve authentic official cover: NEVER use an article thumbnail as a cover!
       const officialCoverUrl = discoveredCovers[issueSlug] || "";
@@ -791,96 +783,11 @@ async function handleSync(request: Request) {
         }
       }
 
-      const newArticlesData = [];
-
-      // A. Sync each Article in the issue
-      for (const art of issueData.articles) {
-        const rawSlug = art.url.split("/").filter(Boolean).pop() || art.id;
-        const altSlug = `${issueSlug}-${art.id}`;
-        const articleSlug = rawSlug;
-
-        // Check if article is already ingested using preloaded Set (instant, 0 DB roundtrips)
-        if (existingArticleSlugs.has(rawSlug) || existingArticleSlugs.has(altSlug)) {
-          console.log(`   -> Article [${art.title}] already synced. Skipping detail download.`);
-          continue;
-        }
-
-        // Fetch paid article content
-        console.log(`   -> Scraping detailed Premium content for: [${art.title}]...`);
-        const artUrlObj = new URL(art.url);
-        const artRes = await makeRequest({
-          hostname: artUrlObj.hostname,
-          path: artUrlObj.pathname,
-          method: "GET",
-          headers: {
-            "Cookie": cookieHeader,
-            "Referer": "https://trendsjournal.com/"
-          }
-        });
-
-        // Parse entry-content section
-        const contentMatch = /<(div|section)[^>]*class="[^"]*entry-content[^"]*"[^>]*>([\s\S]*?)<\/\1>/i.exec(artRes.data);
-        const articleBody = contentMatch ? contentMatch[2] : "";
-
-        // Parse all clean paragraphs
-        const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
-        let pMatch;
-        const paragraphs: string[] = [];
-        while ((pMatch = pRegex.exec(articleBody)) !== null) {
-          const cleanP = pMatch[1].replace(/<[^>]+>/g, "").trim();
-          if (cleanP && cleanP.length > 5) {
-            paragraphs.push(cleanP);
-          }
-        }
-
-        // If scraping returned no paragraphs (due to WP styling block), fallback to excerpt
-        if (paragraphs.length === 0 && art.excerpt) {
-          paragraphs.push(art.excerpt);
-        }
-
-        const articleMeta = {
-          document_type: "knowledge_magazine_transcription",
-          is_magazine_transcription: true,
-          is_magazine_article: true,
-          issue_slug: issueSlug,
-          slug: articleSlug,
-          category: art.category,
-          image_url: art.imgUrl || officialCoverUrl || "",
-          published_at: issueData.date.toISOString(),
-          paragraphs
-        };
-
-        // Insert detailed article to Supabase under global Admin user_id
-        const { error: artInsertError } = await supabase
-          .from("documents")
-          .insert({
-            user_id: GLOBAL_ADMIN_USER_ID,
-            title: art.title,
-            description: `${art.category} - ${paragraphs[0]?.substring(0, 150) || art.excerpt || ""}`,
-            type: "knowledge_transcription",
-            file_url: art.url,
-            metadata: articleMeta
-          });
-
-        if (artInsertError) {
-          console.error(`   [Error Ingesting Article]:`, artInsertError);
-        } else {
-          totalArticlesSynced++;
-          newArticlesData.push({
-            title: art.title,
-            category: art.category,
-            excerpt: paragraphs[0] || art.excerpt || ""
-          });
-        }
-      }
-
-      // B. If new articles were added, or the master summary doesn't exist yet, or PDF was newly uploaded, update Issue summary
-      if (!existingSummaryText || newArticlesData.length > 0 || pdfUpdated) {
+      // B. If the master summary doesn't exist yet or PDF was newly uploaded, update Issue summary and cover
+      if (!existingSummaryText || !issueDocId || pdfUpdated) {
         let newSummary = existingSummaryText;
-        if (!existingSummaryText || newArticlesData.length > 0) {
+        if (!existingSummaryText) {
           console.log(`[Sync Scraper] Generating Premium Master Summary for Issue ${issueSlug}...`);
-          
-          // Collate all articles of this issue for Gemini to read
           const allArticlesSummaryInput = issueData.articles.map(a => ({
             title: a.title,
             category: a.category,
@@ -958,7 +865,6 @@ async function handleSync(request: Request) {
         };
 
         if (issueDocId) {
-          // Update existing issue summary and set its PDF link while merging metadata
           await supabase
             .from("documents")
             .update({
@@ -969,7 +875,6 @@ async function handleSync(request: Request) {
             .eq("id", issueDocId);
           console.log(`[Sync Scraper] Updated summary and PDF of issue ${issueSlug} with merged metadata.`);
         } else if (!issueFetchError) {
-          // Double check to prevent race condition duplicate insertion
           const expectedTitle = formatSpanishIssueTitle(issueSlug);
           const { data: raceCheck, error: raceCheckErr } = await supabase
             .from("documents")
@@ -992,7 +897,6 @@ async function handleSync(request: Request) {
               .eq("id", issueDocId);
             console.log(`[Sync Scraper] Race condition avoided. Updated existing issue ${issueSlug}.`);
           } else {
-            // Insert new weekly issue document
             const { data: newIssueDoc, error: issueInsertError } = await supabase
               .from("documents")
               .insert({
@@ -1016,20 +920,9 @@ async function handleSync(request: Request) {
         }
       }
 
-      // Trigger page-sliced v7 transcription & 18kbps audio synthesis asynchronously to prevent Vercel Serverless timeout
-      try {
-        console.log(`[Sync Scraper] Triggering automatic v7 transcription & synthesis asynchronously for ${issueSlug}...`);
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://hivex-backend.vercel.app");
-        const secret = process.env.CRON_SECRET || "";
-        // Dispatched asynchronously without blocking the sync response
-        fetch(`${baseUrl}/api/news/transcribe?slug=${encodeURIComponent(issueSlug)}&secret=${encodeURIComponent(secret)}`, {
-          method: "GET",
-          headers: { "x-cron-secret": secret }
-        }).catch(transcribeFetchErr => {
-          console.warn(`[Sync Scraper] Async background transcription trigger notice for ${issueSlug}:`, transcribeFetchErr?.message);
-        });
-      } catch (transcribeErr: any) {
-        console.error(`[Sync Scraper] Error triggering automatic v7 transcription for ${issueSlug}:`, transcribeErr?.message || transcribeErr);
+      const isAlreadyReady = existingIssue?.audio_status === "ready" && Boolean(existingIssue?.audio_url);
+      if (!isAlreadyReady && resolvedPdfUrl && resolvedPdfUrl.includes(".supabase.co/")) {
+        pendingTranscribeSlugs.push(issueSlug);
       }
 
       syncedIssuesDetails.push({
@@ -1040,7 +933,35 @@ async function handleSync(request: Request) {
       });
     }
 
-    console.log(`[Sync Scraper] Complete. Synced ${totalArticlesSynced} articles across ${syncedIssuesDetails.length} issues.`);
+    // Also check if any existing weekly issue in DB with a valid Supabase PDF still needs v8 transcription/audio synthesis
+    for (const doc of (allWeeklyDocsLight || [])) {
+      if (doc.slug && doc.file_url?.includes(".supabase.co/") && (doc.audio_status !== "ready" || !doc.audio_url)) {
+        if (!pendingTranscribeSlugs.includes(doc.slug)) {
+          pendingTranscribeSlugs.push(doc.slug);
+        }
+      }
+    }
+
+    // 7. Execute/resume v8 TOC partition + 18kbps Aoede audio synthesis within remaining Vercel time budget
+    let transcriptionResult: any = null;
+    if (pendingTranscribeSlugs.length > 0) {
+      const targetSlug = pendingTranscribeSlugs[0];
+      const elapsedMs = Date.now() - startTime;
+      const remainingBudgetMs = Math.max(45000, 235000 - elapsedMs);
+      console.log(`[Sync Scraper] Running awaited v8 transcription & audio synthesis for ${targetSlug} (time budget: ${remainingBudgetMs}ms)...`);
+      try {
+        transcriptionResult = await processMagazineTranscribeAndSynthesis(targetSlug, false, {
+          maxRuntimeMs: remainingBudgetMs
+        });
+        if (transcriptionResult?.articleCount) {
+          totalArticlesSynced += transcriptionResult.articleCount;
+        }
+      } catch (transcribeErr: any) {
+        console.error(`[Sync Scraper] Error in v8 transcription for ${targetSlug}:`, transcribeErr?.message || transcribeErr);
+      }
+    }
+
+    console.log(`[Sync Scraper] Complete. Synced ${syncedIssuesDetails.length} issues.`);
 
     // Record execution log in database
     await recordCronExecution({
@@ -1052,6 +973,7 @@ async function handleSync(request: Request) {
       details: {
         totalIssuesProcessed: syncedIssuesDetails.length,
         totalArticlesSynced,
+        transcriptionResult,
         issues: syncedIssuesDetails
       }
     });
@@ -1061,6 +983,7 @@ async function handleSync(request: Request) {
       stats: {
         totalIssuesProcessed: syncedIssuesDetails.length,
         totalArticlesSynced,
+        transcriptionResult,
         issues: syncedIssuesDetails
       }
     });
