@@ -1,8 +1,22 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
+import { encodePcmToMp3 } from "@/lib/audio/mp3Encoder";
 
 interface SpeakRequestBody {
   text: string;
   voice?: string;
+}
+
+function getSupabaseClient() {
+  const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey =
+    process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return null;
+  return createClient(supabaseUrl, supabaseKey);
 }
 
 /**
@@ -69,12 +83,67 @@ function formatDecimalsForTTS(text: string, voice: string): string {
   }
 }
 
-// High-performance in-memory cache for synthesized audio WAV buffers
-const ttsCache = new Map<string, { wavBuffer: Buffer; successfulModel: string; createdAt: number }>();
+// High-performance in-memory cache for synthesized audio buffers
+const ttsCache = new Map<string, { audioBuffer: Buffer; contentType: string; successfulModel: string; createdAt: number }>();
 const MAX_CACHE_ENTRIES = 500;
+
+function buildAudioResponse(
+  audioBuffer: Buffer,
+  contentType: string,
+  successfulModel: string,
+  cacheStatus: string,
+  request?: Request
+): Response {
+  const rangeHeader = request?.headers?.get("range");
+  if (rangeHeader) {
+    const totalLength = audioBuffer.length;
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      let start = match[1] ? parseInt(match[1], 10) : 0;
+      let end = match[2] ? parseInt(match[2], 10) : totalLength - 1;
+      if (start >= totalLength) {
+        return new Response("", {
+          status: 416,
+          headers: { "Content-Range": `bytes */${totalLength}`, "Accept-Ranges": "bytes" }
+        });
+      }
+      if (end >= totalLength) end = totalLength - 1;
+      if (start > end) start = end;
+
+      const chunkSize = (end - start) + 1;
+      const slicedBuffer = audioBuffer.subarray(start, end + 1);
+
+      return new Response(new Uint8Array(slicedBuffer), {
+        status: 206,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Range": `bytes ${start}-${end}/${totalLength}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": String(chunkSize),
+          "X-Generated-By-Model": successfulModel,
+          "X-Cache": cacheStatus,
+          "Cache-Control": "public, max-age=31536000, immutable"
+        }
+      });
+    }
+  }
+
+  return new Response(new Uint8Array(audioBuffer), {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Accept-Ranges": "bytes",
+      "Content-Length": String(audioBuffer.length),
+      "X-Generated-By-Model": successfulModel,
+      "X-Cache": cacheStatus,
+      "Cache-Control": "public, max-age=31536000, immutable"
+    }
+  });
+}
 
 /**
  * Core speech synthesis handler supporting both GET and POST requests.
+ * Uses a 2-tier cache (1: In-memory RAM, 2: Persistent Supabase Storage) to prevent repeated Gemini TTS charges.
  */
 async function synthesizeSpeech(text: string, voice: string, request?: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -101,135 +170,125 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
     .trim();
 
   const processedText = formatDecimalsForTTS(cleanedText, voice);
-  const cacheKey = `${voice}:${processedText.trim()}`;
+  // Cap max text length to 1500 chars to avoid Gemini TTS API overload
+  const safeText = processedText.trim().substring(0, 1500);
+  const cacheKey = `${voice}:${safeText}`;
 
-  // Check in-memory cache for instantaneous 1ms response
+  // Tier 1: Check in-memory cache for instantaneous 1ms response
   if (ttsCache.has(cacheKey)) {
     const cached = ttsCache.get(cacheKey)!;
-    console.log(`[Speak API Cache HIT] Returning cached TTS for "${processedText.trim().substring(0, 30)}..." (${cached.wavBuffer.length} bytes)`);
-    
-    const rangeHeader = request?.headers?.get("range");
-    if (rangeHeader) {
-      const totalLength = cached.wavBuffer.length;
-      const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
-      if (match) {
-        let start = match[1] ? parseInt(match[1], 10) : 0;
-        let end = match[2] ? parseInt(match[2], 10) : totalLength - 1;
-        if (start >= totalLength) {
-          return new Response("", {
-            status: 416,
-            headers: { "Content-Range": `bytes */${totalLength}`, "Accept-Ranges": "bytes" }
-          });
-        }
-        if (end >= totalLength) end = totalLength - 1;
-        if (start > end) start = end;
-
-        const chunkSize = (end - start) + 1;
-        const slicedBuffer = cached.wavBuffer.subarray(start, end + 1);
-
-        return new Response(new Uint8Array(slicedBuffer), {
-          status: 206,
-          headers: {
-            "Content-Type": "audio/wav",
-            "Content-Range": `bytes ${start}-${end}/${totalLength}`,
-            "Accept-Ranges": "bytes",
-            "Content-Length": String(chunkSize),
-            "X-Generated-By-Model": cached.successfulModel,
-            "X-Cache": "HIT",
-            "Cache-Control": "public, max-age=31536000, immutable"
-          }
-        });
-      }
-    }
-
-    return new Response(new Uint8Array(cached.wavBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "audio/wav",
-        "Accept-Ranges": "bytes",
-        "Content-Length": String(cached.wavBuffer.length),
-        "X-Generated-By-Model": cached.successfulModel,
-        "X-Cache": "HIT",
-        "Cache-Control": "public, max-age=31536000, immutable"
-      }
-    });
+    console.log(`[Speak API Memory Cache HIT] Returning cached TTS for "${safeText.substring(0, 30)}..." (${cached.audioBuffer.length} bytes)`);
+    return buildAudioResponse(cached.audioBuffer, cached.contentType, cached.successfulModel, "MEMORY-HIT", request);
   }
 
-  // Sequence of dedicated Gemini TTS models (gemini-3.1-flash-tts-preview first for ~2.5s rapid synthesis)
+  // Tier 2: Check persistent Supabase Storage cache so serverless cold starts never re-bill Gemini TTS
+  const textHash = crypto.createHash("sha256").update(cacheKey).digest("hex");
+  const safeVoice = voice.replace(/[^a-zA-Z0-9_-]/g, "") || "Charon";
+  const storagePath = `tts_cache/${safeVoice}_${textHash}.mp3`;
+  const supabase = getSupabaseClient();
+
+  if (supabase) {
+    try {
+      const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(storagePath);
+      if (!dlErr && blob) {
+        const storedBuffer = Buffer.from(await blob.arrayBuffer());
+        if (storedBuffer.length > 200) {
+          if (ttsCache.size >= MAX_CACHE_ENTRIES) {
+            const oldestKey = ttsCache.keys().next().value;
+            if (oldestKey) ttsCache.delete(oldestKey);
+          }
+          ttsCache.set(cacheKey, {
+            audioBuffer: storedBuffer,
+            contentType: "audio/mpeg",
+            successfulModel: "supabase-storage-cache",
+            createdAt: Date.now()
+          });
+          console.log(`[Speak API Supabase Cache HIT] Serving persisted MP3 (${storedBuffer.length} bytes) for "${safeText.substring(0, 30)}..."`);
+          return buildAudioResponse(storedBuffer, "audio/mpeg", "supabase-storage-cache", "SUPABASE-HIT", request);
+        }
+      }
+    } catch (_) {
+      // Proceed to synthesis on storage cache miss
+    }
+  }
+
+  // Sequence of dedicated Flash Gemini TTS models (excluding expensive Pro TTS to minimize cost)
   const models = [
     "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts",
-    "gemini-2.5-pro-preview-tts"
+    "gemini-2.5-flash-preview-tts"
   ];
 
   let base64Audio = "";
   let successfulModel = "";
   const errorDetails: string[] = [];
 
-  // Cap max text length to 1500 chars to avoid Gemini TTS API overload
-  const safeText = processedText.trim().substring(0, 1500);
-
-  // Attempt generation sequentially with per-fetch timeout guard
+  // Attempt generation sequentially with per-fetch timeout guard and retry on rate limit
   for (const model of models) {
-    try {
-      console.log(`[Speak API] Trying model: ${model} with voice: ${voice} (text length: ${safeText.length})`);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        console.log(`[Speak API] Trying model: ${model} (attempt ${attempt + 1}) with voice: ${voice} (text length: ${safeText.length})`);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-      const payload = {
-        contents: [
-          {
-            parts: [
-              {
-                text: safeText
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voice
+        const payload = {
+          contents: [
+            {
+              parts: [
+                {
+                  text: safeText
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: voice
+                }
               }
             }
           }
-        }
-      };
+        };
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 18000);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 18000);
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const data = await response.json();
-        const part = data.candidates?.[0]?.content?.parts?.[0];
-        
-        if (part?.inlineData?.data) {
-          base64Audio = part.inlineData.data;
-          successfulModel = model;
-          console.log(`[Speak API] Generation successful with model ${model}! Base64 length: ${base64Audio.length}`);
-          break;
+        if (response.ok) {
+          const data = await response.json();
+          const part = data.candidates?.[0]?.content?.parts?.[0];
+          
+          if (part?.inlineData?.data) {
+            base64Audio = part.inlineData.data;
+            successfulModel = model;
+            console.log(`[Speak API] Generation successful with model ${model}! Base64 length: ${base64Audio.length}`);
+            break;
+          } else {
+            errorDetails.push(`${model}: No se encontraron datos binarios (inlineData) en la respuesta.`);
+          }
         } else {
-          errorDetails.push(`${model}: No se encontraron datos binarios (inlineData) en la respuesta.`);
+          const errText = await response.text();
+          errorDetails.push(`${model} (HTTP ${response.status}): ${errText.substring(0, 200)}`);
+          if (response.status === 429 || response.status === 503) {
+            await new Promise((r) => setTimeout(r, (attempt + 1) * 1200));
+          }
         }
-      } else {
-        const errText = await response.text();
-        errorDetails.push(`${model} (HTTP ${response.status}): ${errText.substring(0, 200)}`);
+      } catch (err: any) {
+        errorDetails.push(`${model} (Excepción): ${err?.message || err}`);
       }
-    } catch (err: any) {
-      errorDetails.push(`${model} (Excepción): ${err?.message || err}`);
     }
+    if (base64Audio) break;
   }
 
   if (!base64Audio) {
@@ -247,74 +306,32 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
   // Decode base64 PCM to raw binary Buffer
   const pcmBuffer = Buffer.from(base64Audio, "base64");
 
-  // Package the raw signed 16-bit 24kHz linear PCM data with a 44-byte standard RIFF/WAV header
-  const wavBuffer = addWavHeader(pcmBuffer, 24000, 1, 16);
+  // Compress raw 24kHz 16-bit mono PCM to lightweight 48kbps MP3 (fallback to WAV if encoding fails)
+  let finalBuffer: Buffer;
+  let contentType = "audio/mpeg";
+  try {
+    finalBuffer = encodePcmToMp3(pcmBuffer, 24000, 48);
+  } catch (_) {
+    finalBuffer = addWavHeader(pcmBuffer, 24000, 1, 16);
+    contentType = "audio/wav";
+  }
 
-  // Store in-memory cache for fast repeated reads
+  // Store in Tier 1 (in-memory cache)
   if (ttsCache.size >= MAX_CACHE_ENTRIES) {
     const oldestKey = ttsCache.keys().next().value;
     if (oldestKey) ttsCache.delete(oldestKey);
   }
-  ttsCache.set(cacheKey, { wavBuffer, successfulModel, createdAt: Date.now() });
+  ttsCache.set(cacheKey, { audioBuffer: finalBuffer, contentType, successfulModel, createdAt: Date.now() });
 
-  const rangeHeader = request?.headers?.get("range");
-  if (rangeHeader) {
-    const totalLength = wavBuffer.length;
-    // Format: "bytes=start-end"
-    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
-    if (match) {
-      const startStr = match[1];
-      const endStr = match[2];
-
-      let start = startStr ? parseInt(startStr, 10) : 0;
-      let end = endStr ? parseInt(endStr, 10) : totalLength - 1;
-
-      if (start >= totalLength) {
-        return new Response("", {
-          status: 416,
-          headers: {
-            "Content-Range": `bytes */${totalLength}`,
-            "Accept-Ranges": "bytes"
-          }
-        });
-      }
-
-      if (end >= totalLength) {
-        end = totalLength - 1;
-      }
-
-      if (start > end) {
-        start = end;
-      }
-
-      const chunkSize = (end - start) + 1;
-      const slicedBuffer = wavBuffer.subarray(start, end + 1);
-
-      return new Response(new Uint8Array(slicedBuffer), {
-        status: 206,
-        headers: {
-          "Content-Type": "audio/wav",
-          "Content-Range": `bytes ${start}-${end}/${totalLength}`,
-          "Accept-Ranges": "bytes",
-          "Content-Length": String(chunkSize),
-          "X-Generated-By-Model": successfulModel,
-          "Cache-Control": "public, max-age=31536000, immutable"
-        }
-      });
-    }
+  // Store in Tier 2 (persistent Supabase Storage) asynchronously so we never re-synthesize this sentence
+  if (supabase && contentType === "audio/mpeg") {
+    supabase.storage
+      .from("documents")
+      .upload(storagePath, finalBuffer, { contentType: "audio/mpeg", upsert: true })
+      .catch((err: any) => console.warn("[Speak API] Non-blocking Supabase cache upload warning:", err?.message || err));
   }
 
-  // Return the response as binary stream playable natively by browser Audio element
-  return new Response(new Uint8Array(wavBuffer), {
-    status: 200,
-    headers: {
-      "Content-Type": "audio/wav",
-      "Accept-Ranges": "bytes",
-      "Content-Length": String(wavBuffer.length),
-      "X-Generated-By-Model": successfulModel,
-      "Cache-Control": "public, max-age=31536000, immutable" // Highly cacheable summaries
-    }
-  });
+  return buildAudioResponse(finalBuffer, contentType, successfulModel, "MISS", request);
 }
 
 export async function POST(request: Request) {

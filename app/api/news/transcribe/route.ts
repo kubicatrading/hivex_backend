@@ -31,8 +31,7 @@ const MAJOR_SECTIONS = [
 
 const TTS_MODELS = [
   "gemini-2.5-flash-preview-tts",
-  "gemini-3.1-flash-tts-preview",
-  "gemini-2.5-pro-preview-tts"
+  "gemini-3.1-flash-tts-preview"
 ];
 
 function cleanPageText(rawPage: string): string {

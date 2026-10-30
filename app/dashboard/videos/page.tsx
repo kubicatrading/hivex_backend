@@ -2153,15 +2153,22 @@ export default function VideosPage() {
   };
 
   const ensureLookaheadWindow = (currentIndex: number, mode: 'summary' | 'report') => {
-    // Sliding lookahead window: pre-load the next 3 sentences concurrently
-    for (let offset = 0; offset <= 3; offset++) {
+    if (!activeStudyVideo?.id) return;
+    const voiceName = getVoiceNameFromId(selectedVoiceIdRef.current);
+    const lang = selectedLanguageRef.current || "en";
+    const cacheKey = `${activeStudyVideo.id}_${mode}_${voiceName}_${lang}`;
+    // If consolidated track is already cached in Supabase Storage, no individual sentence TTS calls are needed
+    if (cachedAudioTracksRef.current[cacheKey]?.audioUrl) return;
+
+    // Sliding lookahead window: pre-load current + next sentence while full track consolidates
+    for (let offset = 0; offset <= 1; offset++) {
       const idx = currentIndex + offset;
       prefetchSentenceAudio(idx, mode);
     }
   };
 
-  // Background volatile cache pre-warmer: initiates synthesis of full track to Supabase Storage
-  const startBackgroundPreloadingForActiveTrack = (_specificIndex?: number) => {
+  // Persistent cache pre-warmer: checks or initiates synthesis of full track to Supabase Storage
+  const startBackgroundPreloadingForActiveTrack = (_specificIndex?: number, checkOnly = false) => {
     if (!activeStudyVideo?.id) return;
     const mode = activeAudioModeRef.current;
     const isReport = mode === 'report';
@@ -2173,10 +2180,10 @@ export default function VideosPage() {
     const cacheKey = `${activeStudyVideo.id}_${mode}_${voiceName}_${lang}`;
 
     if (cachedAudioTracksRef.current[cacheKey]) return; // Already loaded!
-    if (isSynthesizingRef.current[cacheKey]) return; // In-flight!
-    isSynthesizingRef.current[cacheKey] = true;
-
-    console.log(`[Cached Audio Preloader] Background pre-warming volatile cache for ${cacheKey}...`);
+    if (!checkOnly && isSynthesizingRef.current[cacheKey]) return; // Synthesis already in-flight!
+    if (!checkOnly) {
+      isSynthesizingRef.current[cacheKey] = true;
+    }
 
     fetch("/api/videos/cached-audio", {
       method: "POST",
@@ -2186,7 +2193,8 @@ export default function VideosPage() {
         track: mode,
         voice: voiceName,
         language: lang,
-        sentences: chunks
+        sentences: checkOnly ? undefined : chunks,
+        checkOnly
       })
     })
       .then((res) => res.json())
@@ -2204,7 +2212,9 @@ export default function VideosPage() {
         console.warn("[Cached Audio Preloader] Background fetch warning:", err);
       })
       .finally(() => {
-        isSynthesizingRef.current[cacheKey] = false;
+        if (!checkOnly) {
+          isSynthesizingRef.current[cacheKey] = false;
+        }
       });
   };
 
@@ -2931,12 +2941,12 @@ export default function VideosPage() {
     setActiveSentenceIndex(targetIdx);
     activeSentenceIndexRef.current = targetIdx;
 
-    // Prioritize background preloading starting from the new seek position
-    startBackgroundPreloadingForActiveTrack(targetIdx);
-    ensureLookaheadWindow(targetIdx, 'summary');
-
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
+      startBackgroundPreloadingForActiveTrack(targetIdx, false);
+      ensureLookaheadWindow(targetIdx, 'summary');
       playGeminiSentence(targetIdx);
+    } else {
+      startBackgroundPreloadingForActiveTrack(targetIdx, true);
     }
   };
 
@@ -2951,12 +2961,12 @@ export default function VideosPage() {
     setReportActiveSentenceIndex(targetIdx);
     reportActiveSentenceIndexRef.current = targetIdx;
 
-    // Prioritize background preloading starting from the new seek position
-    startBackgroundPreloadingForActiveTrack(targetIdx);
-    ensureLookaheadWindow(targetIdx, 'report');
-
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
+      startBackgroundPreloadingForActiveTrack(targetIdx, false);
+      ensureLookaheadWindow(targetIdx, 'report');
       playGeminiSentence(targetIdx);
+    } else {
+      startBackgroundPreloadingForActiveTrack(targetIdx, true);
     }
   };
 
@@ -2982,7 +2992,7 @@ export default function VideosPage() {
       }
 
       // Prioritize background preloading starting from the clicked sentence
-      startBackgroundPreloadingForActiveTrack(index);
+      startBackgroundPreloadingForActiveTrack(index, false);
 
       playGeminiSentence(index);
     }
@@ -3009,13 +3019,14 @@ export default function VideosPage() {
     }
     clearPreloadedBlobUrls();
 
-    startBackgroundPreloadingForActiveTrack();
-
-    // If already playing and not paused, apply change immediately
+    // If already playing and not paused, apply change and synthesize immediately; otherwise only check cache
     if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
+      startBackgroundPreloadingForActiveTrack(undefined, false);
       const isReport = activeAudioModeRef.current === 'report';
       const activeIndexRef = isReport ? reportActiveSentenceIndexRef : activeSentenceIndexRef;
       playGeminiSentence(activeIndexRef.current >= 0 ? activeIndexRef.current : 0);
+    } else {
+      startBackgroundPreloadingForActiveTrack(undefined, true);
     }
   };
 
@@ -3140,9 +3151,13 @@ export default function VideosPage() {
       }
     }
 
-    // Trigger prioritized background preloading and pre-buffering for the active track
-    startBackgroundPreloadingForActiveTrack();
-    ensureLookaheadWindow(0, activeAudioModeRef.current);
+    // Only check Supabase Storage cache passively on load/selection (0 Gemini TTS calls until user clicks Play)
+    if (isPlayingAudioRef.current && !isPausedAudioRef.current) {
+      startBackgroundPreloadingForActiveTrack(undefined, false);
+      ensureLookaheadWindow(0, activeAudioModeRef.current);
+    } else {
+      startBackgroundPreloadingForActiveTrack(undefined, true);
+    }
   }, [activeStudyVideo, selectedLanguage, transcriptionStates, translationsCache]);
 
   // Trigger translation automatically when video, selected language, or original transcription changes

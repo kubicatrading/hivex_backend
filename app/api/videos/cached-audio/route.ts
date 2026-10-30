@@ -9,7 +9,8 @@ interface CachedAudioRequestBody {
   track: "summary" | "report";
   voice?: string;
   language?: string;
-  sentences: string[];
+  sentences?: string[];
+  checkOnly?: boolean;
 }
 
 interface SentenceTimestamp {
@@ -70,18 +71,17 @@ function groupSentencesIntoBlocks(sentences: string[], maxCharsPerBlock = 1200):
 }
 
 /**
- * Synthesizes speech for a text block using Gemini TTS models with fallback.
+ * Synthesizes speech for a text block using Gemini Flash TTS models with retry backoff.
  */
 async function synthesizeBlock(text: string, voice: string, apiKey: string): Promise<Buffer> {
   const models = [
     "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts",
-    "gemini-2.5-pro-preview-tts"
+    "gemini-2.5-flash-preview-tts"
   ];
   const processed = formatDecimalsForTTS(text).substring(0, 1500);
 
   for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
         const payload = {
@@ -97,7 +97,7 @@ async function synthesizeBlock(text: string, voice: string, apiKey: string): Pro
         };
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 16000);
+        const timeoutId = setTimeout(() => controller.abort(), 18000);
 
         const res = await fetch(url, {
           method: "POST",
@@ -114,9 +114,14 @@ async function synthesizeBlock(text: string, voice: string, apiKey: string): Pro
           if (base64Data) {
             return Buffer.from(base64Data, "base64");
           }
+        } else if (res.status === 429 || res.status === 503) {
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 1500));
         }
       } catch (err: any) {
         console.warn(`[Cached Audio] Model ${model} failed (attempt ${attempt + 1}):`, err?.message || err);
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, (attempt + 1) * 1000));
+        }
       }
     }
   }
@@ -126,47 +131,8 @@ async function synthesizeBlock(text: string, voice: string, apiKey: string): Pro
   return Buffer.alloc(estimatedSec * 48000);
 }
 
-/**
- * Volatile cache cleaner: ensures videos_cache folder stays clean (<24 hours old, max 35 files).
- */
-async function triggerVolatileCacheCleanup(supabase: any) {
-  try {
-    const { data: files, error } = await supabase.storage.from("documents").list("videos_cache", {
-      limit: 100,
-      sortBy: { column: "created_at", order: "asc" }
-    });
-
-    if (error || !files || files.length === 0) return;
-
-    const now = Date.now();
-    const oneDayMs = 24 * 60 * 60 * 1000;
-    const toDelete: string[] = [];
-
-    // 1. Files older than 24 hours
-    files.forEach((f: any) => {
-      if (f.created_at) {
-        const fileAge = now - new Date(f.created_at).getTime();
-        if (fileAge > oneDayMs) {
-          toDelete.push(`videos_cache/${f.name}`);
-        }
-      }
-    });
-
-    // 2. LRU: If still more than 35 files, purge oldest
-    const remaining = files.filter((f: any) => !toDelete.includes(`videos_cache/${f.name}`));
-    if (remaining.length > 35) {
-      const excess = remaining.slice(0, remaining.length - 30);
-      excess.forEach((f: any) => toDelete.push(`videos_cache/${f.name}`));
-    }
-
-    if (toDelete.length > 0) {
-      console.log(`[Cached Audio Volatile Cleanup] Purging ${toDelete.length} expired cache files from Supabase Storage`);
-      await supabase.storage.from("documents").remove(toDelete);
-    }
-  } catch (err) {
-    console.warn("[Cached Audio Volatile Cleanup] Non-blocking cleanup warning:", err);
-  }
-}
+// In-flight deduplication map to prevent concurrent duplicate syntheses of the same track
+const inFlightTrackPromises = new Map<string, Promise<any>>();
 
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -188,10 +154,10 @@ export async function POST(request: Request) {
 
   try {
     const body: CachedAudioRequestBody = await request.json();
-    const { videoId, track, voice = "Aoede", language = "en", sentences } = body;
+    const { videoId, track, voice = "Aoede", language = "en", sentences = [], checkOnly = false } = body;
 
-    if (!videoId || !track || !Array.isArray(sentences) || sentences.length === 0) {
-      return NextResponse.json({ success: false, error: "Parámetros requeridos inválidos (videoId, track, sentences)." }, { status: 400 });
+    if (!videoId || !track) {
+      return NextResponse.json({ success: false, error: "Parámetros requeridos inválidos (videoId, track)." }, { status: 400 });
     }
 
     const safeVideoId = videoId.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -199,7 +165,7 @@ export async function POST(request: Request) {
     const mp3StoragePath = `videos_cache/${baseKey}.mp3`;
     const jsonStoragePath = `videos_cache/${baseKey}.json`;
 
-    // 1. Check if volatile cache already has this audio ready (< 24 hours)
+    // 1. Check if persistent Supabase Storage cache already has this audio ready
     try {
       const { data: jsonBlob, error: jsonErr } = await supabase.storage.from("documents").download(jsonStoragePath);
       if (!jsonErr && jsonBlob) {
@@ -207,10 +173,11 @@ export async function POST(request: Request) {
         const cachedMeta = JSON.parse(jsonText);
 
         const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(mp3StoragePath);
-        console.log(`[Cached Audio API] Volatile Cache HIT for ${baseKey}! Serving instant URL.`);
+        console.log(`[Cached Audio API] Persistent Cache HIT for ${baseKey}! Serving instant URL.`);
 
         return NextResponse.json({
           success: true,
+          cached: true,
           audioUrl: publicUrlData.publicUrl,
           sentenceTimestamps: cachedMeta.sentenceTimestamps,
           totalDuration: cachedMeta.totalDuration,
@@ -218,95 +185,131 @@ export async function POST(request: Request) {
         });
       }
     } catch (_) {
-      // If download fails or json is corrupt, proceed to fresh synthesis
+      // If download fails or json is corrupt, proceed to checkOnly response or fresh synthesis
     }
 
-    console.log(`[Cached Audio API] Volatile Cache MISS for ${baseKey}. Synthesizing ${sentences.length} sentences on-demand...`);
+    // Passive check mode: return without calling Gemini TTS if not yet cached
+    if (checkOnly) {
+      return NextResponse.json({
+        success: true,
+        cached: false,
+        fromCache: false
+      });
+    }
 
-    // 2. Group into optimal blocks (~1200 chars)
-    const blocks = groupSentencesIntoBlocks(sentences, 1200);
+    if (!Array.isArray(sentences) || sentences.length === 0) {
+      return NextResponse.json({ success: false, error: "Se requieren 'sentences' para sintetizar la pista." }, { status: 400 });
+    }
 
-    // 3. Synthesize blocks concurrently in parallel
-    const pcmPromises = blocks.map((b) => synthesizeBlock(b.blockText, voice, apiKey));
-    const pcmBuffers = await Promise.all(pcmPromises);
+    // Deduplicate concurrent synthesis requests for the same baseKey
+    if (inFlightTrackPromises.has(baseKey)) {
+      const sharedResult = await inFlightTrackPromises.get(baseKey);
+      return NextResponse.json(sharedResult);
+    }
 
-    // 4. Calculate exact proportional sentence timestamps
-    const timestamps: SentenceTimestamp[] = [];
-    let cumulativeOffset = 0;
-    let globalSentenceIdx = 0;
+    const synthesisTask = (async () => {
+      console.log(`[Cached Audio API] Persistent Cache MISS for ${baseKey}. Synthesizing ${sentences.length} sentences on-demand...`);
 
-    for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
-      const block = blocks[bIdx];
-      const pcm = pcmBuffers[bIdx];
-      const blockDurationSec = pcm.length / 48000; // 24kHz * 16-bit mono = 48000 bytes/sec
-      const totalBlockChars = block.sentences.reduce((acc, s) => acc + s.length, 0);
+      // 2. Group into optimal blocks (~1200 chars)
+      const blocks = groupSentencesIntoBlocks(sentences, 1200);
 
-      let currentBlockTime = cumulativeOffset;
-      block.sentences.forEach((s) => {
-        const prop = totalBlockChars > 0 ? s.length / totalBlockChars : 1 / block.sentences.length;
-        const sDuration = blockDurationSec * prop;
-        const startTime = Number(currentBlockTime.toFixed(2));
-        const endTime = Number((currentBlockTime + sDuration).toFixed(2));
+      // 3. Synthesize blocks in controlled batches of 3 to avoid HTTP 429 rate-limit cascades
+      const pcmBuffers: Buffer[] = new Array(blocks.length);
+      const BATCH_SIZE = 3;
+      for (let i = 0; i < blocks.length; i += BATCH_SIZE) {
+        const slice = blocks.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          slice.map((b) => synthesizeBlock(b.blockText, voice, apiKey))
+        );
+        batchResults.forEach((buf, idx) => {
+          pcmBuffers[i + idx] = buf;
+        });
+      }
 
-        timestamps.push({
-          sentenceIdx: globalSentenceIdx,
-          text: s,
-          startTime,
-          endTime
+      // 4. Calculate exact proportional sentence timestamps
+      const timestamps: SentenceTimestamp[] = [];
+      let cumulativeOffset = 0;
+      let globalSentenceIdx = 0;
+
+      for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
+        const block = blocks[bIdx];
+        const pcm = pcmBuffers[bIdx];
+        const blockDurationSec = pcm.length / 48000; // 24kHz * 16-bit mono = 48000 bytes/sec
+        const totalBlockChars = block.sentences.reduce((acc, s) => acc + s.length, 0);
+
+        let currentBlockTime = cumulativeOffset;
+        block.sentences.forEach((s) => {
+          const prop = totalBlockChars > 0 ? s.length / totalBlockChars : 1 / block.sentences.length;
+          const sDuration = blockDurationSec * prop;
+          const startTime = Number(currentBlockTime.toFixed(2));
+          const endTime = Number((currentBlockTime + sDuration).toFixed(2));
+
+          timestamps.push({
+            sentenceIdx: globalSentenceIdx,
+            text: s,
+            startTime,
+            endTime
+          });
+
+          globalSentenceIdx++;
+          currentBlockTime += sDuration;
         });
 
-        globalSentenceIdx++;
-        currentBlockTime += sDuration;
+        cumulativeOffset += blockDurationSec;
+      }
+
+      // 5. Concatenate and compress PCM to lightweight MP3 (48kbps mono ~400 KB - 1.5 MB)
+      const fullPcm = Buffer.concat(pcmBuffers);
+      const mp3Buffer = encodePcmToMp3(fullPcm, 24000, 48);
+
+      // 6. Upload MP3 and JSON metadata permanently to Supabase Storage in videos_cache/
+      const { error: mp3UploadErr } = await supabase.storage.from("documents").upload(mp3StoragePath, mp3Buffer, {
+        contentType: "audio/mpeg",
+        upsert: true
       });
 
-      cumulativeOffset += blockDurationSec;
+      if (mp3UploadErr) {
+        console.error("[Cached Audio API] Failed to upload MP3 to Supabase Storage:", mp3UploadErr);
+        throw new Error(`Error al subir MP3 a Supabase: ${mp3UploadErr.message}`);
+      }
+
+      const metadataPayload = {
+        videoId,
+        track,
+        voice,
+        language,
+        totalDuration: Number(cumulativeOffset.toFixed(2)),
+        sentenceTimestamps: timestamps,
+        createdAt: new Date().toISOString()
+      };
+
+      await supabase.storage.from("documents").upload(
+        jsonStoragePath,
+        Buffer.from(JSON.stringify(metadataPayload), "utf-8"),
+        { contentType: "application/json", upsert: true }
+      );
+
+      const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(mp3StoragePath);
+
+      console.log(`[Cached Audio API] Completed persistent synthesis for ${baseKey} (${Number(cumulativeOffset.toFixed(1))}s, ${mp3Buffer.length} bytes)`);
+
+      return {
+        success: true,
+        cached: true,
+        audioUrl: publicUrlData.publicUrl,
+        sentenceTimestamps: timestamps,
+        totalDuration: Number(cumulativeOffset.toFixed(2)),
+        fromCache: false
+      };
+    })();
+
+    inFlightTrackPromises.set(baseKey, synthesisTask);
+    try {
+      const result = await synthesisTask;
+      return NextResponse.json(result);
+    } finally {
+      inFlightTrackPromises.delete(baseKey);
     }
-
-    // 5. Concatenate and compress PCM to lightweight MP3 (48kbps mono ~1-2 MB)
-    const fullPcm = Buffer.concat(pcmBuffers);
-    const mp3Buffer = encodePcmToMp3(fullPcm, 24000, 48);
-
-    // 6. Upload MP3 and JSON metadata to Supabase Storage in videos_cache/
-    const { error: mp3UploadErr } = await supabase.storage.from("documents").upload(mp3StoragePath, mp3Buffer, {
-      contentType: "audio/mpeg",
-      upsert: true
-    });
-
-    if (mp3UploadErr) {
-      console.error("[Cached Audio API] Failed to upload MP3 to Supabase Storage:", mp3UploadErr);
-      throw new Error(`Error al subir MP3 a Supabase: ${mp3UploadErr.message}`);
-    }
-
-    const metadataPayload = {
-      videoId,
-      track,
-      voice,
-      language,
-      totalDuration: Number(cumulativeOffset.toFixed(2)),
-      sentenceTimestamps: timestamps,
-      createdAt: new Date().toISOString()
-    };
-
-    await supabase.storage.from("documents").upload(
-      jsonStoragePath,
-      Buffer.from(JSON.stringify(metadataPayload), "utf-8"),
-      { contentType: "application/json", upsert: true }
-    );
-
-    const { data: publicUrlData } = supabase.storage.from("documents").getPublicUrl(mp3StoragePath);
-
-    // 7. Non-blocking trigger of volatile cache cleanup
-    triggerVolatileCacheCleanup(supabase).catch(() => {});
-
-    console.log(`[Cached Audio API] Completed on-demand synthesis for ${baseKey} (${Number(cumulativeOffset.toFixed(1))}s, ${mp3Buffer.length} bytes)`);
-
-    return NextResponse.json({
-      success: true,
-      audioUrl: publicUrlData.publicUrl,
-      sentenceTimestamps: timestamps,
-      totalDuration: Number(cumulativeOffset.toFixed(2)),
-      fromCache: false
-    });
   } catch (err: any) {
     console.error("[Cached Audio API] Error synthesizing cached audio:", err);
     return NextResponse.json({ success: false, error: err.message || "Error interno al sintetizar audio." }, { status: 500 });

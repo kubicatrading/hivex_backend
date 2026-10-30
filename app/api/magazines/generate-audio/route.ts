@@ -101,8 +101,7 @@ function groupSentencesIntoBlocks(sentences: string[], maxCharsPerBlock = 1000):
 async function synthesizeChunk(text: string, voice: string, apiKey: string): Promise<Buffer> {
   const models = [
     "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts",
-    "gemini-2.5-pro-preview-tts"
+    "gemini-2.5-flash-preview-tts"
   ];
   const safeText = text.substring(0, 1500);
 
