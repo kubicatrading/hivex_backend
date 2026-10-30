@@ -471,10 +471,6 @@ ${JSON.stringify(videoContexts, null, 2)}
       name: "Google AI Studio Gemini 1.5 Flash (v1beta)",
       url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
     },
-    {
-      name: "Google AI Studio Gemini 2.5 Pro (v1beta)",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${apiKey}`,
-    },
   ];
 
   let reportContent = "";
