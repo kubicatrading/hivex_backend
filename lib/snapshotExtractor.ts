@@ -154,7 +154,7 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
 
     let json: any = null;
     for (const modelName of modelsToTry) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`;
       try {
         const response = await fetch(url, {
           method: "POST",

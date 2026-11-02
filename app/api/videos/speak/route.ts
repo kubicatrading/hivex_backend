@@ -226,12 +226,13 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        console.log(`[Speak API] Trying model: ${model} (attempt ${attempt + 1}) with voice: ${voice} (text length: ${safeText.length})`);
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        console.log(`[Speak API] Trying Vertex AI model: ${model} (attempt ${attempt + 1}) with voice: ${voice} (text length: ${safeText.length})`);
+        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
 
         const payload = {
           contents: [
             {
+              role: "user",
               parts: [
                 {
                   text: safeText

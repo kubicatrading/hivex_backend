@@ -266,14 +266,14 @@ async function generateAIEditorialSummary(articles: { title: string; category: s
   ];
 
   for (const modelName of modelsToTry) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`;
     try {
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: promptText }] }],
-          system_instruction: {
+          systemInstruction: {
             parts: [{ text: "You are an elite financial news editor. Replicate a clean, highly narrative-driven macroeconomic summary of the week." }]
           },
           generationConfig: { temperature: 0.25, maxOutputTokens: 2048 }

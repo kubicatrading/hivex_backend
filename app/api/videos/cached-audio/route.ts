@@ -83,9 +83,9 @@ async function synthesizeBlock(text: string, voice: string, apiKey: string): Pro
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
         const payload = {
-          contents: [{ parts: [{ text: processed }] }],
+          contents: [{ role: "user", parts: [{ text: processed }] }],
           generationConfig: {
             responseModalities: ["AUDIO"],
             speechConfig: {

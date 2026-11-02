@@ -511,49 +511,49 @@ ${rawTranscriptText}`;
 
   const attempts = [
     {
-      name: "Google AI Studio Gemini 4.0 Argon (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent`
+      name: "Vertex AI Gemini 4.0 Argon (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 3.8 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent`
+      name: "Vertex AI Gemini 3.8 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 3.7 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent`
+      name: "Vertex AI Gemini 3.7 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 3.6 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent`
+      name: "Vertex AI Gemini 3.6 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 3.5 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`
+      name: "Vertex AI Gemini 3.5 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 3.0 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent`
+      name: "Vertex AI Gemini 3.0 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 2.5 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+      name: "Vertex AI Gemini 2.5 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 2.0 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
+      name: "Vertex AI Gemini 2.0 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent`
     },
     {
-      name: "Google AI Studio Gemini 1.5 Flash (v1beta)",
-      type: "google-ai",
-      url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`
+      name: "Vertex AI Gemini 1.5 Flash (v1beta1)",
+      type: "vertex",
+      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent`
     }
   ];
 
@@ -570,9 +570,9 @@ ${rawTranscriptText}`;
         "Content-Type": "application/json"
       };
 
-      if (attempt.type === "google-ai" && apiKey) {
+      if (apiKey) {
         requestUrl = `${attempt.url}?key=${apiKey}`;
-        console.log(`Transcription: Using local GEMINI_API_KEY for ${attempt.name}`);
+        console.log(`Transcription: Using Vertex AI Express API Key for ${attempt.name}`);
       } else if (googleToken) {
         headers["Authorization"] = `Bearer ${googleToken}`;
       } else {
@@ -588,6 +588,9 @@ ${rawTranscriptText}`;
             parts: [{ text: promptText }]
           }
         ],
+        systemInstruction: {
+          parts: [{ text: currentSystemInstruction }]
+        },
         generationConfig: {
           temperature: 0.2,
           responseMimeType: "application/json",
@@ -597,16 +600,6 @@ ${rawTranscriptText}`;
           }
         }
       };
-
-      if (attempt.type === "google-ai") {
-        payload.system_instruction = {
-          parts: [{ text: currentSystemInstruction }]
-        };
-      } else {
-        payload.systemInstruction = {
-          parts: [{ text: currentSystemInstruction }]
-        };
-      }
 
       const response = await fetch(requestUrl, {
         method: "POST",

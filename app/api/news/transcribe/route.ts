@@ -190,7 +190,7 @@ ${tocText}`;
   let lastStatus = 0;
   for (const modelName of modelsToTry) {
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+      const res = await fetch(`https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -220,7 +220,7 @@ ${tocText}`;
 async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): Promise<Buffer> {
   const promptText = `Please read aloud clearly in American English:\n\n${text}`;
   const payload = {
-    contents: [{ parts: [{ text: promptText }] }],
+    contents: [{ role: "user", parts: [{ text: promptText }] }],
     generationConfig: {
       responseModalities: ["AUDIO"],
       speechConfig: {
@@ -233,7 +233,7 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const model = TTS_MODELS[attempt % TTS_MODELS.length];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
 
     try {
       const res = await fetch(url, {

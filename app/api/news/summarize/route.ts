@@ -95,15 +95,15 @@ ${textToSummarize}`;
 
     for (const modelName of modelsToTry) {
       try {
-        console.log(`[News Summarize API] Querying model ${modelName}...`);
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+        console.log(`[News Summarize API] Querying Vertex AI model ${modelName}...`);
+        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`;
 
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: promptText }] }],
-            system_instruction: {
+            systemInstruction: {
               parts: [{ text: "You are an elite financial editor. Produce a beautifully formatted Markdown detailed summary for institutional investors." }]
             },
             generationConfig: { temperature: 0.2, maxOutputTokens: 8192 }

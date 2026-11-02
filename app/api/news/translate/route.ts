@@ -5,40 +5,40 @@ const SYSTEM_INSTRUCTION = `Eres un traductor profesional de élite especializad
 
 const ATTEMPTS = [
   {
-    name: "Google AI Studio Gemini 4.0 Argon",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-4.0-argon:generateContent"
+    name: "Vertex AI Gemini 4.0 Argon",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 3.8 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
+    name: "Vertex AI Gemini 3.8 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 3.7 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+    name: "Vertex AI Gemini 3.7 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 3.6 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+    name: "Vertex AI Gemini 3.6 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 3.5 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    name: "Vertex AI Gemini 3.5 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 3.0 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent"
+    name: "Vertex AI Gemini 3.0 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 2.5 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    name: "Vertex AI Gemini 2.5 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 2.0 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    name: "Vertex AI Gemini 2.0 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent"
   },
   {
-    name: "Google AI Studio Gemini 1.5 Flash",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    name: "Vertex AI Gemini 1.5 Flash",
+    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent"
   }
 ];
 
@@ -52,7 +52,7 @@ async function translateTextWithGemini(prompt: string, apiKey: string): Promise<
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
           generationConfig: { temperature: 0.1, maxOutputTokens: 8192 }
         })
       });
