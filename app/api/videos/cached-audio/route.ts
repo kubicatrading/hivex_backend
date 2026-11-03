@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { encodePcmToMp3 } from "@/lib/audio/mp3Encoder";
+import { VERTEX_CASCADE_TTS, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const maxDuration = 60; // 60 seconds serverless execution ceiling
 
@@ -74,16 +75,13 @@ function groupSentencesIntoBlocks(sentences: string[], maxCharsPerBlock = 1200):
  * Synthesizes speech for a text block using Gemini Flash TTS models with retry backoff.
  */
 async function synthesizeBlock(text: string, voice: string, apiKey: string): Promise<Buffer> {
-  const models = [
-    "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts"
-  ];
+  const models = VERTEX_CASCADE_TTS;
   const processed = formatDecimalsForTTS(text).substring(0, 1500);
 
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
+        const url = getVertexEndpoint(model, apiKey);
         const payload = {
           contents: [{ role: "user", parts: [{ text: processed }] }],
           generationConfig: {

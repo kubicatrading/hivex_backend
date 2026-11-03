@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { encodePcmToMp3, addWavHeader } from "@/lib/audio/mp3Encoder";
+import { VERTEX_CASCADE_TTS, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const maxDuration = 120; // Allow up to 120 seconds for full magazine audio synthesis
 
@@ -99,16 +100,13 @@ function groupSentencesIntoBlocks(sentences: string[], maxCharsPerBlock = 1000):
  * Calls Gemini TTS API to synthesize speech for a given text fragment.
  */
 async function synthesizeChunk(text: string, voice: string, apiKey: string): Promise<Buffer> {
-  const models = [
-    "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts"
-  ];
+  const models = VERTEX_CASCADE_TTS;
   const safeText = text.substring(0, 1500);
 
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
+        const url = getVertexEndpoint(model, apiKey);
         const payload = {
           contents: [{ role: "user", parts: [{ text: safeText }] }],
           generationConfig: {

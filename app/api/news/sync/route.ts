@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { recordCronExecution } from "@/lib/cron-logger";
 import { processMagazineTranscribeAndSynthesis } from "../transcribe/route";
+import { VERTEX_CASCADE_FLASH_EFFICIENT, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Extend to maximum Vercel limit to ensure async scraping runs smoothly without timing out
@@ -253,20 +254,8 @@ async function generateAIEditorialSummary(articles: { title: string; category: s
   3. No utilices subtítulos rígidos, listas, viñetas, guiones ni encabezados de sección. Solo párrafos de texto continuo.
   4. Redáctalo enteramente en español. Evita comentarios de IA o notas iniciales. Ve directo al grano.`;
 
-  const modelsToTry = [
-    "gemini-4.0-argon",
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.0-flash",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-  ];
-
-  for (const modelName of modelsToTry) {
-    const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`;
+  for (const modelName of VERTEX_CASCADE_FLASH_EFFICIENT) {
+    const url = getVertexEndpoint(modelName, apiKey);
     try {
       const response = await fetch(url, {
         method: "POST",

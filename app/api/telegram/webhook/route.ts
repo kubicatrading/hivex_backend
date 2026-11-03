@@ -8,6 +8,11 @@ import {
   saveOmnichannelTurn,
   formatGeminiMultiTurnPayload
 } from "@/lib/omnichannelMemory";
+import {
+  VERTEX_CASCADE_REASONING,
+  VERTEX_CASCADE_FLASH_EFFICIENT,
+  getVertexEndpoint
+} from "@/lib/vertexModels";
 
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during complex Gemini queries with Search grounding
 
@@ -86,23 +91,17 @@ export async function POST(request: NextRequest) {
         console.log("[Telegram Webhook] Invoking Gemini for audio transcription...");
         const transcriptionInstruction = "Por favor, transcribe exactamente lo que dice este mensaje de voz en español, palabra por palabra. Tu respuesta debe ser ÚNICAMENTE la transcripción literal sin comentarios, explicaciones, saludos ni notas.";
 
-        const attemptTranscriptionUrls = [
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent",
-          "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent"
+        const transcriptionModels = [
+          "gemini-3.5-transcribe",
+          ...VERTEX_CASCADE_FLASH_EFFICIENT
         ];
 
         let transcribedText = "";
-        for (const url of attemptTranscriptionUrls) {
+        for (const model of transcriptionModels) {
           try {
-            console.log(`[Telegram Webhook] Trying transcription with Vertex AI endpoint: ${url}...`);
-            const res = await fetch(`${url}?key=${apiKey}`, {
+            const endpointUrl = getVertexEndpoint(model, apiKey);
+            console.log(`[Telegram Webhook] Trying transcription with Vertex AI model: ${model}...`);
+            const res = await fetch(endpointUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -148,10 +147,10 @@ export async function POST(request: NextRequest) {
               }
             } else {
               const errorText = await res.text();
-              console.error(`[Telegram Webhook] Transcription API error (${url}):`, errorText);
+              console.error(`[Telegram Webhook] Transcription API error (${model}):`, errorText);
             }
           } catch (transErr) {
-            console.error(`[Telegram Webhook] Transcription attempt crashed for ${url}:`, transErr);
+            console.error(`[Telegram Webhook] Transcription attempt crashed for ${model}:`, transErr);
           }
         }
 
@@ -633,44 +632,10 @@ ${currentPromptText}
     console.log(`[Telegram Webhook] Successfully parsed payload. Chat ID: ${chatId}, User Text: "${userText}". Multi-turn count: ${contentsPayload.length}. Reply active: ${!!message.reply_to_message}.`);
     console.log(`[Telegram Webhook] Total videos in context: ${totalVideos}. DB docs count: ${allDocs.length}. Magazines count: ${magazineArticles.length}.`);
 
-    const attempts = [
-      {
-        name: "Vertex AI Gemini 4.0 Argon",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.8 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.7 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.6 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.5 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.0 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 2.5 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 2.0 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 1.5 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent"
-      }
-    ];
+    const attempts = VERTEX_CASCADE_REASONING.map((model) => ({
+      name: `Vertex AI ${model}`,
+      url: getVertexEndpoint(model, apiKey)
+    }));
 
     let geminiResponseText = "";
     let successfulModel = "";
@@ -678,7 +643,7 @@ ${currentPromptText}
     for (const attempt of attempts) {
       try {
         console.log(`[Telegram Webhook] Querying Gemini model: ${attempt.name}...`);
-        const requestUrl = `${attempt.url}?key=${apiKey}`;
+        const requestUrl = attempt.url;
         const payload: Record<string, any> = {
           contents: contentsPayload,
           generationConfig: {

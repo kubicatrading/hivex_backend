@@ -2,6 +2,7 @@ import { exec } from "child_process";
 import fs from "fs";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
+import { VERTEX_CASCADE_VISION_FILTER, getVertexEndpoint } from "@/lib/vertexModels";
 
 const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -114,17 +115,7 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
     const fileBuffer = fs.readFileSync(filePath);
     const base64Data = fileBuffer.toString("base64");
 
-    const modelsToTry = [
-      "gemini-4.0-argon",
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.0-flash",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash"
-    ];
+    const modelsToTry = VERTEX_CASCADE_VISION_FILTER;
 
     const payload = {
       contents: [
@@ -154,7 +145,7 @@ export async function isImageAChart(filePath: string): Promise<boolean> {
 
     let json: any = null;
     for (const modelName of modelsToTry) {
-      const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`;
+      const url = getVertexEndpoint(modelName, apiKey);
       try {
         const response = await fetch(url, {
           method: "POST",

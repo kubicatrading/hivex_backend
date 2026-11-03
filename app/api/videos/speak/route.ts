@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { encodePcmToMp3 } from "@/lib/audio/mp3Encoder";
+import { VERTEX_CASCADE_TTS, getVertexEndpoint } from "@/lib/vertexModels";
 
 interface SpeakRequestBody {
   text: string;
@@ -213,10 +214,7 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
   }
 
   // Sequence of dedicated Flash Gemini TTS models (excluding expensive Pro TTS to minimize cost)
-  const models = [
-    "gemini-3.1-flash-tts-preview",
-    "gemini-2.5-flash-preview-tts"
-  ];
+  const models = VERTEX_CASCADE_TTS;
 
   let base64Audio = "";
   let successfulModel = "";
@@ -227,7 +225,7 @@ async function synthesizeSpeech(text: string, voice: string, request?: Request) 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         console.log(`[Speak API] Trying Vertex AI model: ${model} (attempt ${attempt + 1}) with voice: ${voice} (text length: ${safeText.length})`);
-        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
+        const url = getVertexEndpoint(model, apiKey);
 
         const payload = {
           contents: [

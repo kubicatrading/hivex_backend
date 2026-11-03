@@ -8,6 +8,7 @@ import {
   saveOmnichannelTurn,
   formatGeminiMultiTurnPayload
 } from "@/lib/omnichannelMemory";
+import { VERTEX_CASCADE_REASONING, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const maxDuration = 300;
 
@@ -364,44 +365,10 @@ ${useInternet ? `
       throw new Error("Missing GEMINI_API_KEY environment variable.");
     }
 
-    const attempts = [
-      {
-        name: "Vertex AI Gemini 4.0 Argon",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.8 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.7 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.6 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.5 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 3.0 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 2.5 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 2.0 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent"
-      },
-      {
-        name: "Vertex AI Gemini 1.5 Flash",
-        url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent"
-      }
-    ];
+    const attempts = VERTEX_CASCADE_REASONING.map((model) => ({
+      name: `Vertex AI ${model}`,
+      url: getVertexEndpoint(model, apiKey)
+    }));
 
     let geminiResponseText = "";
     let geminiData: any = null;
@@ -413,7 +380,7 @@ ${useInternet ? `
 
     for (const attempt of attempts) {
       try {
-        const requestUrl = `${attempt.url}?key=${apiKey}`;
+        const requestUrl = attempt.url;
         const payload: Record<string, any> = {
           contents: contentsPayload,
           generationConfig: {

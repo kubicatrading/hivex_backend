@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { sendTelegramMessageWithPhotos, sendTelegramMessage, markdownToTelegramHtml, splitMarkdown } from "@/lib/telegram";
 import { recordCronExecution } from "@/lib/cron-logger";
+import { VERTEX_CASCADE_REASONING, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const dynamic = "force-dynamic";
 
@@ -345,44 +346,10 @@ Aquí tienes los datos de la base de conocimiento de HIVEX para sintetizar:
 ${JSON.stringify(videoContexts, null, 2)}
 `;
 
-  const attempts = [
-    {
-      name: "Vertex AI Gemini 4.0 Argon (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 3.8 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 3.7 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 3.6 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 3.5 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 3.0 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 2.5 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 2.0 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    },
-    {
-      name: "Vertex AI Gemini 1.5 Flash (v1beta1)",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    },
-  ];
+  const attempts = VERTEX_CASCADE_REASONING.map((model) => ({
+    name: `Vertex AI ${model} (v1beta1)`,
+    url: getVertexEndpoint(model, apiKey),
+  }));
 
   let reportContent = "";
   const errorDetails: string[] = [];

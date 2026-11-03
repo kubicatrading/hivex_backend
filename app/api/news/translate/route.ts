@@ -1,53 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { VERTEX_CASCADE_FLASH_EFFICIENT, getVertexEndpoint } from "@/lib/vertexModels";
 
 const SYSTEM_INSTRUCTION = `Eres un traductor profesional de élite especializado en finanzas, economía, geopolítica y análisis de mercados. Tu única tarea es traducir el texto suministrado de manera sumamente natural, fluida y con perfecta dicción al idioma solicitado, preservando listas, nombres propios y estructura markdown. No agregues introducciones, explicaciones, ni notas del traductor.`;
-
-const ATTEMPTS = [
-  {
-    name: "Vertex AI Gemini 4.0 Argon",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 3.8 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 3.7 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 3.6 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 3.5 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 3.0 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 2.5 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 2.0 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent"
-  },
-  {
-    name: "Vertex AI Gemini 1.5 Flash",
-    url: "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent"
-  }
-];
 
 async function translateTextWithGemini(prompt: string, apiKey: string): Promise<string> {
   let lastError = "";
 
-  for (const attempt of ATTEMPTS) {
+  for (const model of VERTEX_CASCADE_FLASH_EFFICIENT) {
     try {
-      const response = await fetch(`${attempt.url}?key=${apiKey}`, {
+      const response = await fetch(getVertexEndpoint(model, apiKey), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -69,10 +31,10 @@ async function translateTextWithGemini(prompt: string, apiKey: string): Promise<
         }
       } else {
         const errText = await response.text();
-        lastError = `${attempt.name} HTTP ${response.status}: ${errText}`;
+        lastError = `${model} HTTP ${response.status}: ${errText}`;
       }
     } catch (e: any) {
-      lastError = `${attempt.name} Exception: ${e?.message || String(e)}`;
+      lastError = `${model} Exception: ${e?.message || String(e)}`;
     }
   }
 

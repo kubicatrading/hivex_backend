@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { YoutubeTranscript } from "youtube-transcript";
 import { extractSnapshotsInBackground } from "@/lib/snapshotExtractor";
+import { VERTEX_CASCADE_REASONING, getVertexBaseUrl } from "@/lib/vertexModels";
 
 export const maxDuration = 300; // Extend Vercel execution duration to 300s (Pro plan limit) to prevent timeouts during transcription
 
@@ -509,53 +510,11 @@ ${rawTranscriptText}`;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "558326121700-ufp44b64pdnb0cisl7nu3c2dqc3vu82k.apps.googleusercontent.com";
   const projectNumber = clientId.split("-")[0] || "558326121700";
 
-  const attempts = [
-    {
-      name: "Vertex AI Gemini 4.0 Argon (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.8 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.7 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.6 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.5 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.0 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 2.5 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 2.0 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 1.5 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent`
-    }
-  ];
+  const attempts = VERTEX_CASCADE_REASONING.map((model) => ({
+    name: `Vertex AI ${model} (v1beta1)`,
+    type: "vertex",
+    url: getVertexBaseUrl(model)
+  }));
 
   let finalOutput = "";
   let successfulModel = "";

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { VERTEX_CASCADE_REASONING, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // Vercel maximum execution duration
@@ -64,17 +65,7 @@ export async function POST(req: Request) {
     }
 
     // Gemini models priority list: Gemini 4.0 Argon followed by Flash family in descending release order
-    const modelsToTry = [
-      "gemini-4.0-argon",
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
-      "gemini-3.6-flash",
-      "gemini-3.5-flash",
-      "gemini-3.0-flash",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash"
-    ];
+    const modelsToTry = VERTEX_CASCADE_REASONING;
 
     const promptText = `Eres un analista macroeconómico y editor jefe de élite de HIVEX.
 Tu objetivo es analizar la transcripción completa de la revista semanal de noticias y mercados y sintetizar un RESUMEN DETALLADO PREMIUM EN FORMATO MARKDOWN de la más alta calidad.
@@ -96,7 +87,7 @@ ${textToSummarize}`;
     for (const modelName of modelsToTry) {
       try {
         console.log(`[News Summarize API] Querying Vertex AI model ${modelName}...`);
-        const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`;
+        const url = getVertexEndpoint(modelName, apiKey);
 
         const response = await fetch(url, {
           method: "POST",

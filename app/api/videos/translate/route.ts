@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { VERTEX_CASCADE_FLASH_EFFICIENT, getVertexBaseUrl } from "@/lib/vertexModels";
 
 const SYSTEM_INSTRUCTION = `Eres un traductor profesional de élite especializado en finanzas, economía y análisis de inversiones. Tu tarea es traducir textos markdown de manera sumamente natural, fluida y con perfecta dicción al idioma solicitado, preservando estructuras complejas, marcas de tiempo y formatos técnicos.`;
 
@@ -66,53 +67,11 @@ async function translateSingleChunk(
 
   const SYSTEM_INSTRUCTION_SEGMENT = `Eres un traductor profesional de élite especializado en finanzas, economía y análisis de inversiones. Tu única tarea es traducir el texto suministrado de manera sumamente natural, fluida y con perfecta dicción al idioma solicitado, preservando estructuras, marcas de tiempo y formatos técnicos. No agregues introducciones, explicaciones, ni notas del traductor.`;
 
-  const attempts = [
-    {
-      name: "Vertex AI Gemini 4.0 Argon (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-4.0-argon:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.8 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.8-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.7 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.6 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.6-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.5 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.5-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 3.0 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.0-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 2.5 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.5-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 2.0 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-2.0-flash:generateContent`
-    },
-    {
-      name: "Vertex AI Gemini 1.5 Flash (v1beta1)",
-      type: "vertex",
-      url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-1.5-flash:generateContent`
-    }
-  ];
+  const attempts = VERTEX_CASCADE_FLASH_EFFICIENT.map((model) => ({
+    name: `Vertex AI ${model} (v1beta1)`,
+    type: "vertex",
+    url: getVertexBaseUrl(model)
+  }));
 
   let translatedText = "";
   let successfulModel = "";

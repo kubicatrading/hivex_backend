@@ -5,6 +5,11 @@ import crypto from "crypto";
 import { sendMagazineNotification } from "@/lib/telegram";
 import { encodePcmToMp3 } from "@/lib/audio/mp3Encoder";
 import { cleanSummaryForSpeech, splitParagraphIntoSentences, extractMagazineSentences } from "@/lib/magazineSentences";
+import {
+  VERTEX_CASCADE_FLASH_EFFICIENT,
+  VERTEX_CASCADE_TTS,
+  getVertexEndpoint
+} from "@/lib/vertexModels";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,10 +34,7 @@ const MAJOR_SECTIONS = [
   "ECONOMIC UPDATE"
 ];
 
-const TTS_MODELS = [
-  "gemini-3.1-flash-tts-preview",
-  "gemini-2.5-flash-preview-tts"
-];
+const TTS_MODELS = VERTEX_CASCADE_TTS;
 
 function cleanPageText(rawPage: string): string {
   if (!rawPage) return "";
@@ -175,22 +177,10 @@ RULES:
 Table of Contents Text:
 ${tocText}`;
 
-  const modelsToTry = [
-    "gemini-4.0-argon",
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.0-flash",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-  ];
-
   let lastStatus = 0;
-  for (const modelName of modelsToTry) {
+  for (const modelName of VERTEX_CASCADE_FLASH_EFFICIENT) {
     try {
-      const res = await fetch(`https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${modelName}:generateContent?key=${apiKey}`, {
+      const res = await fetch(getVertexEndpoint(modelName, apiKey), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -233,7 +223,7 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const model = TTS_MODELS[attempt % TTS_MODELS.length];
-    const url = `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${model}:generateContent?key=${apiKey}`;
+    const url = getVertexEndpoint(model, apiKey);
 
     try {
       const res = await fetch(url, {
