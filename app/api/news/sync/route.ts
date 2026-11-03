@@ -29,12 +29,13 @@ interface ArticleMetadata {
 function makeRequest(options: any, postData: string | null = null, redirectCount: number = 0): Promise<{ statusCode: number; headers: any; data: string }> {
   const https = require("https");
   return new Promise((resolve, reject) => {
-    const mergedHeaders = {
+    const { followRedirects = true, timeoutMs = 25000, ...restOptions } = options;
+    const mergedHeaders: Record<string, any> = {
       ...DEFAULT_BROWSER_HEADERS,
-      ...(options.headers || {})
+      ...(restOptions.headers || {})
     };
     const reqOptions = {
-      ...options,
+      ...restOptions,
       headers: mergedHeaders
     };
 
@@ -42,23 +43,45 @@ function makeRequest(options: any, postData: string | null = null, redirectCount
       let data = "";
       res.on("data", (chunk: string) => { data += chunk; });
       res.on("end", async () => {
-        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location && redirectCount < 5) {
+        const isRedirect = res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308;
+        if (followRedirects && isRedirect && res.headers.location && redirectCount < 5) {
           try {
-            const redirectUrl = new URL(res.headers.location, `https://${options.hostname}`);
-            const newOptions = {
-              ...options,
-              hostname: redirectUrl.hostname,
-              path: redirectUrl.pathname + redirectUrl.search,
-              method: options.method === "POST" && (res.statusCode === 301 || res.statusCode === 302) ? "GET" : options.method
-            };
-            const setCookie = res.headers["set-cookie"] || [];
+            const redirectUrl = new URL(res.headers.location, `https://${restOptions.hostname}`);
+            const switchToGet = restOptions.method === "POST" && (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303);
+            const nextHeaders: Record<string, any> = { ...(restOptions.headers || {}) };
+            if (switchToGet) {
+              delete nextHeaders["Content-Length"];
+              delete nextHeaders["content-length"];
+              delete nextHeaders["Content-Type"];
+              delete nextHeaders["content-type"];
+            }
+            const setCookie: string[] = res.headers["set-cookie"] || [];
             if (setCookie.length > 0) {
               const newCookies = setCookie.map((c: string) => c.split(";")[0]).join("; ");
-              const existingCookies = options.headers?.["Cookie"] || options.headers?.["cookie"] || "";
-              const combinedCookies = [existingCookies, newCookies].filter(Boolean).join("; ");
-              newOptions.headers = { ...newOptions.headers, Cookie: combinedCookies };
+              const existingCookies = nextHeaders["Cookie"] || nextHeaders["cookie"] || "";
+              const combinedCookies = Array.from(new Set([existingCookies, newCookies].filter(Boolean).join("; ").split("; ").filter(Boolean))).join("; ");
+              nextHeaders["Cookie"] = combinedCookies;
             }
-            const redirectedRes = await makeRequest(newOptions, null, redirectCount + 1);
+            const newOptions = {
+              ...restOptions,
+              followRedirects,
+              timeoutMs,
+              hostname: redirectUrl.hostname,
+              path: redirectUrl.pathname + redirectUrl.search,
+              method: switchToGet ? "GET" : restOptions.method,
+              headers: nextHeaders
+            };
+            const redirectedRes = await makeRequest(newOptions, switchToGet ? null : postData, redirectCount + 1);
+            const mergedSetCookie = [
+              ...(res.headers["set-cookie"] || []),
+              ...(redirectedRes.headers?.["set-cookie"] || [])
+            ];
+            if (mergedSetCookie.length > 0) {
+              redirectedRes.headers = {
+                ...redirectedRes.headers,
+                "set-cookie": mergedSetCookie
+              };
+            }
             resolve(redirectedRes);
             return;
           } catch (e) {
@@ -67,7 +90,7 @@ function makeRequest(options: any, postData: string | null = null, redirectCount
         }
 
         if (res.statusCode === 403 || data.includes("<title>Just a moment...</title>")) {
-          console.warn(`[Sync Scraper] Cloudflare bot challenge/403 encountered on ${options.path}`);
+          console.warn(`[Sync Scraper] Cloudflare bot challenge/403 encountered on ${restOptions.path}`);
         }
 
         resolve({
@@ -77,6 +100,9 @@ function makeRequest(options: any, postData: string | null = null, redirectCount
         });
       });
     });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timeout (${timeoutMs}ms) on ${restOptions.hostname}${restOptions.path}`));
+    });
     req.on("error", (e: any) => reject(e));
     if (postData) {
       req.write(postData);
@@ -85,28 +111,51 @@ function makeRequest(options: any, postData: string | null = null, redirectCount
   });
 }
 
-function downloadBinaryFile(options: any, postData: string | null = null): Promise<Buffer> {
+function downloadBinaryFile(options: any, postData: string | null = null, redirectCount: number = 0): Promise<Buffer> {
   const https = require("https");
   return new Promise((resolve, reject) => {
+    const { timeoutMs = 45000, ...restOptions } = options;
     const mergedHeaders = {
       ...DEFAULT_BROWSER_HEADERS,
-      ...(options.headers || {})
+      ...(restOptions.headers || {})
     };
     const reqOptions = {
-      ...options,
+      ...restOptions,
       headers: mergedHeaders
     };
 
     const req = https.request(reqOptions, (res: any) => {
+      const isRedirect = res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308;
+      if (isRedirect && res.headers.location && redirectCount < 5) {
+        res.resume();
+        try {
+          const redirectUrl = new URL(res.headers.location, `https://${restOptions.hostname}`);
+          downloadBinaryFile({
+            ...restOptions,
+            timeoutMs,
+            hostname: redirectUrl.hostname,
+            path: redirectUrl.pathname + redirectUrl.search,
+            method: "GET"
+          }, null, redirectCount + 1).then(resolve).catch(reject);
+          return;
+        } catch (err) {
+          reject(err);
+          return;
+        }
+      }
+
       const chunks: any[] = [];
       res.on("data", (chunk: any) => { chunks.push(chunk); });
       res.on("end", () => {
         if (res.statusCode && res.statusCode >= 400) {
-          reject(new Error(`Failed to download binary file from ${options.path}, status code: ${res.statusCode}`));
+          reject(new Error(`Failed to download binary file from ${restOptions.path}, status code: ${res.statusCode}`));
         } else {
           resolve(Buffer.concat(chunks));
         }
       });
+    });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Binary download timeout (${timeoutMs}ms) on ${restOptions.path}`));
     });
     req.on("error", (e: any) => reject(e));
     if (postData) {
@@ -136,29 +185,41 @@ async function fetchIssuePage(cookieHeader: string, issueSlug: string, homeHtml:
     foundIssueSlugs.push(match[1]);
   }
 
+  const candidateSlugs: string[] = [];
+
   if (parts.length === 3) {
     const day = parts[0];
-    const month = parts[1];
+    const paddedDay = day.padStart(2, "0");
+    const month = parts[1].toLowerCase();
     const year = parts[2];
 
     const matched = foundIssueSlugs.find(slug => {
       const s = slug.toLowerCase();
       return s.includes(year) && 
-        s.includes(month.toLowerCase()) && 
-        (s.includes(`-${day}-`) || s.startsWith(`${day}-`) || s.endsWith(`-${day}`));
+        s.includes(month) && 
+        (s.includes(`-${day}-`) || s.startsWith(`${day}-`) || s.endsWith(`-${day}`) ||
+         s.includes(`-${paddedDay}-`) || s.startsWith(`${paddedDay}-`) || s.endsWith(`-${paddedDay}`));
     });
     if (matched) {
       resolvedSlug = matched;
+      candidateSlugs.push(matched);
       console.log(`[Sync Scraper] Dynamically resolved WordPress page slug to: ${resolvedSlug} (for ${issueSlug})`);
     }
+
+    // Always try both month-day-year (e.g. october-27-2026) and day-month-year (e.g. 27-october-2026)
+    candidateSlugs.push(
+      `${month}-${day}-${year}`,
+      `${day}-${month}-${year}`,
+      `${month}-${paddedDay}-${year}`,
+      `${paddedDay}-${month}-${year}`
+    );
   }
 
-  const pathsToTry = Array.from(new Set([
-    `/issue/${resolvedSlug}/`,
-    `/issue/${resolvedSlug}`,
-    `/issue/${issueSlug}/`,
-    `/issue/${normalizedSlug}/`
-  ]));
+  candidateSlugs.push(resolvedSlug, issueSlug, normalizedSlug);
+
+  const pathsToTry = Array.from(new Set(
+    candidateSlugs.filter(Boolean).map(s => `/issue/${s}/`)
+  ));
 
   for (const path of pathsToTry) {
     try {
@@ -173,7 +234,8 @@ async function fetchIssuePage(cookieHeader: string, issueSlug: string, homeHtml:
         }
       });
       if (res.statusCode === 200 && res.data.length > 5000 && !res.data.includes("<title>Just a moment...</title>")) {
-        return { data: res.data, resolvedSlug: resolvedSlug };
+        const cleanResolved = path.replace(/^\/issue\/|\/$/g, "");
+        return { data: res.data, resolvedSlug: cleanResolved };
       }
     } catch (e) {
       console.error(`[Sync Scraper] Error fetching path ${path}:`, e);
@@ -331,6 +393,14 @@ async function handleSync(request: Request) {
     }
 
     if (!isAuthorized) {
+      await recordCronExecution({
+        path: "/api/news/sync",
+        cronName: "Sincronización de Revistas (Trends Journal)",
+        statusCode: 401,
+        status: "error",
+        error: "Acceso no autorizado",
+        durationMs: Date.now() - startTime
+      });
       return NextResponse.json({ success: false, error: "Acceso no autorizado" }, { status: 401 });
     }
 
@@ -339,9 +409,18 @@ async function handleSync(request: Request) {
     const password = process.env.TRENDSJOURNAL_PASS;
 
     if (!username || !password) {
+      const errMsg = "Falta configurar las credenciales de Trends Journal (TRENDSJOURNAL_USER / TRENDSJOURNAL_PASS) en el servidor.";
+      await recordCronExecution({
+        path: "/api/news/sync",
+        cronName: "Sincronización de Revistas (Trends Journal)",
+        statusCode: 500,
+        status: "error",
+        error: errMsg,
+        durationMs: Date.now() - startTime
+      });
       return NextResponse.json({
         success: false,
-        error: "Falta configurar las credenciales de Trends Journal (TRENDSJOURNAL_USER / TRENDSJOURNAL_PASS) en el servidor."
+        error: errMsg
       }, { status: 500 });
     }
 
@@ -358,7 +437,7 @@ async function handleSync(request: Request) {
         path: "/login/",
         method: "GET",
         headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
         }
       });
@@ -368,7 +447,7 @@ async function handleSync(request: Request) {
       console.warn("[Sync Scraper] Step 3a GET /login/ warning:", getErr?.message);
     }
 
-    // Step 3b: POST login form with initial Cloudflare cookies, Referer, and Origin headers
+    // Step 3b: POST login form with followRedirects: false so we capture the 302 Set-Cookie directly without GET redirect hang
     const postData = querystring.stringify({
       log: username,
       pwd: password,
@@ -382,8 +461,9 @@ async function handleSync(request: Request) {
       hostname: "trendsjournal.com",
       path: "/login/",
       method: "POST",
+      followRedirects: false,
       headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
         "Content-Type": "application/x-www-form-urlencoded",
         "Content-Length": Buffer.byteLength(postData),
         "Cookie": initCookieHeader,
@@ -392,13 +472,52 @@ async function handleSync(request: Request) {
       }
     }, postData);
 
-    const loginCookies = loginRes.headers["set-cookie"] || [];
-    const allCookieStrings = [initCookieHeader, ...loginCookies.map((c: string) => c.split(";")[0])].filter(Boolean);
-    const cookieHeader = Array.from(new Set(allCookieStrings)).join("; ");
+    let loginCookies = loginRes.headers["set-cookie"] || [];
+    let allCookieStrings = [initCookieHeader, ...loginCookies.map((c: string) => c.split(";")[0])].filter(Boolean);
+    let cookieHeader = Array.from(new Set(allCookieStrings)).join("; ");
+
+    // Fallback to standard /wp-login.php if /login/ didn't yield wordpress_logged_in_ cookie
+    if (!cookieHeader.includes("wordpress_logged_in_")) {
+      console.warn("[Sync Scraper] Primary /login/ did not return session cookie; trying /wp-login.php fallback...");
+      const wpPostData = querystring.stringify({
+        log: username,
+        pwd: password,
+        rememberme: "forever",
+        "wp-submit": "Log In",
+        redirect_to: "https://trendsjournal.com/",
+        testcookie: "1"
+      });
+      const wpLoginRes = await makeRequest({
+        hostname: "trendsjournal.com",
+        path: "/wp-login.php",
+        method: "POST",
+        followRedirects: false,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": Buffer.byteLength(wpPostData),
+          "Cookie": [initCookieHeader, "wordpress_test_cookie=WP%20Cookie%20check"].filter(Boolean).join("; "),
+          "Referer": "https://trendsjournal.com/wp-login.php",
+          "Origin": "https://trendsjournal.com"
+        }
+      }, wpPostData);
+      const wpCookies = wpLoginRes.headers["set-cookie"] || [];
+      allCookieStrings = [initCookieHeader, ...wpCookies.map((c: string) => c.split(";")[0])].filter(Boolean);
+      cookieHeader = Array.from(new Set(allCookieStrings)).join("; ");
+    }
 
     if (!cookieHeader.includes("wordpress_logged_in_")) {
+      const errMsg = "Falló el inicio de sesión contra el portal de Trends Journal. No se recibió cookie wordpress_logged_in_.";
       console.error("[Sync Scraper] Login failure: No active session cookies returned.");
-      return NextResponse.json({ success: false, error: "Falló el inicio de sesión contra el portal de Trends Journal. Verifique credenciales." }, { status: 401 });
+      await recordCronExecution({
+        path: "/api/news/sync",
+        cronName: "Sincronización de Revistas (Trends Journal)",
+        statusCode: 401,
+        status: "error",
+        error: errMsg,
+        durationMs: Date.now() - startTime
+      });
+      return NextResponse.json({ success: false, error: errMsg }, { status: 401 });
     }
 
     console.log("[Sync Scraper] Logged in successfully. Crawling homepage...");
@@ -418,7 +537,16 @@ async function handleSync(request: Request) {
     const supabaseUrl = process.env.SUPABASE_PRODUCTION_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!supabaseUrl || !serviceRoleKey) {
-      return NextResponse.json({ success: false, error: "Supabase production credentials are not configured in backend variables." }, { status: 500 });
+      const errMsg = "Supabase production credentials are not configured in backend variables.";
+      await recordCronExecution({
+        path: "/api/news/sync",
+        cronName: "Sincronización de Revistas (Trends Journal)",
+        statusCode: 500,
+        status: "error",
+        error: errMsg,
+        durationMs: Date.now() - startTime
+      });
+      return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
     }
 
     const { createClient } = await import("@supabase/supabase-js");
@@ -509,7 +637,46 @@ async function handleSync(request: Request) {
 
     const issuesMap = parseArticlesFromHtml(homeRes.data);
 
-    // Extract all issue links from the homepage
+    // Discover authentic official covers directly from homepage figures & TJ-Cover patterns
+    const discoveredCovers: Record<string, string> = {};
+    const extractCoversFromHtml = (html: string) => {
+      const figRegex = /<figure[^>]*class="[^"]*cmsmasters_img_rollover_wrap[^"]*"[^>]*>([\s\S]*?)<\/figure>/gi;
+      let fMatch;
+      while ((fMatch = figRegex.exec(html)) !== null) {
+        const figContent = fMatch[1];
+        const aMatch = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/i.exec(figContent);
+        if (!aMatch) continue;
+        const s = normalizeIssueSlug(aMatch[1]);
+        const imgMatch = /data-src="([^"]+)"/i.exec(figContent) || /src="([^"]+)"/i.exec(figContent);
+        if (imgMatch && imgMatch[1].startsWith("http") && imgMatch[1].includes("wp-content/uploads/")) {
+          discoveredCovers[s] = imgMatch[1];
+        }
+      }
+
+      const tjCoverRegex = /https:\/\/trendsjournal\.com\/wp-content\/uploads\/\d{4}\/\d{2}\/TJ-Cover-([a-z0-9-]+)\.jpg/gi;
+      let tjMatch;
+      while ((tjMatch = tjCoverRegex.exec(html)) !== null) {
+        const fullUrl = tjMatch[0];
+        const datePart = tjMatch[1];
+        const dMatch = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/.exec(datePart);
+        if (dMatch) {
+          const monthNum = parseInt(dMatch[1], 10) - 1;
+          const day = parseInt(dMatch[2], 10);
+          let year = parseInt(dMatch[3], 10);
+          if (year < 100) year += 2000;
+          const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+          if (monthNum >= 0 && monthNum < 12) {
+            const slug = `${day}-${months[monthNum]}-${year}`;
+            if (!discoveredCovers[slug]) {
+              discoveredCovers[slug] = fullUrl;
+            }
+          }
+        }
+      }
+    };
+    extractCoversFromHtml(homeRes.data);
+
+    // Extract all issue links from the homepage + discovered covers + proactive recent Tuesdays
     const issueLinkRegex = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/gi;
     let linkMatch;
     const discoveredIssueSlugs = new Set<string>();
@@ -519,26 +686,47 @@ async function handleSync(request: Request) {
       const slug = linkMatch[1].toLowerCase();
       const issueDate = parseIssueCategoryToDate(`category-${slug}`);
       if (issueDate && issueDate >= limitDate) {
-        discoveredIssueSlugs.add(slug);
+        discoveredIssueSlugs.add(normalizeIssueSlug(slug));
       }
     }
+
+    for (const coverSlug of Object.keys(discoveredCovers)) {
+      const issueDate = parseIssueCategoryToDate(`category-${coverSlug}`);
+      if (issueDate && issueDate >= limitDate) {
+        discoveredIssueSlugs.add(normalizeIssueSlug(coverSlug));
+      }
+    }
+
+    // Proactive Tuesday discovery: check the last 4 Tuesdays up to today so new issues are never missed even if homepage layout changes
+    {
+      const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+      const nowUtc = new Date();
+      const todayUtc = new Date(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate()));
+      // Day of week: 0=Sun, 1=Mon, 2=Tue, ...
+      const diffToTuesday = (todayUtc.getUTCDay() + 7 - 2) % 7;
+      const latestTuesday = new Date(todayUtc.getTime() - diffToTuesday * 24 * 60 * 60 * 1000);
+      for (let w = 0; w < 4; w++) {
+        const tue = new Date(latestTuesday.getTime() - w * 7 * 24 * 60 * 60 * 1000);
+        if (tue >= limitDate) {
+          const tueSlug = `${tue.getUTCDate()}-${months[tue.getUTCMonth()]}-${tue.getUTCFullYear()}`;
+          discoveredIssueSlugs.add(tueSlug);
+        }
+      }
+    }
+
+    // Cache issue pages fetched during discovery so Step 6 doesn't have to re-fetch them
+    const cachedIssuePages: Record<string, { data: string; resolvedSlug: string }> = {};
 
     // Crawl archive page for any discovered issue link not fully populated from homepage
     for (const slug of Array.from(discoveredIssueSlugs)) {
       const normSlug = normalizeIssueSlug(slug);
       const alreadyPresent = Object.keys(issuesMap).some(s => normalizeIssueSlug(s) === normSlug);
       if (!alreadyPresent) {
-        console.log(`[Sync Scraper] Fetching archive page for issue link: /issue/${slug}/ ...`);
-        const pageRes = await makeRequest({
-          hostname: "trendsjournal.com",
-          path: `/issue/${slug}/`,
-          method: "GET",
-          headers: {
-            "Cookie": cookieHeader,
-            "Referer": "https://trendsjournal.com/"
-          }
-        });
-        if (pageRes.statusCode === 200 && pageRes.data && !pageRes.data.includes("<title>Just a moment...</title>")) {
+        console.log(`[Sync Scraper] Probing archive page for issue slug: ${normSlug} ...`);
+        const pageRes = await fetchIssuePage(cookieHeader, normSlug, homeRes.data);
+        if (pageRes && pageRes.data) {
+          cachedIssuePages[normSlug] = pageRes;
+          extractCoversFromHtml(pageRes.data);
           const pageIssues = parseArticlesFromHtml(pageRes.data);
           Object.keys(pageIssues).forEach(s => {
             const normalizedKey = normalizeIssueSlug(s);
@@ -546,6 +734,13 @@ async function handleSync(request: Request) {
               issuesMap[normalizedKey] = pageIssues[s];
             }
           });
+          // Even if the issue page has 0 <article> blocks (e.g. PDF-only issue page), if it has a valid PDF link, register the issue!
+          const hasPdfOnPage = /href="[^"]*wp-content\/uploads\/[^"]+\.pdf"/i.test(pageRes.data);
+          const issueDate = parseIssueCategoryToDate(`category-${normSlug}`);
+          if (!issuesMap[normSlug] && hasPdfOnPage && issueDate) {
+            console.log(`[Sync Scraper] Discovered valid PDF issue page for ${normSlug}!`);
+            issuesMap[normSlug] = { date: issueDate, articles: [] };
+          }
         }
       }
     }
@@ -614,42 +809,12 @@ async function handleSync(request: Request) {
       console.warn("[Sync Scraper] RSS feed discovery skipped:", rssErr.message);
     }
 
-    // Discover authentic official covers directly from homepage figures & TJ-Cover patterns
-    const discoveredCovers: Record<string, string> = {};
-
-    const figRegex = /<figure[^>]*class="[^"]*cmsmasters_img_rollover_wrap[^"]*"[^>]*>([\s\S]*?)<\/figure>/gi;
-    let fMatch;
-    while ((fMatch = figRegex.exec(homeRes.data)) !== null) {
-      const figContent = fMatch[1];
-      const aMatch = /href="https:\/\/trendsjournal\.com\/issue\/([^/"]+)\/?"/i.exec(figContent);
-      if (!aMatch) continue;
-      const s = normalizeIssueSlug(aMatch[1]);
-      const imgMatch = /data-src="([^"]+)"/i.exec(figContent) || /src="([^"]+)"/i.exec(figContent);
-      if (imgMatch && imgMatch[1].startsWith("http") && imgMatch[1].includes("wp-content/uploads/")) {
-        discoveredCovers[s] = imgMatch[1];
-      }
-    }
-
-    const tjCoverRegex = /https:\/\/trendsjournal\.com\/wp-content\/uploads\/\d{4}\/\d{2}\/TJ-Cover-([a-z0-9-]+)\.jpg/gi;
-    let tjMatch;
-    while ((tjMatch = tjCoverRegex.exec(homeRes.data)) !== null) {
-      const fullUrl = tjMatch[0];
-      const datePart = tjMatch[1];
-      const dMatch = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/.exec(datePart);
-      if (dMatch) {
-        const monthNum = parseInt(dMatch[1], 10) - 1;
-        const day = parseInt(dMatch[2], 10);
-        let year = parseInt(dMatch[3], 10);
-        if (year < 100) year += 2000;
-        const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-        const slug = `${day}-${months[monthNum]}-${year}`;
-        if (!discoveredCovers[slug]) {
-          discoveredCovers[slug] = fullUrl;
-        }
-      }
-    }
-
-    const issuesList = Object.keys(issuesMap);
+    // Sort issues descending by date so newest issues (e.g. 27-october-2026) are ALWAYS synced and transcribed first!
+    const issuesList = Object.keys(issuesMap).sort((a, b) => {
+      const da = issuesMap[a]?.date?.getTime() || 0;
+      const db = issuesMap[b]?.date?.getTime() || 0;
+      return db - da;
+    });
     console.log(`[Sync Scraper] Found ${issuesList.length} valid weekly issues to sync:`, issuesList);
 
     let totalArticlesSynced = 0;
@@ -674,7 +839,7 @@ async function handleSync(request: Request) {
       console.log(`\n[Sync Scraper] Processing Weekly Issue: ${issueSlug} (${issueData.articles.length} web headlines detected)`);
 
       // 1. Resolve authentic official cover: NEVER use an article thumbnail as a cover!
-      const officialCoverUrl = discoveredCovers[issueSlug] || "";
+      let officialCoverUrl = discoveredCovers[issueSlug] || "";
 
       const existingIssues = (allWeeklyDocsLight || [])
         .sort((a: any, b: any) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
@@ -701,9 +866,13 @@ async function handleSync(request: Request) {
       // If there's no PDF, or the URL doesn't point to Supabase Storage, fetch and upload it
       if (!resolvedPdfUrl || !resolvedPdfUrl.includes(".supabase.co/")) {
         console.log(`[Sync Scraper] PDF missing or not hosted in Supabase for ${issueSlug}. Fetching issue page...`);
-        const issuePageResult = await fetchIssuePage(cookieHeader, issueSlug, homeRes.data);
+        const issuePageResult = cachedIssuePages[issueSlug] || await fetchIssuePage(cookieHeader, issueSlug, homeRes.data);
         if (issuePageResult) {
           const issueHtml = issuePageResult.data;
+          extractCoversFromHtml(issueHtml);
+          if (!officialCoverUrl && discoveredCovers[issueSlug]) {
+            officialCoverUrl = discoveredCovers[issueSlug];
+          }
           const pdfRegex = /href="([^"]+\.pdf)"/gi;
           let pdfMatch;
           let pdfLink = "";

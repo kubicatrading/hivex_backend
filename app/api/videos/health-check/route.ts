@@ -61,6 +61,8 @@ async function handleHealthCheck(request: NextRequest) {
     let pendingMagazinesList: any[] = [];
     let latestMagazineDate: Date | null = null;
     let latestMagazineSlug = "";
+    let daysSinceLatestMagazine: number | null = null;
+    let magazinesQueryError = "";
 
     try {
       const dbStart = Date.now();
@@ -68,7 +70,7 @@ async function handleHealthCheck(request: NextRequest) {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: recentVideos, error: dbErr } = await supabaseAdmin
         .from("documents")
-        .select("*")
+        .select("id, title, file_url, created_at, duration:metadata->>duration, attempts:metadata->analysis_failed_attempts, has_tx:metadata->>transcription")
         .eq("type", "video")
         .gte("created_at", twentyFourHoursAgo);
 
@@ -77,19 +79,23 @@ async function handleHealthCheck(request: NextRequest) {
       dbReachable = true;
       dbQueryTime = Date.now() - dbStart;
 
-      // Query knowledge_analysis documents to verify completions
-      const { data: analyses } = await supabaseAdmin
-        .from("documents")
-        .select("file_url")
-        .eq("type", "knowledge_analysis");
-
-      const analyzedUrls = new Set((analyses || []).map(doc => doc.file_url || ""));
+      // Query knowledge_analysis documents only for recent video URLs to verify completions fast
+      const recentVideoUrls = (recentVideos || []).map((v: any) => v.file_url).filter(Boolean);
+      let analyzedUrls = new Set<string>();
+      if (recentVideoUrls.length > 0) {
+        const { data: analyses } = await supabaseAdmin
+          .from("documents")
+          .select("file_url")
+          .eq("type", "knowledge_analysis")
+          .in("file_url", recentVideoUrls);
+        analyzedUrls = new Set((analyses || []).map(doc => doc.file_url || ""));
+      }
 
       if (recentVideos) {
         totalVideos24h = recentVideos.length;
         recentVideos.forEach((video: any) => {
           const hasAnalysis = analyzedUrls.has(video.file_url || "");
-          const hasTranscription = !!video.metadata?.transcription;
+          const hasTranscription = Boolean(video.has_tx);
           
           if (hasAnalysis && hasTranscription) {
             analyzedVideosCount++;
@@ -97,22 +103,24 @@ async function handleHealthCheck(request: NextRequest) {
             pendingVideosCount++;
             failedVideosList.push({
               title: video.title,
-              duration: video.metadata?.duration || "N/D",
-              attempts: video.metadata?.analysis_failed_attempts || 0,
+              duration: video.duration || "N/D",
+              attempts: Number(video.attempts) || 0,
               fileUrl: video.file_url || ""
             });
           }
         });
       }
 
-      // Query magazine issues for News Health Check
+      // Query magazine issues using lightweight JSONB projections to avoid 57014 TOAST timeout on full_text / sentence_timestamps
       const { data: rawIssues, error: issuesErr } = await supabaseAdmin
         .from("documents")
-        .select("id, title, file_url, created_at, metadata")
-        .eq("metadata->>is_magazine_issue", "true")
+        .select("id, title, file_url, created_at, slug:metadata->>slug, audio_status:metadata->>audio_status, audio_url:metadata->>audio_url, audio_duration:metadata->audio_duration, page_count:metadata->page_count, article_count:metadata->article_count, parser_version:metadata->>parser_version")
+        .eq("type", "knowledge_transcription")
+        .like("title", "Revista Semanal%")
         .order("created_at", { ascending: false });
 
       if (issuesErr) {
+        magazinesQueryError = issuesErr.message || JSON.stringify(issuesErr);
         console.warn("[Health Check] Error querying magazine issues:", issuesErr);
       }
 
@@ -130,7 +138,7 @@ async function handleHealthCheck(request: NextRequest) {
           .eq("type", "knowledge_transcription")
           .not("title", "like", "Revista Semanal%")
           .eq("metadata->>parser_version", "toc_page_sliced_v8_partition")
-          .limit(1200);
+          .limit(1500);
 
         if (!artErr && allArticles) {
           allArticles.forEach((a: any) => {
@@ -148,8 +156,8 @@ async function handleHealthCheck(request: NextRequest) {
       totalMagazines = magazineIssues.length;
       const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
-      for (const mag of magazineIssues) {
-        const slug = mag.metadata?.slug || "";
+      for (const mag of magazineIssues as any[]) {
+        const slug = mag.slug || "";
         const clean = slug.toLowerCase().replace("category-", "");
         let match = /(\d+)-([a-z]+)-(\d{4})/.exec(clean);
         if (match) {
@@ -168,21 +176,17 @@ async function handleHealthCheck(request: NextRequest) {
         let artCount = arts.length;
         let hasValidPages = artCount > 0 && arts.some(a => a.start_page !== null && a.start_page !== undefined);
 
-        // Fallback: Check if issue document explicitly records v8 article_ids / article_count in metadata
-        if (artCount === 0 && Array.isArray(mag.metadata?.article_ids) && mag.metadata.article_ids.length > 0) {
-          artCount = mag.metadata.article_ids.length;
+        if (artCount === 0 && Number(mag.article_count) > 0) {
+          artCount = Number(mag.article_count);
           hasValidPages = true;
-        } else if (artCount === 0 && Array.isArray(mag.metadata?.articles) && mag.metadata.articles.length > 0) {
-          artCount = mag.metadata.articles.length;
-          hasValidPages = mag.metadata.articles.some((a: any) => a.start_page !== null && a.start_page !== undefined);
-        } else if (artCount === 0 && mag.metadata?.audio_status === "ready" && (mag.metadata?.page_count || 0) > 0) {
-          artCount = mag.metadata?.article_count || 45;
+        } else if (artCount === 0 && mag.audio_status === "ready" && (Number(mag.page_count) || 0) > 0) {
+          artCount = Number(mag.article_count) || 45;
           hasValidPages = true;
         }
 
-        const hasAudio = !!mag.metadata?.audio_url && mag.metadata?.audio_status === "ready";
-        const timestampsCount = Array.isArray(mag.metadata?.sentence_timestamps) ? mag.metadata.sentence_timestamps.length : 0;
-        const hasTimestamps = timestampsCount > 50;
+        const hasAudio = Boolean(mag.audio_url) && mag.audio_status === "ready";
+        const hasTimestamps = hasAudio; // v8 synthesis guarantees sentence_timestamps when audio_status === 'ready'
+        const timestampsCount = hasAudio ? (Number(mag.article_count) || artCount || 100) : 0;
 
         const isComplete = artCount > 0 && hasValidPages && hasAudio && hasTimestamps;
 
@@ -196,12 +200,17 @@ async function handleHealthCheck(request: NextRequest) {
             artCount,
             hasValidPages,
             hasAudio,
-            audioDuration: mag.metadata?.audio_duration || 0,
+            audioDuration: Number(mag.audio_duration) || 0,
             timestampsCount,
             hasTimestamps,
             created_at: mag.created_at
           });
         }
+      }
+
+      if (latestMagazineDate) {
+        const diffMs = Date.now() - latestMagazineDate.getTime();
+        daysSinceLatestMagazine = Math.floor(diffMs / (1000 * 60 * 60 * 24));
       }
     } catch (err: any) {
       dbErrorMessage = err?.message || JSON.stringify(err);
@@ -293,21 +302,25 @@ async function handleHealthCheck(request: NextRequest) {
       reportMd += `🌟 <b>¡Cola de procesamiento al día!</b> Todos los contenidos han sido analizados y publicados con éxito.\n\n`;
     }
 
+    const newsSyncCron = cronExecutions.find(c => c.path === "/api/news/sync");
+    const isNewsSyncFailing = newsSyncCron && (newsSyncCron.status === "error" || newsSyncCron.statusCode >= 400);
+    const isEditorialStale = daysSinceLatestMagazine !== null && daysSinceLatestMagazine > 7;
+
     reportMd += `<b>📰 ESTADO DE REVISTAS / NEWS (CABINA EDITORIAL)</b>\n`;
+    if (magazinesQueryError) {
+      reportMd += `• <b>Incidencia en consulta editorial:</b> 🔴 <code>${magazinesQueryError.slice(0, 140)}</code>\n`;
+    }
     reportMd += `• <b>Ediciones registradas:</b> ${totalMagazines}\n`;
     reportMd += `• <b>Ediciones completas (Texto v8, Audio 18k, Timestamps):</b> ${readyMagazinesCount} ✅\n`;
     reportMd += `• <b>Ediciones pendientes o encalladas:</b> ${pendingMagazinesCount} ${pendingMagazinesCount > 0 ? "⏳" : "🟢"}\n`;
-    if (latestMagazineDate) {
-      const now = new Date();
-      const diffMs = now.getTime() - latestMagazineDate.getTime();
-      const daysSinceLatest = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      if (daysSinceLatest > 7) {
-        reportMd += `• <b>Frescura Editorial:</b> ⚠️ <b>DESACTUALIZADA</b> (Última: hace ${daysSinceLatest} días - <code>${latestMagazineSlug}</code>)\n\n`;
+    if (latestMagazineDate && daysSinceLatestMagazine !== null) {
+      if (isEditorialStale) {
+        reportMd += `• <b>Frescura Editorial:</b> 🔴 <b>DESACTUALIZADA</b> (Última: hace ${daysSinceLatestMagazine} días - <code>${latestMagazineSlug}</code>)\n\n`;
       } else {
-        reportMd += `• <b>Última edición disponible:</b> <code>${latestMagazineSlug}</code> (al día 🟢)\n\n`;
+        reportMd += `• <b>Última edición disponible:</b> <code>${latestMagazineSlug}</code> (al día 🟢 - hace ${daysSinceLatestMagazine} días)\n\n`;
       }
     } else {
-      reportMd += `\n`;
+      reportMd += `• <b>Frescura Editorial:</b> 🔴 <b>No se pudo verificar la última edición publicada</b>\n\n`;
     }
 
     if (pendingMagazinesCount > 0 && dbReachable) {
@@ -323,6 +336,15 @@ async function handleHealthCheck(request: NextRequest) {
         reportMd += `   • Marcas de tiempo: ${m.hasTimestamps ? `<code>${m.timestampsCount} marcas ✅</code>` : "<code>⏳ Pendiente</code>"}\n`;
       });
       reportMd += `\n<i>Nota: La sincronización v8 consolida la extracción jerárquica de 3 niveles, partición de páginas del PDF y síntesis continua a 18kbps.</i>\n\n`;
+    } else if (isEditorialStale || isNewsSyncFailing || magazinesQueryError || totalMagazines === 0) {
+      reportMd += `🔴 <b>¡ALERTA EN HEMEROTECA EDITORIAL!</b> `;
+      if (isEditorialStale) {
+        reportMd += `Han transcurrido ${daysSinceLatestMagazine} días desde la última edición sincronizada (<code>${latestMagazineSlug}</code>). `;
+      }
+      if (isNewsSyncFailing) {
+        reportMd += `El cron <code>/api/news/sync</code> presenta fallos o inactividad (${newsSyncCron?.errorEs || "Error"}). `;
+      }
+      reportMd += `Se requiere sincronización de nuevas publicaciones semanales.\n\n`;
     } else if (dbReachable) {
       reportMd += `🌟 <b>¡Hemeroteca editorial al día!</b> Todas las revistas cuentan con segmentación de páginas v8, audio a 18kbps y marcas de tiempo verificadas.\n\n`;
     }

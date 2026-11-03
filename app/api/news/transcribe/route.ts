@@ -207,6 +207,8 @@ ${tocText}`;
   throw new Error(`Gemini API returned status ${lastStatus}`);
 }
 
+const unavailableTtsModels = new Set<string>();
+
 async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): Promise<Buffer> {
   const promptText = `Please read aloud clearly in American English:\n\n${text}`;
   const payload = {
@@ -221,8 +223,13 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
     }
   };
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const model = TTS_MODELS[attempt % TTS_MODELS.length];
+  const activeModels = TTS_MODELS.filter(m => !unavailableTtsModels.has(m));
+  const candidateModels = activeModels.length > 0 ? activeModels : TTS_MODELS;
+
+  for (let attempt = 0; attempt < candidateModels.length + 3; attempt++) {
+    const currentList = TTS_MODELS.filter(m => !unavailableTtsModels.has(m));
+    const listToUse = currentList.length > 0 ? currentList : TTS_MODELS;
+    const model = listToUse[attempt % listToUse.length];
     const url = getVertexEndpoint(model, apiKey);
 
     try {
@@ -233,13 +240,18 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
         signal: AbortSignal.timeout(90000)
       });
 
+      if (res.status === 404) {
+        unavailableTtsModels.add(model);
+        continue;
+      }
+
       if (res.status === 429 || res.status >= 500) {
-        await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+        await new Promise(r => setTimeout(r, (attempt + 1) * 1500));
         continue;
       }
 
       if (!res.ok) {
-        await new Promise(r => setTimeout(r, 1500));
+        unavailableTtsModels.add(model);
         continue;
       }
 
@@ -255,7 +267,7 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
       }
     } catch (e: any) {
       console.warn(`[News Transcribe v7] Chunk synthesis attempt ${attempt + 1} warning: ${e?.message || e}`);
-      await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+      await new Promise(r => setTimeout(r, 1500));
     }
   }
 
@@ -660,7 +672,24 @@ export async function processMagazineTranscribeAndSynthesis(
 
   // 10. Synthesize audio blocks with concurrency limit and persistent Supabase Storage caching
   const blockPcmBuffers: Buffer[] = new Array(blocks.length);
-  const BATCH_SIZE = 3;
+  const BATCH_SIZE = 6;
+
+  // Pre-list existing cached blocks in one storage request instead of N individual 404 downloads
+  const existingCachedFiles = new Set<string>();
+  if (!force) {
+    try {
+      const { data: fileList } = await supabase.storage
+        .from("documents")
+        .list(`magazines/audio_chunks/${mainDoc.id}`, { limit: 1000 });
+      if (fileList) {
+        for (const f of fileList) {
+          if (f.name) existingCachedFiles.add(f.name);
+        }
+      }
+    } catch {
+      // ignore list error and fallback
+    }
+  }
 
   for (let i = 0; i < blocks.length; i += BATCH_SIZE) {
     const batchIndices = Array.from(
@@ -670,12 +699,12 @@ export async function processMagazineTranscribeAndSynthesis(
 
     await Promise.all(
       batchIndices.map(async (bIdx) => {
-        const chunkKey = `magazines/audio_chunks/${mainDoc.id}/block_${bIdx}.bin`;
-        const candidateKeys = [!force ? chunkKey : ""].filter(Boolean);
+        const fileName = `block_${bIdx}.bin`;
+        const chunkKey = `magazines/audio_chunks/${mainDoc.id}/${fileName}`;
 
-        for (const k of candidateKeys) {
+        if (!force && existingCachedFiles.has(fileName)) {
           try {
-            const { data: cachedBlob } = await supabase.storage.from("documents").download(k);
+            const { data: cachedBlob } = await supabase.storage.from("documents").download(chunkKey);
             if (cachedBlob && cachedBlob.size > 0) {
               blockPcmBuffers[bIdx] = Buffer.from(await cachedBlob.arrayBuffer());
               return;

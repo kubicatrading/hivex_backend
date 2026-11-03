@@ -29,8 +29,8 @@ export function translateErrorToSpanish(error: any): string {
   if (/canceling statement due to statement timeout/i.test(errStr) || /statement timeout/i.test(errStr)) {
     return "Tiempo de espera de la base de datos agotado (Statement Timeout).";
   }
-  if (/fetch failed/i.test(errStr) || /ENOTFOUND/i.test(errStr) || /ECONNREFUSED/i.test(errStr)) {
-    return "Fallo de conexión de red o servidor de destino inaccesible.";
+  if (/fetch failed/i.test(errStr) || /ENOTFOUND/i.test(errStr) || /ECONNREFUSED/i.test(errStr) || /ECONNRESET/i.test(errStr)) {
+    return "Fallo de conexión de red o corte de conexión con el servidor externo (ECONNRESET/ENOTFOUND).";
   }
   if (/ETIMEDOUT/i.test(errStr) || /timeout of .* exceeded/i.test(errStr)) {
     return "Tiempo de espera agotado al conectar con el servidor externo.";
@@ -157,86 +157,119 @@ export interface LatestCronSummary {
   schedule?: string;
 }
 
-export const KNOWN_CRONS: Array<{ path: string; cronName: string; schedule: string }> = [
-  { path: "/api/videos/sync", cronName: "Sincronización de Vídeos (YouTube Sync)", schedule: "Cada hora (:00)" },
-  { path: "/api/videos/monitor-analysis", cronName: "Monitor de Análisis de Vídeos", schedule: "Cada 5 min" },
-  { path: "/api/videos/alerts-24h", cronName: "Alertas Instantáneas de Vídeos", schedule: "Cada 15 min" },
-  { path: "/api/videos/digest", cronName: "Resumen Diario: HIVEX Alerts - 24H", schedule: "Diario 06:30 UTC" },
-  { path: "/api/videos/investors-24h", cronName: "Decisiones Tácticas: HIVEX Investors - 24H", schedule: "Diario 07:00 UTC" },
-  { path: "/api/videos/backfill-snapshots", cronName: "Recuperación de Gráficos (Backfill Snapshots)", schedule: "Cada 5 min" },
-  { path: "/api/videos/health-check", cronName: "Salud de Cabina (Health Check)", schedule: "Diario 08:00 UTC" },
-  { path: "/api/news/sync", cronName: "Sincronización de Revistas (Trends Journal)", schedule: "Cada 15 min" },
+export const KNOWN_CRONS: Array<{ path: string; cronName: string; schedule: string; maxStaleMinutes: number }> = [
+  { path: "/api/videos/sync", cronName: "Sincronización de Vídeos (YouTube Sync)", schedule: "Cada hora (:00)", maxStaleMinutes: 125 },
+  { path: "/api/videos/monitor-analysis", cronName: "Monitor de Análisis de Vídeos", schedule: "Cada 5 min", maxStaleMinutes: 30 },
+  { path: "/api/videos/alerts-24h", cronName: "Alertas Instantáneas de Vídeos", schedule: "Cada 15 min", maxStaleMinutes: 45 },
+  { path: "/api/videos/digest", cronName: "Resumen Diario: HIVEX Alerts - 24H", schedule: "Diario 06:30 UTC", maxStaleMinutes: 26 * 60 },
+  { path: "/api/videos/investors-24h", cronName: "Decisiones Tácticas: HIVEX Investors - 24H", schedule: "Diario 07:00 UTC", maxStaleMinutes: 26 * 60 },
+  { path: "/api/videos/backfill-snapshots", cronName: "Recuperación de Gráficos (Backfill Snapshots)", schedule: "Cada 5 min", maxStaleMinutes: 30 },
+  { path: "/api/videos/health-check", cronName: "Salud de Cabina (Health Check)", schedule: "Diario 08:00 UTC", maxStaleMinutes: 26 * 60 },
+  { path: "/api/news/sync", cronName: "Sincronización de Revistas (Trends Journal)", schedule: "Cada 15 min", maxStaleMinutes: 45 },
 ];
 
 /**
- * Returns the most recent execution log for all known crons.
+ * Returns the most recent execution log for all known crons, querying each cron path
+ * individually so high-frequency crons never push lower-frequency or failing crons out of the window.
+ * Also enforces staleness checks so a silent/missing cron is flagged as an error rather than "pending".
  */
 export async function getLatestCronExecutions(): Promise<LatestCronSummary[]> {
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase
-      .from("documents")
-      .select("id, title, description, file_url, created_at, metadata")
-      .eq("type", "knowledge_analysis")
-      .eq("metadata->>is_cron_log", "true")
-      .order("created_at", { ascending: false })
-      .limit(100);
+    const nowMs = Date.now();
 
-    if (error || !data) {
-      console.error("[CronLogger] Failed to retrieve logs:", error);
-      return KNOWN_CRONS.map(k => ({
-        path: k.path,
-        cronName: k.cronName,
-        statusCode: 0,
-        status: "pending",
-        errorEs: null,
-        executedAt: null,
-        durationMs: 0,
-        schedule: k.schedule
-      }));
-    }
+    const perCronResults = await Promise.all(
+      KNOWN_CRONS.map(async (known): Promise<LatestCronSummary> => {
+        try {
+          const { data: rows, error } = await supabase
+            .from("documents")
+            .select("id, title, description, file_url, created_at, metadata")
+            .eq("type", "knowledge_analysis")
+            .eq("file_url", known.path)
+            .order("created_at", { ascending: false })
+            .limit(1);
 
-    const latestByPath = new Map<string, LatestCronSummary>();
+          if (error) {
+            console.warn(`[CronLogger] Error querying latest log for ${known.path}:`, error.message);
+          }
 
-    for (const row of data) {
-      const meta = row.metadata || {};
-      const path = meta.path || row.file_url;
-      if (!path) continue;
+          const row = rows && rows.length > 0 ? rows[0] : null;
+          if (!row) {
+            // If health-check itself has no prior row while currently running, treat as active
+            if (known.path === "/api/videos/health-check") {
+              return {
+                path: known.path,
+                cronName: known.cronName,
+                statusCode: 200,
+                status: "success",
+                errorEs: null,
+                executedAt: new Date().toISOString(),
+                durationMs: 0,
+                createdAt: new Date().toISOString(),
+                schedule: known.schedule
+              };
+            }
+            return {
+              path: known.path,
+              cronName: known.cronName,
+              statusCode: 504,
+              status: "error",
+              errorEs: `Sin registros de ejecución recientes (${known.schedule}). El cron no se ha lanzado o murió por timeout antes de guardar registro.`,
+              executedAt: null,
+              durationMs: 0,
+              schedule: known.schedule
+            };
+          }
 
-      if (!latestByPath.has(path)) {
-        latestByPath.set(path, {
-          path,
-          cronName: meta.cron_name || path,
-          statusCode: meta.status_code || 200,
-          status: meta.status || "success",
-          errorEs: meta.error_es || null,
-          executedAt: meta.executed_at || row.created_at,
-          durationMs: meta.duration_ms || 0,
-          createdAt: row.created_at
-        });
-      }
-    }
+          const meta = row.metadata || {};
+          const executedAt = meta.executed_at || row.created_at;
+          const executedMs = executedAt ? new Date(executedAt).getTime() : 0;
+          const ageMinutes = executedMs ? (nowMs - executedMs) / 60000 : Infinity;
 
-    const result: LatestCronSummary[] = [];
-    for (const known of KNOWN_CRONS) {
-      const found = latestByPath.get(known.path);
-      if (found) {
-        result.push({ ...found, schedule: known.schedule });
-      } else {
-        result.push({
-          path: known.path,
-          cronName: known.cronName,
-          statusCode: 0,
-          status: "pending",
-          errorEs: null,
-          executedAt: null,
-          durationMs: 0,
-          schedule: known.schedule
-        });
-      }
-    }
+          let status: "success" | "error" | "pending" = meta.status || "success";
+          let statusCode: number = meta.status_code || 200;
+          let errorEs: string | null = meta.error_es || null;
 
-    return result;
+          // Staleness check (skip for health-check which is currently running)
+          if (known.path !== "/api/videos/health-check" && ageMinutes > known.maxStaleMinutes) {
+            status = "error";
+            if (statusCode >= 200 && statusCode < 300) {
+              statusCode = 504;
+            }
+            const ageDesc = ageMinutes >= 120
+              ? `${Math.round(ageMinutes / 60)} horas`
+              : `${Math.round(ageMinutes)} min`;
+            const staleNotice = `Cron retrasado o inactivo: última ejecución hace ${ageDesc} (frecuencia esperada: ${known.schedule}).`;
+            errorEs = errorEs ? `${staleNotice} Último error: ${errorEs}` : staleNotice;
+          }
+
+          return {
+            path: known.path,
+            cronName: known.cronName,
+            statusCode,
+            status,
+            errorEs,
+            executedAt,
+            durationMs: meta.duration_ms || 0,
+            createdAt: row.created_at,
+            schedule: known.schedule
+          };
+        } catch (innerErr: any) {
+          return {
+            path: known.path,
+            cronName: known.cronName,
+            statusCode: 500,
+            status: "error",
+            errorEs: `No se pudo verificar el estado del cron: ${innerErr?.message || innerErr}`,
+            executedAt: null,
+            durationMs: 0,
+            schedule: known.schedule
+          };
+        }
+      })
+    );
+
+    return perCronResults;
   } catch (err: any) {
     console.error("[CronLogger] Error in getLatestCronExecutions:", err?.message || err);
     return [];
