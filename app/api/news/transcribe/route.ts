@@ -209,10 +209,18 @@ ${tocText}`;
 
 const unavailableTtsModels = new Set<string>();
 
+function isSilentPcm(buf: Buffer): boolean {
+  if (!buf || buf.length === 0) return true;
+  const step = Math.max(1, Math.floor(buf.length / 512));
+  for (let i = 0; i < buf.length; i += step) {
+    if (buf[i] !== 0) return false;
+  }
+  return !buf.some(b => b !== 0);
+}
+
 async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): Promise<Buffer> {
-  const promptText = `Please read aloud clearly in American English:\n\n${text}`;
   const payload = {
-    contents: [{ role: "user", parts: [{ text: promptText }] }],
+    contents: [{ role: "user", parts: [{ text }] }],
     generationConfig: {
       responseModalities: ["AUDIO"],
       speechConfig: {
@@ -237,7 +245,7 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(90000)
+        signal: AbortSignal.timeout(45000)
       });
 
       if (res.status === 404) {
@@ -251,7 +259,6 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
       }
 
       if (!res.ok) {
-        unavailableTtsModels.add(model);
         continue;
       }
 
@@ -289,7 +296,7 @@ async function synthesizeChunk(text: string, apiKey: string, voice = "Aoede"): P
 export async function processMagazineTranscribeAndSynthesis(
   issueSlug: string,
   force = false,
-  options?: { maxRuntimeMs?: number }
+  options?: { maxRuntimeMs?: number; repairMissingBlocks?: boolean }
 ) {
   const pipelineStartMs = Date.now();
   const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -419,7 +426,7 @@ export async function processMagazineTranscribeAndSynthesis(
   const issueArts = await fetchExistingIssueArticles();
 
   // 2. Strict Immutability & Idempotency Check
-  if (!force) {
+  if (!force && !options?.repairMissingBlocks) {
     const isAudioReady = mainDoc.metadata?.audio_url && mainDoc.metadata?.audio_status === "ready";
     const hasTimestamps = Array.isArray(mainDoc.metadata?.sentence_timestamps) && mainDoc.metadata.sentence_timestamps.length > 100;
     const hasValidArticles = issueArts.length >= 40 && issueArts.every(a => a.metadata?.start_page !== undefined);
@@ -438,9 +445,30 @@ export async function processMagazineTranscribeAndSynthesis(
 
   console.log(`[News Transcribe v8] Starting full v8 pipeline for ${issueSlug} (force: ${!!force})...`);
 
-  const validExistingArts = issueArts.filter(
+  const rawValidExistingArts = issueArts.filter(
     a => a.metadata?.start_page !== undefined && a.metadata?.parser_version === "toc_page_sliced_v8_partition"
   );
+
+  // Deduplicate by order_index (or start_page + title) to prevent duplicate rows from multiplying blocks
+  const uniqueByKey = new Map<string, any>();
+  const duplicateArtIds: string[] = [];
+  for (const art of rawValidExistingArts) {
+    const key = art.metadata?.order_index !== undefined
+      ? `idx:${art.metadata.order_index}`
+      : `p:${art.metadata?.start_page}:${art.title}`;
+    if (!uniqueByKey.has(key)) {
+      uniqueByKey.set(key, art);
+    } else {
+      duplicateArtIds.push(art.id);
+    }
+  }
+  const validExistingArts = Array.from(uniqueByKey.values());
+  if (duplicateArtIds.length > 0) {
+    console.log(`[News Transcribe v8] Cleaning up ${duplicateArtIds.length} duplicate article rows for ${issueSlug}...`);
+    for (let c = 0; c < duplicateArtIds.length; c += 50) {
+      await supabase.from("documents").delete().in("id", duplicateArtIds.slice(c, c + 50));
+    }
+  }
 
   let insertedArticles: any[] = [];
   if (validExistingArts.length >= 40) {
@@ -706,8 +734,12 @@ export async function processMagazineTranscribeAndSynthesis(
           try {
             const { data: cachedBlob } = await supabase.storage.from("documents").download(chunkKey);
             if (cachedBlob && cachedBlob.size > 0) {
-              blockPcmBuffers[bIdx] = Buffer.from(await cachedBlob.arrayBuffer());
-              return;
+              const cachedBuf = Buffer.from(await cachedBlob.arrayBuffer());
+              if (!isSilentPcm(cachedBuf)) {
+                blockPcmBuffers[bIdx] = cachedBuf;
+                return;
+              }
+              console.warn(`[News Transcribe v8] Cached block_${bIdx}.bin was fallback silence; re-synthesizing...`);
             }
           } catch {
             // ignore
@@ -718,14 +750,16 @@ export async function processMagazineTranscribeAndSynthesis(
         const pcm = await synthesizeChunk(blockText, geminiApiKey, "Aoede");
         blockPcmBuffers[bIdx] = pcm;
 
-        // Persist block to Supabase Storage immediately
-        try {
-          await supabase.storage.from("documents").upload(chunkKey, pcm, {
-            contentType: "application/octet-stream",
-            upsert: true
-          });
-        } catch (uploadErr) {
-          console.warn(`[News Transcribe v8] Non-fatal block upload warn:`, uploadErr);
+        // Persist valid non-silent block to Supabase Storage immediately
+        if (!isSilentPcm(pcm)) {
+          try {
+            await supabase.storage.from("documents").upload(chunkKey, pcm, {
+              contentType: "application/octet-stream",
+              upsert: true
+            });
+          } catch (uploadErr) {
+            console.warn(`[News Transcribe v8] Non-fatal block upload warn:`, uploadErr);
+          }
         }
       })
     );
