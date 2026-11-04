@@ -909,6 +909,24 @@ export async function processMagazineTranscribeAndSynthesis(
     .update({ metadata: updatedMetadata })
     .eq("id", mainDoc.id);
 
+  // 14b. Clean up temporary PCM block cache in Supabase Storage now that the final MP3 is ready
+  try {
+    const { data: leftoverBlocks } = await supabase.storage
+      .from("documents")
+      .list(`magazines/audio_chunks/${mainDoc.id}`, { limit: 1000 });
+    if (leftoverBlocks && leftoverBlocks.length > 0) {
+      const pathsToRemove = leftoverBlocks
+        .filter(f => f.name)
+        .map(f => `magazines/audio_chunks/${mainDoc.id}/${f.name}`);
+      for (let i = 0; i < pathsToRemove.length; i += 100) {
+        await supabase.storage.from("documents").remove(pathsToRemove.slice(i, i + 100));
+      }
+      console.log(`[News Transcribe v8] Cleaned up ${pathsToRemove.length} temporary PCM blocks for ${issueSlug}.`);
+    }
+  } catch (cleanupErr) {
+    console.warn(`[News Transcribe v8] Non-fatal temporary block cleanup warning:`, cleanupErr);
+  }
+
   // 15. Telegram Alert
   if (!mainDoc.metadata?.telegram_notified) {
     try {
