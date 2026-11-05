@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { recordCronExecution } from "@/lib/cron-logger";
-import { processMagazineTranscribeAndSynthesis } from "../transcribe/route";
 import { VERTEX_CASCADE_FLASH_EFFICIENT, getVertexEndpoint } from "@/lib/vertexModels";
 
 export const dynamic = "force-dynamic";
@@ -1108,6 +1107,7 @@ async function handleSync(request: Request) {
       const remainingBudgetMs = Math.max(45000, 235000 - elapsedMs);
       console.log(`[Sync Scraper] Running awaited v8 transcription & audio synthesis for ${targetSlug} (time budget: ${remainingBudgetMs}ms)...`);
       try {
+        const { processMagazineTranscribeAndSynthesis } = await import("../transcribe/route");
         transcriptionResult = await processMagazineTranscribeAndSynthesis(targetSlug, false, {
           maxRuntimeMs: remainingBudgetMs
         });

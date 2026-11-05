@@ -132,31 +132,33 @@ async function handleBackfill(request: NextRequest) {
       auth: { persistSession: false }
     });
 
-    console.log("[Backfill API] Fetching documents from Supabase...");
+    console.log("[Backfill API] Fetching recent video documents from Supabase...");
 
-    // Fetch all video documents with pagination to overcome 1000-row limit
-    let videos: any[] = [];
-    let page = 0;
-    while (true) {
-      const { data, error: vErr } = await supabaseAdmin
-        .from("documents")
-        .select("id, title, type, file_url, created_at, metadata, description")
-        .eq("type", "video")
-        .order("created_at", { ascending: false })
-        .range(page * 1000, (page + 1) * 1000 - 1);
+    // Fetch the 25 most recent video documents so serverless executions complete within a few seconds
+    const { data: recentVideos, error: vErr } = await supabaseAdmin
+      .from("documents")
+      .select("id, title, type, file_url, created_at, metadata, description")
+      .eq("type", "video")
+      .order("created_at", { ascending: false })
+      .limit(25);
 
-      if (vErr) {
-        return NextResponse.json({ success: false, error: `Failed to fetch videos: ${vErr.message}` }, { status: 500 });
-      }
-      if (!data || data.length === 0) break;
-      videos.push(...data);
-      if (data.length < 1000) break;
-      page++;
+    if (vErr) {
+      throw new Error(`Failed to fetch videos: ${vErr.message}`);
     }
 
+    const videos: any[] = recentVideos || [];
     const processedVideosLog: string[] = [];
     let backfilledCount = 0;
-    
+
+    // Check once whether ffmpeg/yt-dlp are available in this runtime
+    let hasFfmpegAndYtDlp = false;
+    try {
+      await runCmd("ffmpeg -version");
+      hasFfmpegAndYtDlp = true;
+    } catch {
+      hasFfmpegAndYtDlp = false;
+    }
+
     // We limit processing to maximum 2 videos with missing snapshots per execution to prevent serverless timeout limits
     const MAX_VIDEOS_PER_RUN = 2;
 
@@ -181,45 +183,9 @@ async function handleBackfill(request: NextRequest) {
       const uploadedNames = new Set((uploadedFiles || []).filter(f => (f.metadata?.size || 0) >= 15000).map(f => f.name));
       const missingCharts = parsedCharts.filter(c => !uploadedNames.has(`${c.seconds}.jpg`));
 
-      if (missingCharts.length === 0) {
-        continue; // Perfectly healthy, all snapshots already exist!
-      }
-
-      // If we reached our limit for this cron run, note it and skip processing (will be healed in the next cron run)
-      if (backfilledCount >= MAX_VIDEOS_PER_RUN) {
-        processedVideosLog.push(`Video "${video.title}" has ${missingCharts.length} missing snapshots (deferred to next execution).`);
-        continue;
-      }
-
-      console.log(`[Backfill API] Video "${video.title}" has ${missingCharts.length} missing snapshots. Processing...`);
-
-      // Create a writable tmp dir for serverless execution environment
-      const tmpDir = path.join(os.tmpdir(), "snapshots", resolvedVideoId);
-      if (!fs.existsSync(tmpDir)) {
-        fs.mkdirSync(tmpDir, { recursive: true });
-      }
-
       const isYoutube = videoUrl.includes("youtube.com") || videoUrl.includes("youtu.be");
 
-      const getStreamUrl = async (): Promise<string> => {
-        if (!isYoutube) return videoUrl;
-        try {
-          const resolved = await runCmd(`yt-dlp -f "best[ext=mp4]/best" -g "${videoUrl}"`);
-          if (resolved) return resolved;
-        } catch {
-          try {
-            const fallback = await runCmd(`yt-dlp -g "${videoUrl}"`);
-            if (fallback) return fallback;
-          } catch (err: any) {
-            console.error(`[Backfill API] Failed to resolve video stream URL:`, err?.message || err);
-          }
-        }
-        return videoUrl;
-      };
-
-      let streamUrl = await getStreamUrl();
-
-      // Also ensure 0.jpg (video cover) is present in Supabase Storage in widescreen HD
+      // Always ensure 0.jpg (video cover) is present in Supabase Storage in widescreen HD even on serverless
       const hasCover = uploadedNames.has("0.jpg");
       if (!hasCover && isYoutube) {
         try {
@@ -240,6 +206,47 @@ async function handleBackfill(request: NextRequest) {
           console.warn(`[Backfill API] Failed to ensure 0.jpg cover for ${resolvedVideoId}:`, coverErr?.message);
         }
       }
+
+      if (missingCharts.length === 0) {
+        continue; // Perfectly healthy, all snapshots already exist!
+      }
+
+      if (!hasFfmpegAndYtDlp) {
+        processedVideosLog.push(`Video "${video.title}" has ${missingCharts.length} chart snapshots queued for worker extraction.`);
+        continue;
+      }
+
+      // If we reached our limit for this cron run, note it and skip processing (will be healed in the next cron run)
+      if (backfilledCount >= MAX_VIDEOS_PER_RUN) {
+        processedVideosLog.push(`Video "${video.title}" has ${missingCharts.length} missing snapshots (deferred to next execution).`);
+        continue;
+      }
+
+      console.log(`[Backfill API] Video "${video.title}" has ${missingCharts.length} missing snapshots. Processing...`);
+
+      // Create a writable tmp dir for serverless execution environment
+      const tmpDir = path.join(os.tmpdir(), "snapshots", resolvedVideoId);
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+
+      const getStreamUrl = async (): Promise<string> => {
+        if (!isYoutube) return videoUrl;
+        try {
+          const resolved = await runCmd(`yt-dlp -f "bestvideo[ext=mp4]/best[ext=mp4]/bestvideo/best" -g "${videoUrl}"`);
+          if (resolved) return resolved.split("\n")[0].trim();
+        } catch {
+          try {
+            const fallback = await runCmd(`yt-dlp -g "${videoUrl}"`);
+            if (fallback) return fallback.split("\n")[0].trim();
+          } catch (err: any) {
+            console.error(`[Backfill API] Failed to resolve video stream URL:`, err?.message || err);
+          }
+        }
+        return videoUrl;
+      };
+
+      let streamUrl = await getStreamUrl();
 
       let actualUploadedForVideo = 0;
 

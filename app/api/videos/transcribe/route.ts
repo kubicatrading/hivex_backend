@@ -320,41 +320,42 @@ export async function transcribeVideoCore(params: {
     if (process.env.SUPADATA_API_KEY) {
       console.log(`[Transcript] SUPADATA_API_KEY detected. Attempting high-resiliency fetch from Supadata API for ID: ${actualYtId}...`);
       try {
-        const url = `https://api.supadata.ai/v1/youtube/transcript?videoId=${actualYtId}&mode=auto`;
-        const res = await fetch(url, {
-          headers: {
-            "x-api-key": process.env.SUPADATA_API_KEY
+        const supaUrls = [
+          `https://api.supadata.ai/v1/youtube/transcript?videoId=${actualYtId}&mode=native`,
+          `https://api.supadata.ai/v1/youtube/transcript?videoId=${actualYtId}&mode=auto`
+        ];
+        let lastSupaError = "Supadata response body does not contain a valid content array.";
+        for (const url of supaUrls) {
+          const res = await fetch(url, {
+            headers: {
+              "x-api-key": process.env.SUPADATA_API_KEY
+            }
+          });
+          if (!res.ok) {
+            lastSupaError = `Supadata API returned status code ${res.status}`;
+            continue;
           }
-        });
-        if (!res.ok) {
-          throw new Error(`Supadata API returned status code ${res.status}`);
+          const data = await res.json();
+          if (data && Array.isArray(data.content) && data.content.length > 0) {
+            transcriptLines = data.content.map((item: any) => ({
+              text: String(item.text || ""),
+              offset: Number(item.offset ?? 0),
+              duration: Number(item.duration ?? 0)
+            }));
+            console.log(`[Transcript] Successfully retrieved ${transcriptLines.length} lines from Supadata API (${url}).`);
+            break;
+          }
         }
-        const data = await res.json();
-        if (data && Array.isArray(data.content)) {
-          transcriptLines = data.content.map((item: any) => ({
-            text: String(item.text || ""),
-            offset: Number(item.offset ?? 0),
-            duration: Number(item.duration ?? 0)
-          }));
-          console.log(`[Transcript] Successfully retrieved ${transcriptLines.length} lines from Supadata API.`);
-        } else {
-          throw new Error("Supadata response body does not contain a valid content array.");
+        if (!transcriptLines || transcriptLines.length === 0) {
+          throw new Error(lastSupaError);
         }
       } catch (supaErr: unknown) {
         const errMessage = supaErr instanceof Error ? supaErr.message : String(supaErr);
-        if (process.env.VERCEL) {
-          console.error(`[Transcript] Supadata API failed on Vercel: ${errMessage}. Local scraper fallback disabled (Fail-Fast).`);
-          throw new Error(`Supadata API failed on Vercel: ${errMessage}. Local scraper fallback disabled.`);
-        }
-        console.warn(`[Transcript] Supadata API failed: ${errMessage}. Falling back to local scraper...`);
+        console.warn(`[Transcript] Supadata API failed: ${errMessage}. Falling back to youtube-transcript scraper...`);
         transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
       }
     } else {
-      if (process.env.VERCEL) {
-        console.error("[Transcript] SUPADATA_API_KEY not set on Vercel. Local scraper fallback disabled (Fail-Fast).");
-        throw new Error("SUPADATA_API_KEY not configured. Local scraper fallback disabled on Vercel.");
-      }
-      console.log(`[Transcript] SUPADATA_API_KEY not set. Using local youtube-transcript scraper for ID: ${actualYtId}...`);
+      console.log(`[Transcript] SUPADATA_API_KEY not set. Using youtube-transcript scraper for ID: ${actualYtId}...`);
       transcriptLines = await YoutubeTranscript.fetchTranscript(actualYtId);
     }
 

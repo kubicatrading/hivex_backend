@@ -217,14 +217,30 @@ async function handleHealthCheck(request: NextRequest) {
       console.error("[Health Check] Database connectivity test failed:", dbErrorMessage);
     }
 
+    const totalDuration = Date.now() - startTime;
+
+    // Record health check execution log BEFORE querying cronExecutions so this run's own status and timestamp are current
+    await recordCronExecution({
+      path: "/api/videos/health-check",
+      cronName: "Salud de Cabina (Health Check)",
+      statusCode: 200,
+      status: "success",
+      durationMs: totalDuration,
+      details: {
+        serverDurationMs: totalDuration,
+        dbReachable,
+        totalVideos24h,
+        analyzedVideosCount,
+        pendingVideosCount
+      }
+    });
+
     let cronExecutions: any[] = [];
     try {
       cronExecutions = await getLatestCronExecutions();
     } catch (cErr) {
       console.error("[Health Check] Failed to fetch cron executions:", cErr);
     }
-
-    const totalDuration = Date.now() - startTime;
 
     // Compile beautiful markdown report following Rule 1, 2 & 4
     let reportMd = `📊 <b>INFORME DE CONTROL Y SALUD OPERATIVA - HIVEX</b>\n`;
@@ -363,22 +379,6 @@ async function handleHealthCheck(request: NextRequest) {
     } catch (pruneErr) {
       console.warn("[Health Check] Error during daily cron logs maintenance:", pruneErr);
     }
-
-    // Record health check execution log
-    await recordCronExecution({
-      path: "/api/videos/health-check",
-      cronName: "Salud de Cabina (Health Check)",
-      statusCode: 200,
-      status: "success",
-      durationMs: totalDuration,
-      details: {
-        serverDurationMs: totalDuration,
-        dbReachable,
-        totalVideos24h,
-        analyzedVideosCount,
-        pendingVideosCount
-      }
-    });
 
     return NextResponse.json({
       success: true,

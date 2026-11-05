@@ -103,6 +103,19 @@ async function handleAlerts(request: NextRequest) {
         await sendTelegramMessage(emptyStateMessage, customChatId || undefined);
       }
 
+      await recordCronExecution({
+        path: "/api/videos/alerts-24h",
+        cronName: "Alertas de Vídeos 24h (Alerts 24h)",
+        statusCode: 200,
+        status: "success",
+        durationMs: Date.now() - startTime,
+        details: {
+          unalertedVideosCount: 0,
+          dryRun,
+          skipped: true
+        }
+      });
+
       return NextResponse.json({
         success: true,
         count: 0,

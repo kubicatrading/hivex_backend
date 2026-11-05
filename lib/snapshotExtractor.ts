@@ -232,10 +232,10 @@ export async function extractSnapshotsInBackground(
       if (isYoutube) {
         try {
           console.log(`[Snapshot Extractor] Fetching stream URL via yt-dlp for: ${fileUrl}`);
-          // Query best MP4 stream or best overall stream URL
-          const resolvedUrl = await runCmd(`yt-dlp -f "best[ext=mp4]/best" -g "${fileUrl}"`);
+          // Query best video stream URL (first line if yt-dlp returns video+audio lines)
+          const resolvedUrl = await runCmd(`yt-dlp -f "bestvideo[ext=mp4]/best[ext=mp4]/bestvideo/best" -g "${fileUrl}"`);
           if (resolvedUrl) {
-            streamUrl = resolvedUrl;
+            streamUrl = resolvedUrl.split("\n")[0].trim();
             console.log(`[Snapshot Extractor] Successfully resolved YouTube stream URL!`);
           } else {
             throw new Error("yt-dlp returned an empty stream URL");
@@ -245,7 +245,7 @@ export async function extractSnapshotsInBackground(
           try {
             const fallbackUrl = await runCmd(`yt-dlp -g "${fileUrl}"`);
             if (fallbackUrl) {
-              streamUrl = fallbackUrl;
+              streamUrl = fallbackUrl.split("\n")[0].trim();
               console.log(`[Snapshot Extractor] Resolved YouTube stream URL using fallback format query!`);
             } else {
               throw new Error("yt-dlp fallback returned empty stream URL");

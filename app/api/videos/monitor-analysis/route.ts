@@ -345,6 +345,14 @@ export async function GET(request: NextRequest) {
 
     if (videosError) throw videosError;
     if (!videos || videos.length === 0) {
+      await recordCronExecution({
+        path: "/api/videos/monitor-analysis",
+        cronName: "Monitor de Análisis de Vídeos (Monitor Analysis)",
+        statusCode: 200,
+        status: "success",
+        durationMs: Date.now() - startTime,
+        details: { processedCount: 0, remainingPending: 0, message: "No videos found in the system." }
+      });
       return NextResponse.json({ success: true, processed: [], message: "No videos found in the system." });
     }
 
@@ -368,7 +376,7 @@ export async function GET(request: NextRequest) {
       const failedAttempts = video.metadata?.analysis_failed_attempts || 0;
 
       const isPending = !hasTranscriptionInMetadata || !hasAnalysisDoc;
-      const isFailedPermanently = failedAttempts >= 5;
+      const isFailedPermanently = failedAttempts >= 10;
       return isPending && !isFailedPermanently;
     });
 
@@ -385,6 +393,14 @@ export async function GET(request: NextRequest) {
     console.log(`[Monitor Cron] Found ${pendingVideos.length} pending videos. (Out of ${videos.length} total videos)`);
 
     if (pendingVideos.length === 0) {
+      await recordCronExecution({
+        path: "/api/videos/monitor-analysis",
+        cronName: "Monitor de Análisis de Vídeos (Monitor Analysis)",
+        statusCode: 200,
+        status: "success",
+        durationMs: Date.now() - startTime,
+        details: { processedCount: 0, remainingPending: 0, message: "All videos are up-to-date and fully analyzed." }
+      });
       return NextResponse.json({
         success: true,
         processed: [],

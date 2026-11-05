@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { PDFParse } from "pdf-parse";
 import crypto from "crypto";
 import { sendMagazineNotification } from "@/lib/telegram";
 import { encodePcmToMp3 } from "@/lib/audio/mp3Encoder";
@@ -10,6 +9,41 @@ import {
   VERTEX_CASCADE_TTS,
   getVertexEndpoint
 } from "@/lib/vertexModels";
+
+async function loadServerlessPDFParse() {
+  const g = globalThis as any;
+  if (typeof g.DOMMatrix === "undefined") {
+    g.DOMMatrix = class DOMMatrix {
+      a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+      constructor(init?: number[]) {
+        if (Array.isArray(init) && init.length >= 6) {
+          [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+        }
+      }
+      multiplySelf() { return this; }
+      preMultiplySelf() { return this; }
+      translate() { return this; }
+      scale() { return this; }
+      invertSelf() { return this; }
+    };
+  }
+  if (typeof g.Path2D === "undefined") {
+    g.Path2D = class Path2D { addPath() {} };
+  }
+  if (typeof g.ImageData === "undefined") {
+    g.ImageData = class ImageData {};
+  }
+  if (!g.pdfjsWorker) {
+    try {
+      // @ts-ignore - Preload worker handler so pdfjs-dist runs in-process without spawning missing worker files on Vercel Serverless
+      g.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    } catch (wErr) {
+      console.warn("[News Transcribe] Could not preload pdf.worker.mjs:", wErr);
+    }
+  }
+  const { PDFParse } = await import("pdf-parse");
+  return PDFParse;
+}
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -501,6 +535,7 @@ export async function processMagazineTranscribeAndSynthesis(
 
     // 4. Extract pages with PDFParse
     console.log(`[News Transcribe v7] Extracting pages from PDF binary (${(pdfBuffer.length / (1024 * 1024)).toFixed(2)} MB)...`);
+    const PDFParse = await loadServerlessPDFParse();
     const pdfParser = new PDFParse({ data: pdfBuffer });
     const textResult = await pdfParser.getText();
 
